@@ -21,6 +21,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check:connection-types
       - run: pnpm typecheck
+        env:
+          NODE_OPTIONS: --max-old-space-size=10240
       - run: pnpm build
       - run: cargo check --locked -p dbx-web -p dbx-cli -p dbx-mcp
       - run: pnpm test:mysql
