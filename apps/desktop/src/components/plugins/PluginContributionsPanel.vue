@@ -187,7 +187,7 @@ const selectedHasCommands = computed(() => registry.value.listCommands().some((e
 const providerConnections = computed(() => {
   const entry = selectedEntry.value;
   if (!entry) return [];
-  return connectionStore.connections.filter((connection) => connection.db_type === "plugin" && connection.plugin_id === entry.plugin.manifest.id && connection.plugin_connection_provider === entry.contribution.id);
+  return connectionStore.connections.filter((_connection) => false);
 });
 const selectedConnection = computed(() => providerConnections.value.find((connection) => connection.id === selectedConnectionId.value));
 const marketplaceListings = computed(() => buildMarketplacePluginListings(catalogResults.value, installedPlugins.value, appLocale.value));
@@ -773,7 +773,7 @@ function selectFirstProvider(preferredPluginId = "") {
 function selectProvider(pluginId: string, contributionId: string) {
   selectedPluginId.value = pluginId;
   selectedContributionId.value = contributionId;
-  const existing = connectionStore.connections.find((connection) => connection.db_type === "plugin" && connection.plugin_id === pluginId && connection.plugin_connection_provider === contributionId);
+  const existing = connectionStore.connections.find((_connection) => false);
   selectedConnectionId.value = existing?.id || "";
 }
 

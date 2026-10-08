@@ -9,17 +9,12 @@ use dbx_core::{
     storage::Storage,
     types::{ColumnInfo, QueryMessage, QueryResult, TableInfo},
 };
-use dbx_mcp::{
-    backend::DocsSnapshotOptions,
-    mongo::{self, MongoSafetyError},
-    DbxBackend, LocalBackend, WebBackend,
-};
+use dbx_mcp::{backend::DocsSnapshotOptions, DbxBackend, LocalBackend, WebBackend};
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
-const DIRECT_QUERY_TYPES: &[&str] =
-    &["postgres", "redshift", "mysql", "doris", "starrocks", "manticoresearch", "sqlite", "rqlite", "kwdb", "questdb"];
+const DIRECT_QUERY_TYPES: &[&str] = &["mysql"];
 const BRIDGE_REQUIRED_TYPES: &[&str] = &[
     "cloudflare-d1",
     "redis",
@@ -341,42 +336,8 @@ async fn run_query(backend: &dyn DbxBackend, flags: &Flags) -> Result<String, Cl
     let allow_writes = flags.allow_writes || env_allow_writes;
     let allow_dangerous = flags.allow_dangerous || env_allow_dangerous;
     let database = selected_database(&connection, flags.database.as_deref());
-    if connection.db_type == DatabaseType::Redis {
-        return Err(CliError::new(
-            "REDIS_COMMAND_REQUIRED",
-            "Redis connections do not accept SQL through dbx query. Use an MCP Redis command tool or DBX directly.",
-        ));
-    }
-    if connection.db_type == DatabaseType::MongoDb {
-        let command = mongo::parse(&sql).map_err(|message| CliError::new("QUERY_ERROR", message))?;
-        if let Err(error) = mongo::validate_safety(
-            &command,
-            allow_writes,
-            allow_dangerous,
-            is_production_database(&connection, &database),
-        ) {
-            return Err(match error {
-                MongoSafetyError::WritesDisabled => {
-                    CliError::new("SQL_BLOCKED", "MongoDB write command is blocked. Pass --allow-writes to allow it.")
-                }
-                MongoSafetyError::EmptyFilter => CliError::new(
-                    "SQL_BLOCKED",
-                    "MongoDB update/delete commands require a non-empty filter unless --allow-dangerous-sql is set.",
-                ),
-                MongoSafetyError::Dangerous => CliError::new(
-                    "SQL_BLOCKED",
-                    "Dangerous MongoDB command is blocked. Pass --allow-dangerous-sql to allow it.",
-                ),
-                MongoSafetyError::ProductionWrite => {
-                    CliError::new("SQL_BLOCKED", "Writes and DDL are blocked for production databases.")
-                }
-            });
-        }
-        let mut result =
-            backend.execute_mongo_command(&connection, &database, &command).await.map_err(command_error)?;
-        truncate_query_result(&mut result, flags.max_rows);
-        return format_query(connection_name, &result, flags.format);
-    }
+    {}
+    {}
     let risk = classify_sql_risk_for_database(&sql, connection.db_type)
         .map_err(|message| CliError::new("SQL_BLOCKED", message))?;
     if risk == SqlRisk::Transaction
@@ -394,14 +355,6 @@ async fn run_query(backend: &dyn DbxBackend, flags: &Flags) -> Result<String, Cl
         .await
         .map_err(command_error)?;
     format_query(connection_name, &result, flags.format)
-}
-
-fn truncate_query_result(result: &mut QueryResult, max_rows: Option<usize>) {
-    let Some(max_rows) = max_rows else { return };
-    if result.rows.len() > max_rows {
-        result.rows.truncate(max_rows);
-        result.truncated = true;
-    }
 }
 
 async fn run_context(backend: &dyn DbxBackend, flags: &Flags) -> Result<String, CliError> {
@@ -1053,103 +1006,6 @@ mod tests {
         assert_eq!(error.code, "NOTES_NOT_FOUND");
         assert!(error.message.contains("typo.json"), "message names the path: {}", error.message);
     }
-    use async_trait::async_trait;
-    use dbx_core::{
-        agent_events::ToolResult,
-        agent_tools::AgentSqlPermissions,
-        storage::{McpGlobalPolicy, Storage},
-    };
-    use dbx_mcp::{backend::new_connection_config, mongo::MongoCommand};
-
-    struct MongoBackend {
-        connection: ConnectionConfig,
-    }
-
-    impl MongoBackend {
-        fn new() -> Self {
-            Self {
-                connection: new_connection_config(
-                    "mongo-test".to_string(),
-                    "local-mongo".to_string(),
-                    DatabaseType::MongoDb,
-                    "127.0.0.1".to_string(),
-                    27017,
-                    String::new(),
-                    String::new(),
-                    Some("test".to_string()),
-                    false,
-                    None,
-                )
-                .unwrap(),
-            }
-        }
-    }
-
-    #[async_trait]
-    impl DbxBackend for MongoBackend {
-        async fn load_mcp_global_policy(&self) -> Result<McpGlobalPolicy, String> {
-            Ok(McpGlobalPolicy::default())
-        }
-
-        async fn load_connections(&self) -> Result<Vec<ConnectionConfig>, String> {
-            Ok(vec![self.connection.clone()])
-        }
-
-        async fn execute_agent_tool(
-            &self,
-            _connection: &ConnectionConfig,
-            _database: &str,
-            _tool_name: &str,
-            _arguments: Value,
-            _permissions: AgentSqlPermissions,
-        ) -> ToolResult {
-            panic!("Mongo CLI queries must not fall through to agent SQL execution")
-        }
-
-        async fn execute_mongo_command(
-            &self,
-            _connection: &ConnectionConfig,
-            _database: &str,
-            command: &MongoCommand,
-        ) -> Result<QueryResult, String> {
-            assert!(matches!(command, MongoCommand::Insert { collection, .. } if collection == "products"));
-            Ok(QueryResult {
-                columns: Vec::new(),
-                column_types: Vec::new(),
-                column_sortables: Vec::new(),
-                spatial_columns: vec![],
-                spatial_values: vec![],
-                rows: Vec::new(),
-                affected_rows: 2,
-                execution_time_ms: 0,
-                server_execute_time_us: None,
-                query_timings_ms: None,
-                truncated: false,
-                session_id: None,
-                has_more: false,
-                elasticsearch_raw_body: None,
-                messages: Vec::new(),
-            })
-        }
-
-        async fn add_connection_for_mcp(&self, config: ConnectionConfig) -> Result<ConnectionConfig, String> {
-            Ok(config)
-        }
-
-        async fn duplicate_connection_for_mcp(
-            &self,
-            _source_id: &str,
-            _copy_id: &str,
-            _copy_name: &str,
-        ) -> Result<ConnectionConfig, String> {
-            Err("not exercised".to_string())
-        }
-
-        async fn remove_connection_for_mcp(&self, _connection_id: &str) -> Result<bool, String> {
-            Ok(true)
-        }
-    }
-
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_string()).collect()
     }
@@ -1205,12 +1061,6 @@ mod tests {
     fn formats_csv_using_existing_escaping_rules() {
         let rows = vec![json!({ "name": "alpha,beta", "value": "a\"b" })];
         assert_eq!(csv_table(&["name", "value"], &rows), "name,value\n\"alpha,beta\",\"a\"\"b\"\n");
-    }
-
-    #[test]
-    fn dangerous_sql_requires_explicit_permission() {
-        let risk = classify_sql_risk_for_database("drop table users", DatabaseType::Postgres).unwrap();
-        assert_eq!(risk, SqlRisk::Ddl);
     }
 
     #[test]
@@ -1270,102 +1120,6 @@ mod tests {
         let output = format_query("local", &result, OutputFormat::Json).unwrap();
         let value: Value = serde_json::from_str(&output).unwrap();
         assert!(value.get("messages").is_none());
-    }
-
-    #[tokio::test]
-    async fn routes_legacy_mongo_insert_through_shared_mongo_backend() {
-        let flags = parse_flags(&args(&[
-            "query",
-            "local-mongo",
-            "db.products.insert([{name: 'first'}, {name: 'second'}])",
-            "--allow-writes",
-            "--json",
-        ]))
-        .unwrap();
-        let output = run_with_backend(&MongoBackend::new(), flags).await.unwrap();
-        let value: Value = serde_json::from_str(&output).unwrap();
-        assert_eq!(value["connection"], "local-mongo");
-        assert_eq!(value["row_count"], 2);
-        assert_eq!(value["columns"], json!([]));
-    }
-
-    #[tokio::test]
-    async fn blocks_mongo_writes_without_explicit_permission() {
-        let flags =
-            parse_flags(&args(&["query", "local-mongo", "db.products.insertOne({name: 'demo'})", "--json"])).unwrap();
-        let error = run_with_backend(&MongoBackend::new(), flags).await.unwrap_err();
-        assert_eq!(error.code, "SQL_BLOCKED");
-    }
-
-    #[tokio::test]
-    #[ignore = "requires DBX_MCP_TEST_MONGO_HOST and DBX_MCP_TEST_MONGO_PASSWORD"]
-    async fn executes_legacy_mongo_insert_without_desktop_process() {
-        let host = env::var("DBX_MCP_TEST_MONGO_HOST").expect("MongoDB host");
-        let port = env::var("DBX_MCP_TEST_MONGO_PORT")
-            .unwrap_or_else(|_| "27017".to_string())
-            .parse::<u16>()
-            .expect("MongoDB port");
-        let password = env::var("DBX_MCP_TEST_MONGO_PASSWORD").expect("MongoDB password");
-        let directory = tempfile::tempdir().expect("temporary data directory");
-        let db_path = directory.path().join("dbx.db");
-        let storage = Storage::open(&db_path).await.expect("open storage");
-        let mut connection = new_connection_config(
-            "mongo-cli-e2e".to_string(),
-            "mongo-cli-e2e".to_string(),
-            DatabaseType::MongoDb,
-            host,
-            port,
-            "root".to_string(),
-            password,
-            Some("dbx_mcp_test".to_string()),
-            false,
-            None,
-        )
-        .unwrap();
-        connection.url_params = Some("authSource=admin".to_string());
-        storage.save_connections(&[connection]).await.expect("save connection");
-        let backend = LocalBackend::open(&db_path).await.expect("open local backend");
-
-        let cleanup = parse_flags(&args(&[
-            "query",
-            "mongo-cli-e2e",
-            "db.items.deleteMany({_id: {$in: ['rust-cli-e2e-1', 'rust-cli-e2e-2']}})",
-            "--allow-writes",
-        ]))
-        .unwrap();
-        run_with_backend(&backend, cleanup).await.expect("initial cleanup");
-
-        let insert = parse_flags(&args(&[
-            "query",
-            "mongo-cli-e2e",
-            "db.items.insert([{_id: 'rust-cli-e2e-1', name: 'Ada'}, {_id: 'rust-cli-e2e-2', name: 'Grace'}])",
-            "--allow-writes",
-            "--json",
-        ]))
-        .unwrap();
-        let inserted: Value = serde_json::from_str(&run_with_backend(&backend, insert).await.unwrap()).unwrap();
-        assert_eq!(inserted["row_count"], 2);
-
-        let find = parse_flags(&args(&[
-            "query",
-            "mongo-cli-e2e",
-            "db.items.find({_id: {$in: ['rust-cli-e2e-1', 'rust-cli-e2e-2']}}).sort({_id: 1})",
-            "--json",
-        ]))
-        .unwrap();
-        let found: Value = serde_json::from_str(&run_with_backend(&backend, find).await.unwrap()).unwrap();
-        assert_eq!(found["row_count"], 2);
-        assert_eq!(found["rows"][0]["name"], "Ada");
-        assert_eq!(found["rows"][1]["name"], "Grace");
-
-        let cleanup = parse_flags(&args(&[
-            "query",
-            "mongo-cli-e2e",
-            "db.items.deleteMany({_id: {$in: ['rust-cli-e2e-1', 'rust-cli-e2e-2']}})",
-            "--allow-writes",
-        ]))
-        .unwrap();
-        run_with_backend(&backend, cleanup).await.expect("final cleanup");
     }
 
     #[test]

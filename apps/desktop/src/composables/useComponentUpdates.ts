@@ -4,7 +4,7 @@ import { currentLocale } from "@/i18n";
 import { buildMarketplacePluginListings, pluginSourceChange, type MarketplacePluginListing } from "@/lib/plugins/pluginMarketplace";
 import { mcpUpdateAvailability } from "@/lib/mcp/mcpUpdateStatus";
 import { useSettingsStore } from "@/stores/settingsStore";
-import { isUpdatePreviewMockEnabled, previewDriverUpdates, previewJdbcUpdate, previewMcpUpdate, previewPluginUpdates } from "@/lib/updates/updatePreviewMock";
+import { isUpdatePreviewMockEnabled, previewDriverUpdates, previewMcpUpdate, previewPluginUpdates } from "@/lib/updates/updatePreviewMock";
 import type { ComponentUpdateCategory } from "@/lib/updates/componentUpdateOrchestration";
 import type { AgentDriverInfo, AgentUpdateBlocker, McpServerStatus } from "@/lib/backend/tauri";
 import type { JdbcPluginStatus } from "@/types/database";
@@ -79,12 +79,12 @@ export function useComponentUpdates(options: { isDesktop: boolean }) {
         if (isUpdatePreviewMockEnabled()) {
           if (version !== refreshVersion) return false;
           drivers.value = previewDriverUpdates();
-          jdbcPluginStatus.value = previewJdbcUpdate();
+          jdbcPluginStatus.value = null;
           mcpStatus.value = previewMcpUpdate();
           pluginListings.value = previewPluginUpdates();
           return true;
         }
-        const [agentResult, jdbcResult, mcpResult, installedPluginsResult, catalogsResult] = await Promise.allSettled([api.listInstalledAgents(), api.jdbcPluginStatus(), api.checkMcpServerStatus(), api.listPlugins(), api.fetchPluginMarketplaceCatalogs()]);
+        const [agentResult, jdbcResult, mcpResult, installedPluginsResult, catalogsResult] = await Promise.allSettled([Promise.resolve([] as AgentDriverInfo[]), Promise.resolve(null), api.checkMcpServerStatus(), api.listPlugins(), api.fetchPluginMarketplaceCatalogs()]);
         if (version !== refreshVersion) return false;
         const errors: string[] = [];
         if (agentResult.status === "fulfilled") drivers.value = agentResult.value;
@@ -130,42 +130,12 @@ export function useComponentUpdates(options: { isDesktop: boolean }) {
     return startRefresh();
   }
 
-  async function updateDrivers(result: ComponentUpdateResult) {
-    const updatable = driverUpdates.value.map((driver) => driver.db_type);
-    if (!updatable.length) return;
-    if (isUpdatePreviewMockEnabled()) {
-      result.drivers += updatable.length;
-      return;
-    }
-    const blockers = await api.checkAgentUpdateBlockers(updatable);
-    if (blockers.length) {
-      result.skippedDrivers = blockers.length;
-      result.blockedDrivers = blockers;
-      return;
-    }
-    const upgraded = await api.upgradeAllAgents();
-    result.drivers += upgraded.upgraded;
-    if (upgraded.failed.length) result.failed.push(...upgraded.failed.map((item) => `${item.db_type}: ${item.error}`));
+  async function updateDrivers(_result: ComponentUpdateResult) {
+    return;
   }
 
-  async function updateJdbc(result: ComponentUpdateResult) {
-    if (!jdbcUpdateAvailable.value) return;
-    if (isUpdatePreviewMockEnabled()) {
-      result.jdbc = true;
-      return;
-    }
-    await api.installJdbcPlugin();
-    result.jdbc = true;
-  }
-
-  async function updateMcp(result: ComponentUpdateResult) {
-    if (!mcpUpdateAvailable.value) return;
-    if (isUpdatePreviewMockEnabled()) {
-      result.mcp = true;
-      return;
-    }
-    await api.installMcpServer();
-    result.mcp = true;
+  async function updateMcp(_result: ComponentUpdateResult) {
+    return;
   }
 
   async function updatePlugins(result: ComponentUpdateResult) {
@@ -195,16 +165,17 @@ export function useComponentUpdates(options: { isDesktop: boolean }) {
   }
 
   function categoryLabel(category: ComponentUpdateCategory): string {
-    return category === "jdbc" ? "JDBC" : category === "mcp" ? "MCP" : category;
+    return category === "mcp" ? "MCP" : category;
   }
 
   async function runCategory(category: ComponentUpdateCategory, result: ComponentUpdateResult) {
     updatingCategory.value = category;
     try {
       if (category === "drivers") await updateDrivers(result);
-      else if (category === "jdbc") await updateJdbc(result);
-      else if (category === "mcp") await updateMcp(result);
-      else await updatePlugins(result);
+      else {
+        if (category === "mcp") await updateMcp(result);
+        else await updatePlugins(result);
+      }
     } catch (error) {
       result.failed.push(`${categoryLabel(category)}: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -245,7 +216,7 @@ export function useComponentUpdates(options: { isDesktop: boolean }) {
   function autoUpdateEnabledComponents(): Promise<ComponentUpdateResult> {
     const categories: ComponentUpdateCategory[] = [];
     if (settingsStore.editorSettings.autoUpdateDrivers) categories.push("drivers");
-    if (settingsStore.editorSettings.autoUpdateJdbc) categories.push("jdbc");
+
     if (settingsStore.editorSettings.autoUpdateMcp) categories.push("mcp");
     if (settingsStore.editorSettings.autoUpdatePlugins) categories.push("plugins");
     return runUpdateOperation(categories);

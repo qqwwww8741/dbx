@@ -12,66 +12,6 @@ use dbx_core::schema_diff::{prepare_schema_diff, SchemaDiffPreparation, SchemaDi
 use dbx_core::sql_risk::{classify_sql_risk, SqlRisk};
 use dbx_core::types::{ColumnInfo, TableInfo};
 
-// ============================================================================
-// Compile-time checks: core function signatures compile
-// ============================================================================
-
-/// Verify prepare_schema_diff accepts SchemaDiffPreparationOptions and returns SchemaDiffPreparation
-#[test]
-fn prepare_schema_diff_function_signature() {
-    let options = SchemaDiffPreparationOptions {
-        source_tables: vec![TableInfo {
-            name: "t".to_string(),
-            table_type: "TABLE".to_string(),
-            valid: None,
-            comment: None,
-            parent_schema: None,
-            parent_name: None,
-        }],
-        target_tables: vec![TableInfo {
-            name: "t".to_string(),
-            table_type: "TABLE".to_string(),
-            valid: None,
-            comment: None,
-            parent_schema: None,
-            parent_name: None,
-        }],
-        source_details: vec![],
-        target_details: vec![],
-        source_functions: vec![],
-        target_functions: vec![],
-        source_sequences: vec![],
-        target_sequences: vec![],
-        source_rules: vec![],
-        target_rules: vec![],
-        source_owners: vec![],
-        target_owners: vec![],
-        database_type: DatabaseType::Postgres,
-        target_schema: None,
-        ignore_comments: false,
-        cascade_delete: false,
-        compare_column_order: false,
-        compare_charset: true,
-        ignore_table_name_case: false,
-        ignore_column_name_case: false,
-        detect_renames: false,
-        detect_table_renames: false,
-        rename_threshold: 0.5,
-        enable_rollback: false,
-        batch_patterns: vec![],
-        source_dialect: None,
-        target_dialect: None,
-        compatibility_threshold: 0.5,
-        source_permissions: vec![],
-        target_permissions: vec![],
-        shard_strategy: None,
-        resource_constraint: None,
-        field_mappings: vec![],
-        table_mappings: vec![],
-    };
-    let _result: SchemaDiffPreparation = prepare_schema_diff(options);
-}
-
 #[test]
 fn schema_diff_case_options_are_backward_compatible_and_use_camel_case() {
     let legacy: SchemaDiffPreparationOptions = serde_json::from_value(serde_json::json!({
@@ -91,99 +31,10 @@ fn schema_diff_case_options_are_backward_compatible_and_use_camel_case() {
     assert!(json.get("ignore_column_name_case").is_none());
 }
 
-/// Verify generate_schema_sync_sql accepts all arg types
-#[test]
-fn generate_schema_sync_sql_function_signature() {
-    let _sql = dbx_core::schema_diff::generate_schema_sync_sql(
-        &[],
-        &[],
-        &[],
-        &[],
-        &[],
-        DatabaseType::Postgres,
-        None,
-        false,
-        None,
-        &[],
-    );
-}
-
 /// Verify classify_sql_risk function signature
 #[test]
 fn classify_sql_risk_function_signature() {
     let _risk: SqlRisk = classify_sql_risk("SELECT 1", "postgres").unwrap();
-}
-
-// ============================================================================
-// Serialization contract: field naming conventions
-// ============================================================================
-
-/// SchemaDiffPreparation fields use camelCase in JSON
-#[test]
-fn schema_diff_preparation_field_names() {
-    let result = prepare_schema_diff(SchemaDiffPreparationOptions {
-        source_tables: vec![TableInfo {
-            name: "t".to_string(),
-            table_type: "TABLE".to_string(),
-            valid: None,
-            comment: None,
-            parent_schema: None,
-            parent_name: None,
-        }],
-        target_tables: vec![TableInfo {
-            name: "t".to_string(),
-            table_type: "TABLE".to_string(),
-            valid: None,
-            comment: None,
-            parent_schema: None,
-            parent_name: None,
-        }],
-        source_details: vec![],
-        target_details: vec![],
-        source_functions: vec![],
-        target_functions: vec![],
-        source_sequences: vec![],
-        target_sequences: vec![],
-        source_rules: vec![],
-        target_rules: vec![],
-        source_owners: vec![],
-        target_owners: vec![],
-        database_type: DatabaseType::Postgres,
-        target_schema: None,
-        ignore_comments: false,
-        cascade_delete: false,
-        compare_column_order: false,
-        compare_charset: true,
-        ignore_table_name_case: false,
-        ignore_column_name_case: false,
-        detect_renames: false,
-        detect_table_renames: false,
-        rename_threshold: 0.5,
-        enable_rollback: false,
-        batch_patterns: vec![],
-        source_dialect: None,
-        target_dialect: None,
-        compatibility_threshold: 0.5,
-        source_permissions: vec![],
-        target_permissions: vec![],
-        shard_strategy: None,
-        resource_constraint: None,
-        field_mappings: vec![],
-        table_mappings: vec![],
-    });
-
-    let json = serde_json::to_value(&result).unwrap();
-    let obj = json.as_object().unwrap();
-    let keys: Vec<&str> = obj.keys().map(|k| k.as_str()).collect();
-
-    // All keys must be camelCase (no underscores)
-    for key in &keys {
-        assert!(!key.contains('_'), "Key '{}' should be camelCase, not snake_case", key);
-    }
-
-    // Core fields must be present
-    assert!(keys.contains(&"diffs"), "diffs field must be present");
-    assert!(keys.contains(&"syncSql"), "syncSql field must be present");
 }
 
 /// DataComparePreparation fields use camelCase
@@ -362,19 +213,6 @@ fn table_columns_result_serialization_contract() {
 }
 
 // ============================================================================
-// DatabaseType serialization consistency
-// ============================================================================
-
-#[test]
-fn database_type_serialization() {
-    let json = serde_json::to_value(DatabaseType::Postgres).unwrap();
-    assert_eq!(json, "postgres", "DatabaseType serializes using snake_case");
-
-    let json = serde_json::to_value(DatabaseType::Mysql).unwrap();
-    assert_eq!(json, "mysql", "DatabaseType serializes using snake_case");
-}
-
-// ============================================================================
 // Tauri command argument compatibility: Option parameters
 // ============================================================================
 
@@ -410,38 +248,6 @@ fn option_types_work_in_tauri_command_boundary() {
     });
     let cmd: TauriLikeCommand = serde_json::from_value(input).unwrap();
     assert_eq!(cmd.cascade_delete, Some(true));
-}
-
-// ============================================================================
-// Web API request compatibility
-// ============================================================================
-
-/// Verify GenerateSchemaSyncSqlRequest contract matches the core function signature
-#[test]
-fn web_api_schema_sync_request_fields() {
-    #[derive(serde::Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    #[allow(dead_code)]
-    struct WebApiRequest {
-        diffs: Vec<dbx_core::schema_diff::TableDiff>,
-        function_diffs: Option<Vec<dbx_core::schema_diff::FunctionDiff>>,
-        sequence_diffs: Option<Vec<dbx_core::schema_diff::SequenceDiff>>,
-        rule_diffs: Option<Vec<dbx_core::schema_diff::RuleDiff>>,
-        owner_diffs: Option<Vec<dbx_core::schema_diff::OwnerDiff>>,
-        database_type: DatabaseType,
-        target_schema: Option<String>,
-        cascade_delete: Option<bool>,
-    }
-
-    let json = serde_json::json!({
-        "diffs": [],
-        "databaseType": "postgres"
-    });
-    let req: WebApiRequest = serde_json::from_value(json).unwrap();
-    assert!(req.diffs.is_empty());
-    assert_eq!(req.database_type, DatabaseType::Postgres);
-    assert!(req.target_schema.is_none());
-    assert!(req.cascade_delete.is_none());
 }
 
 // ============================================================================

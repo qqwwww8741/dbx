@@ -27,7 +27,7 @@ import { schemaDiffRoutineObjectTypes, schemaDiffRoutineObjectTypesIntersection,
 import { useConnectionStore } from "@/stores/connectionStore";
 import DatabaseIcon from "@/components/icons/DatabaseIcon.vue";
 import * as api from "@/lib/backend/api";
-import { isSchemaAware } from "@/lib/database/databaseCapabilities";
+
 import { fetchNamespaceOptionsForConnection } from "@/composables/useDatabaseOptions";
 import { ArrowLeftRight, GitCompareArrows, Save, FolderOpen, Settings, Trash2, X } from "@lucide/vue";
 import type { SchemaDiffConfig, SchemaDiffCompareOptions, FieldMappingEntry, SchemaDiffTableMapping, SchemaDiffRoutineMapping } from "@/types/schemaDiff";
@@ -225,7 +225,7 @@ function getTableIdentity(side: SchemaDiffTableSide): SchemaDiffTableIdentity {
 function isTableIdentityReady(side: SchemaDiffTableSide): boolean {
   const identity = getTableIdentity(side);
   const config = side === "source" ? sourceConfig.value : targetConfig.value;
-  return supportsDatabaseCompare(config, "schema") && !!identity.connectionId && !!identity.database && (!isSchemaAware(config?.db_type) || !!identity.schema);
+  return supportsDatabaseCompare(config, "schema") && !!identity.connectionId && !!identity.database;
 }
 
 function setTableList(side: SchemaDiffTableSide, tables: Array<{ name?: string }>) {
@@ -495,9 +495,7 @@ const canCompare = computed(() => {
     hasSelectedTables &&
     hasSelectedRoutines &&
     hasValidTableMappings &&
-    hasValidRoutineMappings &&
-    (!isSchemaAware(sourceConfig.value?.db_type) || props.sourceSchema) &&
-    (!isSchemaAware(targetConfig.value?.db_type) || props.targetSchema)
+    hasValidRoutineMappings
   );
 });
 
@@ -515,8 +513,7 @@ async function loadDatabases(connectionId: string, side: "source" | "target") {
       if (props.sourceDatabase) {
         await fetchDbVersion(connectionId, props.sourceDatabase, props.sourceSchema, "source");
         // Ensure schema list is loaded after databases are available (handles race with sourceDatabase watcher)
-        if (isSchemaAware(sourceConfig.value?.db_type)) {
-          await loadSchemas("source");
+        {
         }
       }
     } else {
@@ -524,8 +521,7 @@ async function loadDatabases(connectionId: string, side: "source" | "target") {
       if (props.targetDatabase) {
         await fetchDbVersion(connectionId, props.targetDatabase, props.targetSchema, "target");
         // Ensure schema list is loaded after databases are available (handles race with targetDatabase watcher)
-        if (isSchemaAware(targetConfig.value?.db_type)) {
-          await loadSchemas("target");
+        {
         }
       }
     }
@@ -671,16 +667,10 @@ async function fetchDbVersion(connectionId: string, database: string, schema: st
     const dbType = config?.db_type;
     let sql = "";
     switch (dbType) {
-      case "postgres":
-      case "opengauss":
-        sql = "SELECT version()";
-        break;
       case "mysql":
         sql = "SELECT VERSION()";
         break;
-      case "sqlite":
-        sql = "SELECT sqlite_version()";
-        break;
+
       default:
         return;
     }
@@ -753,22 +743,6 @@ async function fetchDbVersion(connectionId: string, database: string, schema: st
           />
         </div>
 
-        <div v-if="isSchemaAware(sourceConfig?.db_type)" class="space-y-1.5">
-          <Label class="text-xs">{{ t("diff.schema") }}</Label>
-          <SearchableSelect
-            :model-value="sourceSchema"
-            @update:model-value="(v: string) => $emit('update:sourceSchema', v)"
-            :options="sourceSchemas"
-            :placeholder="t('diff.selectSchema')"
-            :search-placeholder="t('diff.searchSchema')"
-            :empty-text="t('common.noResults')"
-            :disabled="!sourceSchemas.length"
-            trigger-variant="outline"
-            trigger-class="h-8 w-full justify-between text-xs"
-            content-class="w-[var(--reka-popover-trigger-width)]"
-          />
-        </div>
-
         <!-- Source Info -->
         <div v-if="getConnectionInfo(sourceConnectionId)" class="mt-4 p-3 rounded-lg bg-muted/30 border space-y-1.5">
           <div class="text-xs font-medium text-blue-500">{{ t("diff.info") }}</div>
@@ -813,22 +787,6 @@ async function fetchDbVersion(connectionId: string, database: string, schema: st
             :search-placeholder="t('diff.searchDatabase')"
             :empty-text="t('common.noResults')"
             :disabled="!targetDatabases.length"
-            trigger-variant="outline"
-            trigger-class="h-8 w-full justify-between text-xs"
-            content-class="w-[var(--reka-popover-trigger-width)]"
-          />
-        </div>
-
-        <div v-if="isSchemaAware(targetConfig?.db_type)" class="space-y-1.5">
-          <Label class="text-xs">{{ t("diff.schema") }}</Label>
-          <SearchableSelect
-            :model-value="targetSchema"
-            @update:model-value="(v: string) => $emit('update:targetSchema', v)"
-            :options="targetSchemas"
-            :placeholder="t('diff.selectSchema')"
-            :search-placeholder="t('diff.searchSchema')"
-            :empty-text="t('common.noResults')"
-            :disabled="!targetSchemas.length"
             trigger-variant="outline"
             trigger-class="h-8 w-full justify-between text-xs"
             content-class="w-[var(--reka-popover-trigger-width)]"

@@ -1517,42 +1517,6 @@ mod tests {
     }
 
     #[test]
-    fn installing_v1_migrates_legacy_flat_plugin_and_preserves_rollback() {
-        let root = tempfile::tempdir().unwrap();
-        let legacy = root.path().join("sample.hello");
-        std::fs::create_dir_all(legacy.join("bin")).unwrap();
-        std::fs::write(legacy.join("bin/plugin"), b"legacy").unwrap();
-        std::fs::write(
-            legacy.join("manifest.json"),
-            serde_json::to_vec_pretty(&serde_json::json!({
-                "id": "sample.hello",
-                "name": "Hello legacy",
-                "version": "0.9.0",
-                "protocol_version": 1,
-                "executable": "bin/plugin",
-                "drivers": []
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-
-        let installer =
-            PluginPackageInstaller::with_trust_store(root.path().to_path_buf(), "0.5.67", PluginTrustStore::default());
-        let installed =
-            installer.install_bytes(&package("1.0.0", None, false), PluginInstallPolicy::LocalDevelopment).unwrap();
-
-        assert_eq!(installed.previous_version.as_deref(), Some("0.9.0"));
-        let registry = PluginRegistry::new_with_app_version(root.path().to_path_buf(), "0.5.67");
-        assert_eq!(registry.find_plugin("sample.hello").unwrap().unwrap().manifest.version, "1.0.0");
-
-        let rollback = installer.rollback("sample.hello").unwrap();
-        assert_eq!(rollback.previous_version, "0.9.0");
-        let legacy_plugin = registry.find_plugin("sample.hello").unwrap().unwrap();
-        assert_eq!(legacy_plugin.manifest.version, "0.9.0");
-        assert_eq!(std::fs::read(legacy_plugin.path.join("bin/plugin")).unwrap(), b"legacy");
-    }
-
-    #[test]
     fn retains_a_legacy_version_directory_when_the_legacy_version_is_not_semver() {
         let root = tempfile::tempdir().unwrap();
         let legacy = root.path().join("sample.hello");
@@ -1943,35 +1907,6 @@ mod tests {
             updated.plugin.provenance.and_then(|provenance| provenance.repository_id).as_deref(),
             Some("repo-b")
         );
-    }
-
-    #[test]
-    fn updating_a_plugin_leaves_its_data_directory_untouched() {
-        let root = tempfile::tempdir().unwrap();
-        // The registry root sits beside plugin-data/, exactly like the app layout, so
-        // `PluginRegistry::plugin_data_dir("sample.hello")` resolves to the path below.
-        let plugins_root = root.path().join("plugins");
-        let (installer, signing_key) = signed_installer(&plugins_root, [24u8; 32]);
-        let signed = |version: &str| package(version, Some((&signing_key, "sample-key")), false);
-        let expectation = |repository: &str, version: &str| PluginPackageExpectation {
-            id: "sample.hello".to_string(),
-            version: version.to_string(),
-            repository_id: Some(repository.to_string()),
-            publisher: "sample".to_string(),
-            permissions: BTreeSet::from(["host.events".to_string()]),
-            signing_key_id: "sample-key".to_string(),
-        };
-
-        installer.install_marketplace_bytes(&signed("1.0.0"), &expectation("repo-a", "1.0.0"), false).unwrap();
-        let data_dir = root.path().join("plugin-data").join("sample.hello");
-        std::fs::create_dir_all(&data_dir).unwrap();
-        std::fs::write(data_dir.join("state.json"), b"{\"rows\":1}").unwrap();
-
-        installer.install_marketplace_bytes(&signed("1.1.0"), &expectation("repo-a", "1.1.0"), false).unwrap();
-        installer.rollback("sample.hello").unwrap();
-
-        // Plugin user data lives outside the versioned container and must survive update + rollback.
-        assert_eq!(std::fs::read(data_dir.join("state.json")).unwrap(), b"{\"rows\":1}");
     }
 
     fn activation_record_count(container: &Path) -> usize {

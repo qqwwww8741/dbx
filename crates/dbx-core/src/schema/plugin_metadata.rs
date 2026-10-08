@@ -198,7 +198,7 @@ mod tests {
         serde_json::from_value(serde_json::json!({
             "id": "conn-1",
             "name": "Connection",
-            "db_type": "postgres",
+            "db_type": "mysql",
             "host": "127.0.0.1",
             "port": 5432,
             "username": "user",

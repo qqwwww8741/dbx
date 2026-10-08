@@ -69,7 +69,7 @@ import { executableStatementRangeAtCursor, executableStatementRangeCacheForDoc, 
 
 import { looksLikeDmlStatement } from "@/lib/sql/dmlChangePreview";
 
-import { canFormatSqlForDatabaseType, formatSqlForEditing, compressSqlText } from "@/lib/sql/sqlFormatter";
+import { formatSqlForEditing, compressSqlText } from "@/lib/sql/sqlFormatter";
 import { detectAndFormatStructured } from "@/lib/sql/autoFormat";
 import { restoreSqlFromSourcePaste } from "@/lib/sql/sqlSourcePaste";
 import { enabledSqlParameterSyntaxes, resolveSqlVariableSyntaxToggles } from "@/lib/sql/sqlVariableSyntax";
@@ -80,8 +80,6 @@ import { joinQueryEditorLines } from "@/lib/editor/queryEditorJoinLines";
 
 import { resolveSqlSingleQuoteKeyAction } from "@/lib/sql/sqlQuoteCaret";
 
-import { formatMongoShellText } from "@/lib/mongo/mongoFormatter";
-import { detectAndFormatElasticsearchRequests } from "@/lib/elasticsearch/elasticsearchFormatter";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useTheme } from "@/composables/useTheme";
@@ -118,7 +116,7 @@ import { configureVimSystemClipboard } from "@/lib/editor/vimSystemClipboard";
 
 import { selectionMatchOccurrences } from "@/lib/editor/codemirrorSelectionMatches";
 
-import { createInsertValueHintsExtension, requestInsertValueHintsRefresh, supportsInsertValueHints } from "@/lib/editor/codemirrorInsertValueHints";
+import { createInsertValueHintsExtension, requestInsertValueHintsRefresh } from "@/lib/editor/codemirrorInsertValueHints";
 import { createSqlBlockFoldService } from "@/lib/editor/codemirrorSqlBlockFolding";
 import { focusEditorView } from "@/lib/editor/queryEditorFocus";
 import { createSqlUnknownObjectHighlights, refreshSqlUnknownObjectHighlights } from "@/lib/editor/codemirrorSqlUnknownObjectHighlights";
@@ -145,15 +143,14 @@ import type { SqlCompletionColumn, SqlCompletionContext, SqlCompletionReferenced
 
 const props = defineProps<QueryEditorProps>();
 
-function sqlBehaviorDialect(): "mysql" | "postgres" | "sqlserver" | undefined {
+function sqlBehaviorDialect(): "mysql" | undefined {
   // clickhouse and soql ride the SQL editor but have no matching behavior dialect;
   // fall back to the connection's dialect (undefined for Salesforce).
-  return props.syntaxDialect === "clickhouse" || props.syntaxDialect === "soql" ? props.dialect : (props.syntaxDialect ?? props.dialect);
+  return props.syntaxDialect === "soql" ? props.dialect : (props.syntaxDialect ?? props.dialect);
 }
 
 function queryEditorSelectionLanguage(): "sql" | "text" {
-  const databaseType = props.databaseType;
-  return databaseType === "redis" || databaseType === "mongodb" || databaseType === "elasticsearch" || databaseType === "easysearch" || databaseType === "meilisearch" || databaseType === "solr" || databaseType === "victoriametrics" ? "text" : "sql";
+  return "sql";
 }
 
 const COMPLETION_REMOTE_LATENCY_BUDGET_MS = 120;
@@ -246,7 +243,7 @@ function sqlStatementParameterOptions() {
   const toggles = resolveSqlVariableSyntaxToggles(settingsStore.editorSettings.sqlVariableSyntaxOverrides, props.databaseType, settingsStore.editorSettings.sqlVariableSubstitutionEnabled);
   return {
     databaseType: props.databaseType,
-    compatibilityMode: props.databaseType === "opengauss" ? connectionStore.databaseCompatibilityMode(props.connectionId, props.database) : undefined,
+    compatibilityMode: undefined,
     enabledSyntaxes: enabledSqlParameterSyntaxes(toggles),
   };
 }
@@ -828,7 +825,7 @@ function schedulePreviewContextRefresh(currentView: EditorViewType) {
 }
 
 function selectStarExpansionTargetForView(currentView: EditorViewType, position?: number): SelectStarExpansionTarget | null {
-  if (!props.connectionId || props.database == null || props.readOnly || !SEMANTIC_SQL_COMPLETION_ENABLED) return null;
+  if (!props.connectionId || props.database == null || props.readOnly) return null;
 
   const sql = currentEditorDocText(currentView);
   const selection = currentView.state.selection.main;
@@ -1161,7 +1158,7 @@ function executableStatementRangeAtPosition(currentView: EditorViewType, positio
 }
 
 function currentExecutableStatementRange(currentView: EditorViewType): SqlTextRange | null {
-  if (!supportsExecutionTargetPicker(props.databaseType) && props.databaseType !== "mongodb") return null;
+  if (!supportsExecutionTargetPicker(props.databaseType)) return null;
   if (boundedEditorAnalysisEnabled() && executableStatementRangeCache?.doc !== currentView.state.doc) return null;
   return executableStatementRangeAtPosition(currentView, currentView.state.selection.main.head);
 }
@@ -1693,7 +1690,7 @@ const { sqlErrorDecorationRange, sqlSemanticDecorationRanges, reconfigureDiagnos
 
 async function formatCurrentSql() {
   if (props.readOnly) return;
-  if (!canFormatSqlForDatabaseType(props.databaseType)) return;
+  {}
   const currentView = view.value;
   if (!currentView) return;
 
@@ -1709,30 +1706,24 @@ async function formatCurrentSql() {
   try {
     let formatted: string;
     let formattedAsSql = false;
-    if (props.databaseType === "mongodb") {
-      formatted = formatMongoShellText(source, settingsStore.editorSettings.sqlFormatter);
-    } else {
-      const esRequest = detectAndFormatElasticsearchRequests(source, props.databaseType, settingsStore.editorSettings.sqlFormatter.tabWidth);
-      if (esRequest.kind === "elasticsearch") {
-        formatted = esRequest.formatted;
-      } else if (esRequest.kind === "unsupported") {
-        toast(t("toolbar.formatAutoDetectFailed"), 3000);
-        return;
-      } else {
-        const structured = detectAndFormatStructured(source, {
-          indentSize: settingsStore.editorSettings.sqlFormatter.tabWidth,
-          useTabs: settingsStore.editorSettings.sqlFormatter.useTabs,
-        });
-        if (structured.kind === "json" || structured.kind === "xml") {
-          formatted = structured.formatted;
-        } else if (structured.kind === "unsupported") {
-          // Keep invalid structured text untouched — the SQL formatter would
-          // silently corrupt XML-looking content.
-          toast(t("toolbar.formatAutoDetectFailed"), 3000);
-          return;
-        } else {
-          formattedAsSql = true;
-          formatted = await formatSqlForEditing(source, formatDialect, settingsStore.editorSettings.sqlFormatter);
+    {
+      {
+        {
+          const structured = detectAndFormatStructured(source, {
+            indentSize: settingsStore.editorSettings.sqlFormatter.tabWidth,
+            useTabs: settingsStore.editorSettings.sqlFormatter.useTabs,
+          });
+          if (structured.kind === "json" || structured.kind === "xml") {
+            formatted = structured.formatted;
+          } else if (structured.kind === "unsupported") {
+            // Keep invalid structured text untouched — the SQL formatter would
+            // silently corrupt XML-looking content.
+            toast(t("toolbar.formatAutoDetectFailed"), 3000);
+            return;
+          } else {
+            formattedAsSql = true;
+            formatted = await formatSqlForEditing(source, formatDialect, settingsStore.editorSettings.sqlFormatter);
+          }
         }
       }
     }
@@ -2070,7 +2061,7 @@ const codeMirrorLifecycle = useQueryEditorCodeMirror({
         initializedRuntime.sqlSignatureComp.of(sqlExtensions.buildSqlSignatureExtension()),
         initializedRuntime.diagnosticComp.of(sqlExtensions.buildSqlDiagnosticExtension()),
         createInsertValueHintsExtension({
-          isEnabled: () => settingsStore.editorSettings.showInsertValueHints && supportsInsertValueHints(props.databaseType),
+          isEnabled: () => settingsStore.editorSettings.showInsertValueHints,
           getTableColumns: getInsertValueHintTableColumns,
           requestTableColumns: requestInsertValueHintTableColumns,
           getDialectId: () => resolveSqlDialectId({ databaseType: props.databaseType, dialect: sqlBehaviorDialect() }),
@@ -2504,16 +2495,14 @@ watch(
 // map is warm; when the mode arrives, re-derive statement boundaries and
 // diagnostics so package DDL is parsed with the correct PL/SQL rules.
 watch(
-  () => (props.databaseType === "opengauss" ? connectionStore.databaseCompatibilityMode(props.connectionId, props.database) : undefined),
+  () => undefined,
   (now, before) => {
     if (now === before) return;
     executableStatementRangeCache = null;
     statementBoundaries.invalidate();
-    if (props.databaseType !== "opengauss") return;
-    if (!view.value) return;
-    refreshCompletionCache();
-    setSemanticDiagnostics([]);
-    scheduleSemanticDiagnostics(0);
+    {
+      return;
+    }
   },
 );
 
@@ -2657,7 +2646,7 @@ watch(
 watch(
   () => settingsStore.editorSettings.sqlSemanticDiagnosticsEnabled,
   (enabled) => {
-    if (props.databaseType === "redis" || props.databaseType === "mongodb" || props.databaseType === "victoriametrics") return;
+    {}
     if (!shouldSkipSqlSemanticDiagnostics() && enabled) {
       scheduleSemanticDiagnostics(0);
       return;

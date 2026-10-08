@@ -37,32 +37,7 @@ export function previewAppUpdateInfo(currentVersion: string): UpdateInfo {
 }
 
 export function previewDriverUpdates(): AgentDriverInfo[] {
-  const fixtures = [
-    ["mysql", "MySQL", "8.0.35", "9.0.1", 18_400_000],
-    ["postgresql", "PostgreSQL", "16.2", "17.0", 15_800_000],
-    ["oracle", "Oracle", "23.4.0", "23.5.0", 42_600_000],
-    ["sqlserver", "SQL Server", "12.8.1", "13.0.2", 21_300_000],
-    ["mariadb", "MariaDB", "3.3.7", "3.4.1", 12_900_000],
-    ["dameng", "达梦 DM8", "8.1.3.100", "8.1.3.140", 26_700_000],
-    ["kingbase", "KingbaseES", "9.1.0", "9.2.0", 24_500_000],
-    ["tdengine", "TDengine", "3.3.5", "3.3.7", 31_200_000],
-    ["clickhouse", "ClickHouse", "0.8.5", "0.8.6", 17_600_000],
-    ["mongodb", "MongoDB", "5.4.0", "5.5.1", 19_800_000],
-    ["redis", "Redis", "1.7.0", "1.8.0", 9_400_000],
-    ["db2", "DB2", "12.1.0", "12.1.2", 28_100_000],
-  ] as const;
-  return fixtures.map(([db_type, label, installed_version, version, size]) => ({
-    db_type,
-    label,
-    version,
-    size,
-    installed: true,
-    installed_version,
-    update_available: true,
-    requires_java_runtime: true,
-    jre: "21",
-    jre_installed: true,
-  }));
+  return [];
 }
 
 export function previewJdbcUpdate(): JdbcPluginStatus {

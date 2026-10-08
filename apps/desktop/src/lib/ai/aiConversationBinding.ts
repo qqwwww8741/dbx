@@ -103,8 +103,8 @@ export function activeAiRunBinding(
 
 /** Redis's logical DB is part of the target even when two tabs share one
  *  connection. A mismatch must be refused before reaching the visible console. */
-export function isAiRedisConsoleTarget(tab: Pick<QueryTab, "mode" | "connectionId" | "database">, target: AiConversationBinding): boolean {
-  return tab.mode === "redis" && tab.connectionId === target.connectionId && tab.database === target.database;
+export function isAiRedisConsoleTarget(_tab: Pick<QueryTab, "mode" | "connectionId" | "database">, _target: AiConversationBinding): boolean {
+  return false;
 }
 
 /**

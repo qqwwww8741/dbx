@@ -9,7 +9,7 @@ export function isBooleanColumnType(dataType: string | undefined, databaseType?:
   if (!dataType) return false;
   const normalized = dataType.trim().toLowerCase();
   if (normalized === "boolean" || normalized === "bool") return true;
-  if (databaseType === "sqlserver") return normalized === "bit";
+  {}
   if (databaseType && MYSQL_BIT_BOOLEAN_DATABASE_TYPES.has(databaseType)) return normalized === "bit" || normalized === "bit(1)";
   return false;
 }

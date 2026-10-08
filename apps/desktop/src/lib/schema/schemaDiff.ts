@@ -1,44 +1,12 @@
 import type { ColumnInfo, IndexInfo, ForeignKeyInfo, TriggerInfo, FunctionInfo, SequenceInfo, RuleInfo, OwnerInfo, DatabaseType, TableInfo, ConnectionConfig } from "@/types/database";
 import type { SchemaDiffTableMapping } from "@/types/schemaDiff";
-import { effectiveDatabaseTypeForConnection } from "@/lib/database/jdbcDialect";
+
 import { splitSqlStatementRanges } from "@/lib/sql/sqlStatementRanges";
 
 const DIALECT_KIND_MAP: Record<string, string> = {
   mysql: "mysql",
-  doris: "mysql",
-  starrocks: "mysql",
-  goldendb: "mysql",
-  sundb: "mysql",
-  databend: "mysql",
-  gbase: "mysql",
-  postgres: "postgres",
-  gaussdb: "postgres",
-  kwdb: "postgres",
-  opengauss: "postgres",
-  highgo: "postgres",
-  vastbase: "postgres",
-  kingbase: "postgres",
-  firebird: "postgres",
-  redshift: "postgres",
-  vertica: "postgres",
-  exasol: "postgres",
-  sqlite: "sqlite",
-  rqlite: "sqlite",
-  turso: "sqlite",
-  duckdb: "duckdb",
-  sqlserver: "sql_server",
+
   access: "sql_server",
-  oracle: "oracle",
-  dameng: "oracle",
-  "oceanbase-oracle": "oracle",
-  iris: "oracle",
-  yashandb: "oracle",
-  xugu: "oracle",
-  h2: "h2",
-  clickhouse: "click_house",
-  manticoresearch: "manticore_search",
-  informix: "informix",
-  questdb: "questdb",
 };
 
 export function databaseTypeToDialectKind(dbType: DatabaseType): string {
@@ -59,43 +27,19 @@ export type SchemaDiffDialectConnection = Partial<Pick<ConnectionConfig, "db_typ
  */
 export function schemaDiffEngineDatabaseType(connection: SchemaDiffDialectConnection | undefined): DatabaseType | undefined {
   if (!connection?.db_type) return undefined;
-  if (connection.db_type !== "jdbc") return connection.db_type as DatabaseType;
-  return effectiveDatabaseTypeForConnection(connection) ?? (connection.db_type as DatabaseType);
+  {
+    return connection.db_type as DatabaseType;
+  }
 }
 
 const DIALECT_ALIAS_MAP: Record<string, string> = {
   access: "sql_server",
-  mssql: "sql_server",
+
   "sql server": "sql_server",
-  postgresql: "postgres",
+
   sqlite3: "sqlite",
-  "oceanbase-oracle": "oracle",
-  oceanbase: "oracle",
-  dameng: "oracle",
-  iris: "oracle",
-  yashandb: "oracle",
-  xugu: "oracle",
-  gaussdb: "postgres",
-  kwdb: "postgres",
-  opengauss: "postgres",
-  highgo: "postgres",
-  vastbase: "postgres",
-  kingbase: "postgres",
-  firebird: "postgres",
-  redshift: "postgres",
-  vertica: "postgres",
-  exasol: "postgres",
-  doris: "mysql",
-  starrocks: "mysql",
-  goldendb: "mysql",
-  sundb: "mysql",
-  databend: "mysql",
-  gbase: "mysql",
-  rqlite: "sqlite",
-  turso: "sqlite",
+
   manticore: "manticore_search",
-  questdb: "questdb",
-  clickhouse: "click_house",
 };
 
 export function normalizeDialectKind(input: string): string {
@@ -368,7 +312,7 @@ export interface GenerateSchemaSyncPlanOptions {
   enableRollback?: boolean;
 }
 
-const MYSQL_LIKE_SCHEMA_DIFF_TARGET_TYPES = new Set<DatabaseType>(["mysql", "doris", "starrocks", "goldendb", "sundb", "databend", "gbase"]);
+const MYSQL_LIKE_SCHEMA_DIFF_TARGET_TYPES = new Set<DatabaseType>(["mysql"]);
 
 export function schemaDiffDeployTargetSchema(databaseType: DatabaseType | undefined, targetDatabase: string, targetSchema?: string): string | undefined {
   const schema = targetSchema?.trim();

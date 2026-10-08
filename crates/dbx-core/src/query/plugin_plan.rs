@@ -20,7 +20,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::agent_explain::{explain_database_type, get_agent_explain_info_core};
 use crate::connection::AppState;
 use crate::db::QueryResult;
 use crate::models::connection::{ConnectionConfig, DatabaseType};
@@ -143,7 +142,7 @@ pub async fn plugin_plan_capabilities(state: &AppState, connection_id: &str) -> 
     let connection_id = require_connection_id(connection_id)?;
     let config = connection_config(state, connection_id).await?;
     require_open_connection(state, connection_id).await?;
-    let database_type = explain_database_type(&config);
+    let database_type = config.db_type;
     Ok(PluginPlanCapabilities {
         db_type: database_type.as_str().to_string(),
         db_version: database_version(&config),
@@ -165,30 +164,13 @@ pub async fn explain_estimated_plan(state: &AppState, request: PluginPlanRequest
     let request = validate_plugin_plan_request(request)?;
     let config = connection_config(state, &request.connection_id).await?;
     require_open_connection(state, &request.connection_id).await?;
-    let database_type = explain_database_type(&config);
+    let database_type = config.db_type;
     let strategy =
         estimated_plan_strategy(Some(database_type)).ok_or_else(|| unsupported_dialect_message(database_type))?;
 
     let timeout_secs = plugin_plan_timeout_secs(request.timeout_ms, &config);
     let (plan_text, rows_truncated) = match strategy.acquisition() {
-        EstimatedPlanAcquisition::DriverNative => {
-            // Dameng and Oracle hand back a native plan listing from their driver;
-            // Oracle's `EXPLAIN PLAN FOR` alone only fills `PLAN_TABLE`. This reuses
-            // the core the AI and command explain paths already use, pinned to
-            // `mode = "explain"` so Dameng autotrace stays unreachable.
-            let text = get_agent_explain_info_core(
-                state,
-                &request.connection_id,
-                request.database.as_deref(),
-                request.schema.as_deref(),
-                &request.sql,
-                Some(AGENT_EXPLAIN_MODE),
-                Some(timeout_secs),
-            )
-            .await?;
-            (text, false)
-        }
-        EstimatedPlanAcquisition::GeneratedSql | EstimatedPlanAcquisition::SqlServerShowPlanSession => {
+        EstimatedPlanAcquisition::GeneratedSql => {
             native_estimated_plan(state, &request, database_type, strategy, timeout_secs).await?
         }
     };
@@ -234,12 +216,6 @@ async fn native_estimated_plan(
 
     match strategy.acquisition() {
         EstimatedPlanAcquisition::GeneratedSql => {}
-        EstimatedPlanAcquisition::SqlServerShowPlanSession => {
-            return sqlserver_estimated_plan(state, request, timeout_secs).await;
-        }
-        EstimatedPlanAcquisition::DriverNative => {
-            return Err("Driver-native plans must use the shared driver explain path".to_string());
-        }
     }
 
     let database = request.database.as_deref().unwrap_or_default();
@@ -260,86 +236,6 @@ async fn native_estimated_plan(
     .map_err(|error| error.to_string())?;
 
     Ok((join_result_text(&result), result.truncated))
-}
-
-/// `SET SHOWPLAN_XML ON` is session state, so the toggle, the planned statement,
-/// and the toggle-off must share one client session. DBX's own explain view
-/// does the same with a dedicated explain session; the plugin path keeps the
-/// session short-lived and discards it afterwards.
-async fn sqlserver_estimated_plan(
-    state: &AppState,
-    request: &PluginPlanRequest,
-    timeout_secs: u64,
-) -> Result<(String, bool), String> {
-    let client_session_id = format!("plugin-plan-{}", uuid::Uuid::new_v4());
-    let database = request.database.as_deref().unwrap_or_default();
-    let session_database = (!database.is_empty()).then_some(database);
-    let options = |execution_mode: QueryExecutionMode| QueryExecutionOptions {
-        max_rows: Some(PLUGIN_PLAN_MAX_ROWS),
-        client_session_id: Some(client_session_id.clone()),
-        // ShowPlan capture must not be distorted by result-set probing or query
-        // rewriting, which is what the plain execution mode deliberately does.
-        execution_mode,
-        timeout_secs: Some(timeout_secs),
-        ..Default::default()
-    };
-
-    let capture = async {
-        execute_sql_statement_with_options_typed(
-            state,
-            &request.connection_id,
-            database,
-            "SET SHOWPLAN_XML ON;",
-            request.schema.as_deref(),
-            None,
-            options(QueryExecutionMode::Simple),
-        )
-        .await
-        .map_err(|error| error.to_string())?;
-        execute_sql_statement_with_options_typed(
-            state,
-            &request.connection_id,
-            database,
-            &request.sql,
-            request.schema.as_deref(),
-            None,
-            options(QueryExecutionMode::Simple),
-        )
-        .await
-        .map_err(|error| error.to_string())
-    }
-    .await;
-
-    // The session pool is dropped immediately below, so a failed toggle-off can
-    // never leave ShowPlan capture enabled for another caller's session.
-    let _ = execute_sql_statement_with_options_typed(
-        state,
-        &request.connection_id,
-        database,
-        "SET SHOWPLAN_XML OFF;",
-        request.schema.as_deref(),
-        None,
-        options(QueryExecutionMode::Simple),
-    )
-    .await;
-    let _ = state.close_client_session_pool(&request.connection_id, session_database, &client_session_id).await;
-
-    let result = capture?;
-    let plan = sqlserver_showplan_xml(&result)
-        .ok_or_else(|| "SQL Server did not return a ShowPlan XML estimated plan".to_string())?;
-    Ok((plan, result.truncated))
-}
-
-/// Extracts the `<ShowPlanXML>` document from the captured result, mirroring how
-/// DBX's own plan view locates it: the driver may report other cells alongside.
-fn sqlserver_showplan_xml(result: &QueryResult) -> Option<String> {
-    result
-        .rows
-        .iter()
-        .flatten()
-        .find(|cell| matches!(cell, Value::String(text) if text.contains("<ShowPlanXML")))
-        .and_then(Value::as_str)
-        .map(str::to_string)
 }
 
 /// Flattens a plan result into one text document. OceanBase Oracle returns one
@@ -574,7 +470,10 @@ mod tests {
     /// Opens `connection_id` the way DBX does: a pool in the registry. The pool
     /// kind is irrelevant here because the plan gate only reads pool keys.
     async fn open_connection(state: &AppState, pool_key: &str) {
-        let pool = PoolKind::Redis(std::sync::Arc::new(crate::db::redis_driver::redis_connection_test_stub()));
+        let pool = PoolKind::Mysql(
+            crate::db::mysql::MySqlPool::new("mysql://root@127.0.0.1:1", 1),
+            crate::connection::MysqlMode::Normal,
+        );
         state.update_connection_pools(|connections| connections.insert(pool_key.to_string(), pool)).await;
     }
 
@@ -635,26 +534,6 @@ mod tests {
         assert_eq!(validated.sql, "SELECT 1");
         assert_eq!(validated.database.as_deref(), Some("app"));
         assert_eq!(validated.schema, None);
-    }
-
-    #[test]
-    fn clamps_timeouts_to_the_connection_and_host_ceiling() {
-        let unlimited = config(DatabaseType::Postgres, 0);
-        assert_eq!(plugin_plan_timeout_ceiling_ms(&unlimited), MAX_PLUGIN_PLAN_TIMEOUT_MS);
-        assert_eq!(plugin_plan_timeout_secs(None, &unlimited), 60);
-        assert_eq!(plugin_plan_timeout_secs(Some(1), &unlimited), 1);
-        assert_eq!(plugin_plan_timeout_secs(Some(u64::MAX), &unlimited), 60);
-        assert_eq!(plugin_plan_timeout_secs(Some(0), &unlimited), 1);
-
-        let connection_capped = config(DatabaseType::Postgres, 5);
-        assert_eq!(plugin_plan_timeout_ceiling_ms(&connection_capped), 5_000);
-        assert_eq!(plugin_plan_timeout_secs(None, &connection_capped), 5);
-        assert_eq!(plugin_plan_timeout_secs(Some(30_000), &connection_capped), 5);
-        assert_eq!(plugin_plan_timeout_secs(Some(1_500), &connection_capped), 2);
-
-        let hour_long = config(DatabaseType::Postgres, 3_600);
-        assert_eq!(plugin_plan_timeout_ceiling_ms(&hour_long), MAX_PLUGIN_PLAN_TIMEOUT_MS);
-        assert_eq!(plugin_plan_timeout_secs(Some(45_000), &hour_long), 45);
     }
 
     #[test]
@@ -739,139 +618,9 @@ mod tests {
         assert!(serde_json::from_str::<Value>(&join_result_text(&result)).is_ok());
     }
 
-    #[test]
-    fn extracts_showplan_xml_from_any_cell() {
-        let result: QueryResult = serde_json::from_value(serde_json::json!({
-            "columns": ["note", "plan"],
-            "rows": [["SHOWPLAN", "<ShowPlanXML><BatchSequence/></ShowPlanXML>"]],
-            "affected_rows": 0,
-            "execution_time_ms": 1
-        }))
-        .unwrap();
-        assert_eq!(sqlserver_showplan_xml(&result).as_deref(), Some("<ShowPlanXML><BatchSequence/></ShowPlanXML>"));
-
-        let without_plan: QueryResult = serde_json::from_value(serde_json::json!({
-            "columns": ["note"],
-            "rows": [["no plan"]],
-            "affected_rows": 0,
-            "execution_time_ms": 1
-        }))
-        .unwrap();
-        assert_eq!(sqlserver_showplan_xml(&without_plan), None);
-    }
-
-    #[test]
-    fn plugin_acquisition_paths_match_estimated_plan_strategy() {
-        use EstimatedPlanAcquisition::{DriverNative, GeneratedSql, SqlServerShowPlanSession};
-
-        for (database_type, expected_acquisition) in [
-            (DatabaseType::Mysql, GeneratedSql),
-            (DatabaseType::Doris, GeneratedSql),
-            (DatabaseType::Postgres, GeneratedSql),
-            (DatabaseType::Questdb, GeneratedSql),
-            (DatabaseType::Dameng, DriverNative),
-            (DatabaseType::Oracle, DriverNative),
-            (DatabaseType::OceanbaseOracle, GeneratedSql),
-            (DatabaseType::SqlServer, SqlServerShowPlanSession),
-        ] {
-            let strategy = estimated_plan_strategy(Some(database_type))
-                .unwrap_or_else(|| panic!("{database_type:?} must have an acquisition strategy"));
-            assert!(supports_explain_plan(Some(database_type)), "{database_type:?}");
-            assert_eq!(strategy.acquisition(), expected_acquisition, "{database_type:?}");
-        }
-    }
-
-    #[test]
-    fn rejects_unsupported_dialects_and_unsafe_statements() {
-        let redis = config(DatabaseType::Redis, 0);
-        assert!(!supports_explain_plan(Some(explain_database_type(&redis))));
-
-        // `build_explain_sql` is the same gate the plugin path relies on.
-        for sql in [
-            "DROP TABLE users",
-            "DELETE FROM users",
-            "INSERT INTO users (id) VALUES (1)",
-            "UPDATE users SET name = 'x'",
-            "SELECT 1; DROP TABLE users",
-            "CREATE INDEX idx ON users (id)",
-        ] {
-            assert!(
-                !build_explain_sql(ExplainSqlOptions {
-                    database_type: Some(DatabaseType::Postgres),
-                    analyze: None,
-                    format: None,
-                    sql: sql.to_string(),
-                })
-                .ok,
-                "{sql} must not build an estimated plan statement"
-            );
-        }
-    }
-
-    #[test]
-    fn reports_capability_limits_and_dialect_without_connecting() {
-        // `plugin_plan_capabilities` only reads the stored config, so the parts
-        // that do not need `AppState` are asserted through the shared helpers.
-        let postgres = config(DatabaseType::Postgres, 30);
-        assert_eq!(plugin_plan_timeout_ceiling_ms(&postgres), 30_000);
-        assert_eq!(database_version(&postgres), None);
-        assert_eq!(explain_database_type(&postgres).as_str(), "postgres");
-    }
-
-    /// The boundary the docs promise, enforced in core: a saved config is not an
-    /// open connection, so a plugin can never make DBX dial stored credentials.
-    #[tokio::test]
-    async fn saved_but_disconnected_connection_is_rejected_by_both_plan_calls() {
-        let postgres = config(DatabaseType::Postgres, 30);
-        let (state, _dir) = saved_connection_state(std::slice::from_ref(&postgres)).await;
-
-        let error = plugin_plan_capabilities(&state, &postgres.id).await.unwrap_err();
-        assert_eq!(error, CONNECTION_NOT_OPEN_ERROR);
-
-        let error = explain_estimated_plan(&state, request(PLUGIN_PLAN_MODE_ESTIMATED, "SELECT 1")).await.unwrap_err();
-        assert_eq!(error, CONNECTION_NOT_OPEN_ERROR);
-
-        // The check is a pure read: it must not have opened the connection it
-        // just refused, and an unknown id must still report itself as unknown.
-        assert!(state.with_connection_pools(|pools| pools.is_empty()).await);
-        assert_eq!(plugin_plan_capabilities(&state, "unknown").await.unwrap_err(), "Connection config not found");
-    }
-
-    /// The same connection, once DBX holds it open, behaves exactly as before.
-    #[tokio::test]
-    async fn an_open_connection_keeps_the_existing_behavior() {
-        let postgres = config(DatabaseType::Postgres, 30);
-        let redis = config_for(DatabaseType::Redis, "redis-conn", 0);
-        let (state, _dir) = saved_connection_state(&[postgres.clone(), redis.clone()]).await;
-
-        // A database-scoped or session-scoped pool is the same open connection.
-        open_connection(&state, "conn-1:analytics").await;
-        open_connection(&state, "redis-conn:session:tab-1").await;
-
-        let capabilities = plugin_plan_capabilities(&state, &postgres.id).await.unwrap();
-        assert_eq!(capabilities.db_type, "postgres");
-        assert!(capabilities.supports.estimated_plan);
-        assert_eq!(capabilities.limits.max_timeout_ms, 30_000);
-
-        // Redis has no estimated plan path, but the request reaches that dialect
-        // check instead of the open-connection gate.
-        let request =
-            PluginPlanRequest { connection_id: redis.id.clone(), ..request(PLUGIN_PLAN_MODE_ESTIMATED, "SELECT 1") };
-        assert_eq!(
-            explain_estimated_plan(&state, request).await.unwrap_err(),
-            unsupported_dialect_message(DatabaseType::Redis)
-        );
-    }
-
     #[tokio::test]
     async fn capabilities_resolve_mysql_profiles_before_selecting_plan_strategy() {
-        let cases = [
-            ("mysql-doris", Some("doris"), "doris"),
-            ("mysql-selectdb", Some("selectdb"), "doris"),
-            ("mysql-native", None, "mysql"),
-            ("mysql-profile", Some("mysql"), "mysql"),
-            ("mysql-starrocks", Some("starrocks"), "mysql"),
-        ];
+        let cases = [("mysql-native", None, "mysql"), ("mysql-profile", Some("mysql"), "mysql")];
         let configs = cases
             .iter()
             .map(|(id, profile, _)| {

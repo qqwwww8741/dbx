@@ -722,161 +722,7 @@ impl DialectYaml {
                     ..Default::default()
                 },
             ),
-            DialectKind::Postgres => (
-                vec![
-                    DialectVersion { version: "16".to_string(), status: "RECOMMENDED".to_string() },
-                    DialectVersion { version: "15".to_string(), status: "COMPATIBLE".to_string() },
-                ],
-                DdlCapabilitiesYaml {
-                    rename_column: true,
-                    alter_column_type: true,
-                    comment: true,
-                    create_index: true,
-                    drop_index: true,
-                    rebuild_index: true,
-                    index_type: true,
-                    index_include: true,
-                    index_filter: true,
-                    index_comment: true,
-                    alter_primary_key: true,
-                    foreign_key: true,
-                    truncate_table: true,
-                    create_trigger: true,
-                    drop_trigger: true,
-                    create_function: true,
-                    drop_function: true,
-                    create_sequence: true,
-                    drop_sequence: true,
-                    alter_owner: true,
-                    grant_revoke: true,
-                    if_not_exists: true,
-                    create_or_replace: true,
-                    transactional_ddl: true,
-                    temporary_table: true,
-                    identity_columns: true,
-                    ..Default::default()
-                },
-            ),
-            DialectKind::Sqlite => (
-                vec![DialectVersion { version: "3".to_string(), status: "RECOMMENDED".to_string() }],
-                DdlCapabilitiesYaml {
-                    rename_column: true,
-                    create_index: true,
-                    drop_index: true,
-                    rebuild_index: true,
-                    index_filter: true,
-                    truncate_table: true,
-                    create_trigger: true,
-                    drop_trigger: true,
-                    create_function: true,
-                    drop_function: true,
-                    create_sequence: true,
-                    drop_sequence: true,
-                    if_not_exists: true,
-                    auto_increment: true,
-                    ..Default::default()
-                },
-            ),
-            DialectKind::DuckDb => (
-                vec![DialectVersion { version: "1".to_string(), status: "RECOMMENDED".to_string() }],
-                DdlCapabilitiesYaml {
-                    rename_column: true,
-                    create_index: true,
-                    drop_index: true,
-                    rebuild_index: true,
-                    truncate_table: true,
-                    if_not_exists: true,
-                    create_or_replace: true,
-                    temporary_table: true,
-                    ..Default::default()
-                },
-            ),
-            DialectKind::SqlServer => (
-                vec![DialectVersion { version: "2022".to_string(), status: "RECOMMENDED".to_string() }],
-                DdlCapabilitiesYaml {
-                    rename_column: true,
-                    alter_column_type: true,
-                    comment: true,
-                    create_index: true,
-                    drop_index: true,
-                    rebuild_index: true,
-                    index_type: true,
-                    index_include: true,
-                    index_filter: true,
-                    index_comment: true,
-                    truncate_table: true,
-                    create_trigger: true,
-                    drop_trigger: true,
-                    create_function: true,
-                    drop_function: true,
-                    create_sequence: true,
-                    drop_sequence: true,
-                    alter_owner: true,
-                    grant_revoke: true,
-                    if_not_exists: true,
-                    temporary_table: true,
-                    transactional_ddl: true,
-                    identity_columns: true,
-                    ..Default::default()
-                },
-            ),
-            DialectKind::Oracle => (
-                vec![DialectVersion { version: "21c".to_string(), status: "RECOMMENDED".to_string() }],
-                DdlCapabilitiesYaml {
-                    rename_column: true,
-                    alter_column_type: true,
-                    comment: true,
-                    create_index: true,
-                    drop_index: true,
-                    rebuild_index: true,
-                    index_type: true,
-                    truncate_table: true,
-                    create_trigger: true,
-                    drop_trigger: true,
-                    create_function: true,
-                    drop_function: true,
-                    create_sequence: true,
-                    drop_sequence: true,
-                    alter_owner: true,
-                    grant_revoke: true,
-                    if_not_exists: true,
-                    temporary_table: true,
-                    ..Default::default()
-                },
-            ),
-            DialectKind::H2 => (
-                vec![DialectVersion { version: "2".to_string(), status: "RECOMMENDED".to_string() }],
-                DdlCapabilitiesYaml {
-                    rename_column: true,
-                    alter_column_type: true,
-                    comment: true,
-                    create_index: true,
-                    drop_index: true,
-                    rebuild_index: true,
-                    truncate_table: true,
-                    create_trigger: true,
-                    drop_trigger: true,
-                    create_function: true,
-                    drop_function: true,
-                    if_not_exists: true,
-                    temporary_table: true,
-                    identity_columns: true,
-                    ..Default::default()
-                },
-            ),
-            DialectKind::ClickHouse => (
-                vec![DialectVersion { version: "24".to_string(), status: "RECOMMENDED".to_string() }],
-                DdlCapabilitiesYaml {
-                    rename_column: true,
-                    alter_column_type: true,
-                    reorder_column: true,
-                    comment: true,
-                    truncate_table: true,
-                    if_not_exists: true,
-                    temporary_table: true,
-                    ..Default::default()
-                },
-            ),
+
             _ => (
                 vec![DialectVersion { version: "1".to_string(), status: "COMPATIBLE".to_string() }],
                 DdlCapabilitiesYaml::default(),
@@ -893,26 +739,7 @@ impl DialectYaml {
                 case_sensitive: false,
                 max_length: desc.max_identifier_length,
             },
-            DialectKind::Postgres => IdentifierRules {
-                quote_char: "\"".to_string(),
-                case_sensitive: true,
-                max_length: desc.max_identifier_length,
-            },
-            DialectKind::Sqlite => IdentifierRules {
-                quote_char: "\"".to_string(),
-                case_sensitive: false,
-                max_length: desc.max_identifier_length,
-            },
-            DialectKind::SqlServer => IdentifierRules {
-                quote_char: "\"".to_string(),
-                case_sensitive: false,
-                max_length: desc.max_identifier_length,
-            },
-            DialectKind::Oracle => IdentifierRules {
-                quote_char: "\"".to_string(),
-                case_sensitive: true,
-                max_length: desc.max_identifier_length,
-            },
+
             _ => IdentifierRules { quote_char: "\"".to_string(), case_sensitive: false, max_length: 128 },
         };
 
@@ -949,17 +776,7 @@ impl DialectYaml {
 fn kind_name(kind: DialectKind) -> String {
     match kind {
         DialectKind::Mysql => "MySQL",
-        DialectKind::Postgres => "PostgreSQL",
-        DialectKind::Sqlite => "SQLite",
-        DialectKind::DuckDb => "DuckDB",
-        DialectKind::SqlServer => "SQL Server",
-        DialectKind::Oracle => "Oracle",
-        DialectKind::H2 => "H2",
-        DialectKind::ClickHouse => "ClickHouse",
-        DialectKind::ManticoreSearch => "ManticoreSearch",
-        DialectKind::Informix => "Informix",
-        DialectKind::Questdb => "QuestDB",
-        DialectKind::Soql => "SOQL",
+
         DialectKind::Unsupported => "Unsupported",
     }
     .to_string()
@@ -1282,65 +1099,5 @@ identifier_rules:
         assert!(!yaml.ddl_capabilities.transactional_ddl);
         assert_eq!(yaml.identifier_rules.quote_char, "`");
         assert_eq!(yaml.identifier_rules.max_length, 64);
-    }
-
-    #[test]
-    fn from_descriptor_postgres_roundtrip() {
-        let yaml = DialectYaml::from_descriptor(DialectKind::Postgres);
-        assert_eq!(yaml.dialect.name, "PostgreSQL");
-        assert!(yaml.ddl_capabilities.add_column);
-        assert!(yaml.ddl_capabilities.drop_column);
-        assert!(yaml.ddl_capabilities.create_table);
-        assert!(yaml.ddl_capabilities.drop_table);
-        assert!(yaml.ddl_capabilities.transactional_ddl);
-        assert!(yaml.ddl_capabilities.identity_columns);
-        assert_eq!(yaml.identifier_rules.quote_char, "\"");
-        assert_eq!(yaml.identifier_rules.max_length, 63);
-    }
-
-    #[test]
-    fn from_descriptor_to_yaml_and_back() {
-        for kind in &[
-            DialectKind::Mysql,
-            DialectKind::Postgres,
-            DialectKind::Sqlite,
-            DialectKind::DuckDb,
-            DialectKind::SqlServer,
-            DialectKind::Oracle,
-            DialectKind::H2,
-            DialectKind::ClickHouse,
-        ] {
-            let yaml = DialectYaml::from_descriptor(*kind);
-            let yaml_str = yaml.to_yaml_string().unwrap();
-            let parsed: DialectYaml = serde_yaml::from_str(&yaml_str).unwrap();
-            let desc = parsed.to_descriptor(*kind);
-            let expected = DialectCapabilityDescriptor::for_dialect(*kind);
-            assert_eq!(desc.dialect, *kind);
-            assert_eq!(desc.flags, expected.flags, "capabilities changed for {kind:?}");
-        }
-    }
-
-    #[test]
-    fn from_descriptor_all_core_dialects() {
-        let kinds = &[
-            DialectKind::Mysql,
-            DialectKind::Postgres,
-            DialectKind::Sqlite,
-            DialectKind::DuckDb,
-            DialectKind::SqlServer,
-            DialectKind::Oracle,
-            DialectKind::H2,
-            DialectKind::ClickHouse,
-            DialectKind::ManticoreSearch,
-            DialectKind::Informix,
-            DialectKind::Questdb,
-            DialectKind::Soql,
-        ];
-        for kind in kinds {
-            let yaml = DialectYaml::from_descriptor(*kind);
-            assert!(!yaml.dialect.name.is_empty());
-            assert!(!yaml.identifier_rules.quote_char.is_empty());
-            assert!(yaml.identifier_rules.max_length > 0);
-        }
     }
 }

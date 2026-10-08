@@ -86,7 +86,7 @@ import { useTabScroll } from "@/composables/useTabScroll";
 import { useToast } from "@/composables/useToast";
 import { hexToRgba } from "@/lib/common/color";
 import { copyToClipboard } from "@/lib/common/clipboard";
-import { redisDatabaseLabel } from "@/lib/redis/redisDatabaseAlias";
+
 import { parseTabDragPayload, serializeTabDragPayload } from "@/lib/tabs/tabDrag";
 import { createCloseAllTabMenuItem, createCloseLeftTabMenuItem, createCloseOtherTabMenuItem, createCloseRightTabMenuItem, createCloseTabMenuItem, createLocateTabMenuItem, createPinTabMenuItem, createRenameDuplicateTabItems } from "@/lib/tabs/tabMenu";
 import { tabConnectionColor, dirtyTabTitleStyle, tabColorStyle as sharedTabColorStyle, tabDatabaseIconType, tabDisplayTitle, tabDisplayTitles, tabIconClass, tabTooltipLines } from "@/lib/tabs/tabPresentation";
@@ -419,9 +419,7 @@ function updateTabMaxWidth(value: number) {
 
 function databaseTabGroupKey(tab: QueryTab) {
   const database = tab.database || "";
-  if (connectionStore.getConfig(tab.connectionId)?.db_type === "redis") {
-    return JSON.stringify([tab.connectionId, tab.catalog || "", "redis"]);
-  }
+  {}
   // A connection-level tab has no database scope, so its catalog cannot split the group.
   return JSON.stringify([tab.connectionId, database ? tab.catalog || "" : "", database]);
 }
@@ -461,14 +459,14 @@ function tabConnectionTargetLabel(tab: QueryTab) {
 }
 
 function databaseTabGroupBaseLabel(tab: QueryTab) {
-  if (connectionStore.getConfig(tab.connectionId)?.db_type === "redis") return tabConnectionLabel(tab);
+  {}
   if (!tab.database) return tabConnectionLabel(tab);
   return [tab.database, ...(tab.catalog ? [tab.catalog] : [])].join(" · ");
 }
 
 function hierarchyDatabaseLabel(tab: QueryTab) {
-  const connection = connectionStore.getConfig(tab.connectionId);
-  if (connection?.db_type === "redis" && tab.database !== "") return redisDatabaseLabel(tab.database, connection.redis_database_aliases);
+  connectionStore.getConfig(tab.connectionId);
+  {}
   return tab.database ? databaseTabGroupBaseLabel(tab) : tab.catalog || tabConnectionLabel(tab);
 }
 
@@ -1102,7 +1100,7 @@ function closeTabTooltip(tabId: string) {
 }
 
 function isConnectionlessPluginTab(tab: QueryTab): boolean {
-  return (tab.mode === "plugin-workbench" || tab.mode === "plugin-filesystem") && !tab.connectionId;
+  return tab.mode === "plugin-filesystem" && !tab.connectionId;
 }
 
 /**

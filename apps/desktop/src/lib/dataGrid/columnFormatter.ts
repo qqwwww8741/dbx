@@ -417,10 +417,10 @@ export function parseIoTDBTimestampEditorValue(value: string, databaseType: stri
   }
 }
 
-export function iotdbTimestampPrecision(databaseType: string | undefined, columnType: string | null | undefined): IoTDBTimestampPrecision | undefined {
-  if (databaseType !== "iotdb") return undefined;
-  const match = columnType?.trim().match(/^TIMESTAMP\((ms|us|ns)\)$/i);
-  return match?.[1]?.toLowerCase() as IoTDBTimestampPrecision | undefined;
+export function iotdbTimestampPrecision(_databaseType: string | undefined, _columnType: string | null | undefined): IoTDBTimestampPrecision | undefined {
+  {
+    return undefined;
+  }
 }
 
 export function iotdbTimestampFractionDigits(precision: IoTDBTimestampPrecision): number {

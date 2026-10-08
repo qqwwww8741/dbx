@@ -425,7 +425,7 @@ export function toMongoIndexRow(source: MongoIndexSpecSource): MongoIndexRow {
     name: source.name,
     keys: mongoIndexKeyDescription(source.keys ?? []),
     isUnique: !!source.is_unique,
-    isProtected: isProtectedMongoIndex({ name: source.name, is_primary: source.is_primary }),
+    isProtected: false,
     isSparse: !!source.is_sparse,
     expireAfterSeconds: source.expire_after_seconds ?? undefined,
     partialFilterExpression: source.partial_filter_expression?.trim() || undefined,

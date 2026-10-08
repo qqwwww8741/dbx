@@ -3,7 +3,7 @@ import { createSidebarLabelMatcher, matchSidebarLabel, type SidebarLabelMatcher,
 import { buildTableTreeNodes } from "@/lib/table/tableTree";
 import { stripTableVGroupsFromChildren } from "@/lib/table/tableVGroup";
 
-const preserveMatchedSubtreeTypes = new Set(["connection", "database", "schema", "table", "view", "mongo-db", "mongo-collection"]);
+const preserveMatchedSubtreeTypes = new Set(["connection", "database", "schema", "table", "view"]);
 // Synthetic connection utility entries (the isConnectionUtilityNode types in
 // connectionStore) are admin/navigation shortcuts, not schema objects. Their
 // labels are i18n keys that can never match a text query, so they never
@@ -11,7 +11,7 @@ const preserveMatchedSubtreeTypes = new Set(["connection", "database", "schema",
 // groups whose children ARE real objects, so their children stay searchable
 // and the group only survives through a child hit. saved-sql-root is exempt:
 // its saved queries are real searchable files rather than a shortcut.
-const hiddenSearchNodeTypes = new Set<TreeNodeType>(["user-admin", "dameng-users", "dameng-roles", "dameng-job-admin", "group-tablespaces", "oracle-db-links"]);
+const hiddenSearchNodeTypes = new Set<TreeNodeType>(["user-admin"]);
 
 function bestMatch(matchLabel: SidebarLabelMatcher, label: string, comment?: string | null, aliases?: readonly string[]) {
   let best = matchLabel(label);
@@ -80,7 +80,7 @@ export function reuseLiveSidebarTreeNodes(indexedNodes: TreeNode[], liveNodes: r
   return indexedNodes.map((node) => liveNodesById.get(node.id) ?? node);
 }
 
-export const localTableSearchParentTypes = new Set<TreeNodeType>(["database", "schema", "linked-server-schema", "group-tables"]);
+export const localTableSearchParentTypes = new Set<TreeNodeType>(["database", "schema", "group-tables"]);
 const localTableSearchChildTypes = new Set<TreeNodeType>(["table", "view", "materialized_view"]);
 
 export function filterLocallySearchedTables(nodes: TreeNode[], options: { enabled: boolean; queries: Readonly<Record<string, string>>; indexedResults: Readonly<Record<string, TableInfo[] | null>> }): TreeNode[] {

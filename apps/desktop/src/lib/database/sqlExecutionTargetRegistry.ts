@@ -107,27 +107,6 @@ const SQL_EXECUTION_TARGET_REGISTRY: Partial<Record<DatabaseType, SqlExecutionTa
   // text itself, while the shared executeQuery boundary does not carry a
   // namespace context. Keep them connection-scoped until a driver provider can
   // safely apply a selected index/collection/database to the actual request.
-  elasticsearch: { scope: "connection" },
-  easysearch: { scope: "connection" },
-  meilisearch: { scope: "connection" },
-  solr: { scope: "connection" },
-  couchdb: { scope: "connection" },
-  qdrant: { scope: "connection" },
-  milvus: { scope: "connection" },
-  weaviate: { scope: "connection" },
-  chromadb: { scope: "connection" },
-  etcd: { scope: "connection" },
-  zookeeper: { scope: "connection" },
-  salesforce: { scope: "connection" },
-  doris: { supportsCatalog: true },
-  starrocks: { supportsCatalog: true },
-  "cloudflare-d1": { defaultDatabase: () => "main", allowDefaultWhenDatabaseListEmpty: true },
-  sqlite: { defaultDatabase: (connection) => connection.database?.trim() || "main", allowDefaultWhenDatabaseListEmpty: true },
-  postgres: {
-    defaultDatabase: (connection) => connection.database?.trim() || (connection.driver_profile === "cockroachdb" ? "defaultdb" : "postgres"),
-    allowDefaultWhenDatabaseListEmpty: true,
-  },
-  victoriametrics: { defaultDatabase: (connection) => connection.database?.trim() || "metrics", allowDefaultWhenDatabaseListEmpty: true },
 };
 
 export function registeredSqlExecutionTargetScope(dbType?: DatabaseType): RegisteredSqlExecutionTargetScope | undefined {

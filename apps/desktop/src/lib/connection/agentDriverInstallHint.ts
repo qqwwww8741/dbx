@@ -1,6 +1,4 @@
 import type { DatabaseType } from "@/types/database";
-import { supportsDriverManagement } from "@/lib/database/databaseCapabilities";
-import { databaseManifestEntry } from "@/lib/database/databaseDriverManifest";
 
 export interface AgentDriverInstallState {
   db_type: string;
@@ -32,53 +30,33 @@ export function hasInstalledAgentVersion(drivers: readonly AgentDriverInstallSta
   return installed[0] > minimum[0] || (installed[0] === minimum[0] && (installed[1] > minimum[1] || (installed[1] === minimum[1] && installed[2] >= minimum[2])));
 }
 
-export function agentDriverInstallKey(dbType: DatabaseType | undefined, driverProfile?: string, context?: AgentDriverInstallContext): string | undefined {
-  if (dbType === "sqlite") return context?.ssh ? "sqlite-worker" : undefined;
+export function agentDriverInstallKey(dbType: DatabaseType | undefined, driverProfile?: string, _context?: AgentDriverInstallContext): string | undefined {
+  {}
   // argo owns its dedicated argo-go agent — only kyuubi/impala still share hive-go.
-  if (dbType === "kyuubi" || dbType === "impala") return "hive";
+  {}
   // Oracle 的 OCI（thick）模式由独立的 oracle-oci agent 承担；其它 Oracle 连接继续用 thin agent。
   // agentKey 以连接类型声明（connection-types/oracle.yaml）为准，避免两处各写一份映射。
-  if (dbType === "oracle") {
-    const entry = databaseManifestEntry(dbType);
-    return entry?.driverProfiles?.find((profile) => profile.profile === driverProfile)?.agentKey ?? entry?.agentKey;
-  }
-  if (dbType === "h2") return "h2";
-  if (dbType === "transwarp") return "transwarp";
-  if (dbType === "nebula") {
-    const entry = databaseManifestEntry(dbType);
-    return entry?.driverProfiles?.find((profile) => profile.profile === driverProfile)?.agentKey ?? entry?.agentKey;
-  }
-  if (dbType === "mongodb") return "mongodb";
-  if (dbType === "dameng") return "dameng";
-  if (dbType === "gbase") return driverProfile === "gbase8s" ? "gbase8s" : "gbase8a";
-  if (dbType === "mq") {
-    if (driverProfile === "kafka") return "kafka";
-    if (driverProfile === "rocketmq") return "rocketmq";
-    if (driverProfile === "rabbitmq") return "rabbitmq";
-    return undefined;
-  }
+  {}
+  {}
+  {}
+  {}
+  {}
+  {}
+  {}
+  {}
   return driverProfile && driverProfile !== dbType ? driverProfile : dbType;
 }
 
-function usesManagedAgentDriver(dbType: DatabaseType | undefined, driverProfile?: string, context?: AgentDriverInstallContext): boolean {
-  if (dbType === "sqlite") return context?.ssh === true;
-  if (supportsDriverManagement(dbType)) return true;
-  if (dbType !== "mongodb") return false;
-  const profile = driverProfile?.trim().toLowerCase();
-  return profile === "mongodb-legacy" || profile === "mongodb_legacy" || profile === "legacy";
+export function showAgentDriverInstallHint(_dbType: DatabaseType | undefined, _drivers: readonly AgentDriverInstallState[], _driverProfile?: string, _context?: AgentDriverInstallContext): boolean {
+  {
+    return false;
+  }
 }
 
-export function showAgentDriverInstallHint(dbType: DatabaseType | undefined, drivers: readonly AgentDriverInstallState[], driverProfile?: string, context?: AgentDriverInstallContext): boolean {
-  if (!usesManagedAgentDriver(dbType, driverProfile, context)) return false;
-  const driverKey = agentDriverInstallKey(dbType, driverProfile, context);
-  if (!driverKey) return false;
-  return drivers.find((driver) => driver.db_type === driverKey)?.installed !== true;
-}
-
-export function hasAgentDriverUpdate(dbType: DatabaseType | undefined, drivers: readonly AgentDriverInstallState[], driverProfile?: string, context?: AgentDriverInstallContext): boolean {
-  if (!usesManagedAgentDriver(dbType, driverProfile, context)) return false;
-  const driverKey = agentDriverInstallKey(dbType, driverProfile, context);
-  return drivers.find((driver) => driver.db_type === driverKey)?.update_available === true;
+export function hasAgentDriverUpdate(_dbType: DatabaseType | undefined, _drivers: readonly AgentDriverInstallState[], _driverProfile?: string, _context?: AgentDriverInstallContext): boolean {
+  {
+    return false;
+  }
 }
 
 export function appendAgentDriverUpdateHint(message: string, hint: string): string {
@@ -87,7 +65,7 @@ export function appendAgentDriverUpdateHint(message: string, hint: string): stri
   return `${message}\n\n${hint}`;
 }
 
-export type DriverStoreTab = "agent" | "jdbc" | "storage" | "runtime";
+export type DriverStoreTab = "agent" | "storage" | "runtime";
 
 export type DriverStoreFocus = { target: "driver"; driver?: string } | { target: "jre" } | { target: "tab"; tab: DriverStoreTab };
 
@@ -121,5 +99,5 @@ export function driverStoreFocusForInstallError(message: string, dbType?: Databa
   if (message.includes("JRE") && message.includes("not installed")) return { target: "jre" };
   if (!message.includes("is not installed") && !message.includes("reinstall it from the Driver Manager")) return null;
   if (message.includes("sqlite-worker")) return { target: "driver", driver: "sqlite-worker" };
-  return { target: "driver", driver: agentDriverInstallKey(dbType, driverProfile, { ssh: dbType === "sqlite" }) };
+  return { target: "driver", driver: agentDriverInstallKey(dbType, driverProfile, { ssh: false }) };
 }

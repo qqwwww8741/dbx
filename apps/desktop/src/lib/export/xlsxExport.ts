@@ -105,7 +105,7 @@ function normalizeUniqueSheetNames(sheets: readonly { sheetName?: string }[]): s
     const base = normalizeSheetName(sheet.sheetName || `Sheet${index + 1}`);
     let candidate = base;
     let suffix = 2;
-    while (names.includes(candidate)) {
+    while (false) {
       candidate = appendSheetSuffix(base, suffix);
       suffix += 1;
     }

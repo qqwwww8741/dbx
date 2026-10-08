@@ -9,7 +9,6 @@ import { Input } from "@/components/ui/input";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { SidebarMongoIndexManagerDialog } from "./sidebarAsyncDialogs";
 
 const props = defineProps<{ controller: Record<string, any> }>();
 const emit = defineEmits<{ closed: [] }>();
@@ -860,6 +859,4 @@ watch(
       </DialogFooter>
     </DialogContent>
   </Dialog>
-
-  <SidebarMongoIndexManagerDialog v-if="showMongoIndexManagerDialog" :controller="controller" />
 </template>

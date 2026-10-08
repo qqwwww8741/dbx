@@ -7,7 +7,6 @@ publish = false
 
 [features]
 default = []
-mq-admin = ["dep:uuid"]
 openapi = ["dep:utoipa"]
 
 [dependencies]

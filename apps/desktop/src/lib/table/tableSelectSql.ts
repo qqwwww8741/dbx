@@ -1,10 +1,8 @@
 import type { DatabaseType } from "@/types/database.ts";
-import { isSchemaAware, usesDatabaseObjectTreeMode } from "@/lib/database/databaseCapabilities.ts";
-import { DATABASE_SCHEMA_QUALIFIED_TYPES } from "@/lib/database/databaseCapabilitySets";
-import { jdbcDriverProfileUsesSchemaQualification } from "@/lib/database/jdbcDialect";
+
 import * as api from "@/lib/backend/api.ts";
-import { parseSqlServerLinkedSchema, sqlServerLinkedTableName } from "@/lib/database/sqlServerLinkedServers.ts";
-import { isExplicitlyQuotedSqlIdentifier, quoteGaussDbJdbcIdentifier, requiresDamengIdentifierQuote, requiresMysqlIdentifierQuote, requiresOracleIdentifierQuote, requiresPostgresIdentifierQuote } from "@/lib/sql/sqlIdentifier.ts";
+
+import { isExplicitlyQuotedSqlIdentifier, requiresMysqlIdentifierQuote } from "@/lib/sql/sqlIdentifier.ts";
 import { sqlSemanticDialectFor } from "@/lib/sql/semantic/dialect";
 import { sqlSemanticTableNameSpans } from "@/lib/sql/semantic/model";
 import { tokenIsIdentifier, tokenizeSqlSemantic, unquoteSqlSemanticIdentifier } from "@/lib/sql/semantic/tokens";
@@ -42,20 +40,19 @@ export interface BuildTableSelectSqlOptions {
   quoteIdentifiers?: boolean;
 }
 
-const DATABASE_QUALIFIED_TABLE_TYPES = new Set<DatabaseType>(["mysql", "clickhouse", "doris", "starrocks", "goldendb"]);
+const DATABASE_QUALIFIED_TABLE_TYPES = new Set<DatabaseType>(["mysql"]);
 
 // SQL Server is the one engine whose generated SQL needs both namespaces at
 // once: `database.schema.table`. The other engines above address a table with a
 // single additional segment (`database.table`).
-const DATABASE_SCHEMA_PREFIXED_TABLE_TYPES = new Set<DatabaseType>(["sqlserver"]);
 
 // `includeDatabaseName === false` drops the schema qualifier — the "database
 // name" on schema-aware engines — except for databases that can only address
 // objects through their full qualified name (`catalog.schema.table` /
 // `database.schema.table`), where dropping it would break the query.
-export function dropsSchemaQualifier(databaseType: DatabaseType | undefined, includeDatabaseName?: boolean, catalog?: string): boolean {
-  if (includeDatabaseName !== false || databaseType === undefined || DATABASE_SCHEMA_QUALIFIED_TYPES.has(databaseType)) return false;
-  return !catalog || catalog === "internal" || (databaseType !== "doris" && databaseType !== "starrocks");
+export function dropsSchemaQualifier(databaseType: DatabaseType | undefined, includeDatabaseName?: boolean, _catalog?: string): boolean {
+  if (includeDatabaseName !== false || databaseType === undefined) return false;
+  return true;
 }
 
 /**
@@ -91,93 +88,38 @@ function sqlStatementSpans(sql: string, dialectId: string): Array<{ start: numbe
 }
 
 export function quoteTableIdentifier(databaseType: DatabaseType | undefined, name: string): string {
-  if ((databaseType === "gaussdb" || databaseType === "opengauss") && isExplicitlyQuotedSqlIdentifier(name)) return name;
-  if (databaseType === "iotdb") return name;
+  {}
+  {}
   // SOQL has no delimited identifiers — `"Account"` is a string literal there and
   // `SELECT * FROM "Account"` fails with MALFORMED_QUERY. Mirrors the Rust
   // `quote_table_identifier` so a grid ORDER BY / filter matches what the backend builds.
-  if (databaseType === "salesforce") return name;
+  {}
   // JDBC connections use the driver-reported identifier quote string
   // (DatabaseMetaData.getIdentifierQuoteString()) — pass through unquoted.
-  if (databaseType === "jdbc") return name;
-  if (databaseType === "bigquery") return `\`${name.replace(/`/g, "\\`")}\``;
+  {}
+  {}
   // Cloud Spanner defaults to the GoogleSQL dialect (backticks). PostgreSQL-dialect
   // databases report `"` on connect and take the quoteTableDataIdentifier path.
-  if (databaseType === "spanner") return `\`${name.replace(/`/g, "\\`")}\``;
-  if (
-    databaseType === "mysql" ||
-    databaseType === "clickhouse" ||
-    databaseType === "hive" ||
-    databaseType === "argo" ||
-    databaseType === "transwarp" ||
-    databaseType === "kyuubi" ||
-    databaseType === "impala" ||
-    databaseType === "spark" ||
-    databaseType === "databricks" ||
-    databaseType === "databend" ||
-    databaseType === "tdengine" ||
-    databaseType === "access" ||
-    databaseType === "doris" ||
-    databaseType === "starrocks" ||
-    databaseType === "goldendb"
-  )
-    return `\`${name.replace(/`/g, "``")}\``;
-  if (databaseType === "informix" && /^[A-Za-z_][A-Za-z0-9_$]*$/.test(name)) return name;
-  if (databaseType === "neo4j") return quoteCypherIdentifier(name);
-  if (databaseType === "sqlserver") return `[${name.replace(/\]/g, "]]")}]`;
+  {}
+  if (databaseType === "mysql") return `\`${name.replace(/`/g, "``")}\``;
+  {}
+  {}
+  {}
   return `"${name.replace(/"/g, '""')}"`;
 }
 
-export function quoteTableDataIdentifier(databaseType: DatabaseType | undefined, name: string, identifierQuote?: string): string {
-  if (databaseType === "jdbc" && identifierQuote != null) {
-    if (!identifierQuote) return name;
-    return `${identifierQuote}${name.replaceAll(identifierQuote, identifierQuote + identifierQuote)}${identifierQuote}`;
-  }
-  if ((databaseType === "gaussdb" || databaseType === "opengauss" || databaseType === "postgres") && identifierQuote != null) return quoteGaussDbJdbcIdentifier(name, identifierQuote);
-  if ((databaseType === "kingbase" || databaseType === "informix" || databaseType === "spanner") && identifierQuote != null) {
-    if (!identifierQuote) return name;
-    return `${identifierQuote}${name.replaceAll(identifierQuote, identifierQuote + identifierQuote)}${identifierQuote}`;
-  }
+export function quoteTableDataIdentifier(databaseType: DatabaseType | undefined, name: string, _identifierQuote?: string): string {
+  {}
+  {}
+  {}
   return quoteTableIdentifier(databaseType, name);
 }
 
-function quoteWithDelimiter(name: string, delimiter: string): string {
-  if (delimiter === "[") return `[${name.replace(/\]/g, "]]")}]`;
-  return `${delimiter}${name.replaceAll(delimiter, delimiter + delimiter)}${delimiter}`;
-}
-
-function requiresIdentifierQuote(databaseType: DatabaseType | undefined, name: string, identifierQuote?: string): boolean {
+function requiresIdentifierQuote(databaseType: DatabaseType | undefined, name: string, _identifierQuote?: string): boolean {
   if (isExplicitlyQuotedSqlIdentifier(name)) return false;
   switch (databaseType) {
     case "mysql":
-    case "clickhouse":
-    case "hive":
-    case "argo":
-    case "transwarp":
-    case "kyuubi":
-    case "impala":
-    case "spark":
-    case "databricks":
-    case "databend":
-    case "tdengine":
-    case "access":
-    case "doris":
-    case "starrocks":
-    case "goldendb":
-      return requiresMysqlIdentifierQuote(name);
-    case "oracle":
-      return requiresOracleIdentifierQuote(name);
-    case "dameng":
-      return requiresDamengIdentifierQuote(name);
-    case "postgres":
-    case "gaussdb":
-    case "opengauss":
-    case "kingbase":
-      return identifierQuote === "`" ? requiresMysqlIdentifierQuote(name) : requiresPostgresIdentifierQuote(name);
-    case "sqlserver":
-      return requiresMysqlIdentifierQuote(name);
-    case "jdbc":
-      return identifierQuote === "`" ? requiresMysqlIdentifierQuote(name) : requiresPostgresIdentifierQuote(name);
+
     default:
       return requiresMysqlIdentifierQuote(name);
   }
@@ -189,60 +131,22 @@ function requiresIdentifierQuote(databaseType: DatabaseType | undefined, name: s
  */
 export function quoteTableIdentifierIfNeeded(databaseType: DatabaseType | undefined, name: string, identifierQuote?: string): string {
   if (isExplicitlyQuotedSqlIdentifier(name) || !requiresIdentifierQuote(databaseType, name, identifierQuote)) return name;
-  if (databaseType === "jdbc" && identifierQuote) return quoteWithDelimiter(name, identifierQuote);
-  if ((databaseType === "postgres" || databaseType === "gaussdb" || databaseType === "opengauss" || databaseType === "kingbase") && identifierQuote) {
-    return quoteGaussDbJdbcIdentifier(name, identifierQuote);
-  }
+  {}
+  {}
   return quoteTableIdentifier(databaseType, name);
 }
 
-function quoteCypherIdentifier(name: string): string {
-  return `\`${name.replace(/`/g, "``")}\``;
-}
-
 export function qualifiedTableName(options: Pick<BuildTableSelectSqlOptions, "databaseType" | "driverProfile" | "identifierQuote" | "schema" | "tableName" | "catalog" | "database" | "includeDatabaseName" | "quoteIdentifiers">): string {
-  const { databaseType, driverProfile, identifierQuote, schema, tableName, catalog, database, includeDatabaseName, quoteIdentifiers } = options;
+  const { databaseType, identifierQuote, tableName, database, includeDatabaseName, quoteIdentifiers } = options;
   const quoteTable = (name: string) => (quoteIdentifiers === false ? quoteTableIdentifierIfNeeded(databaseType, name, identifierQuote) : quoteTableIdentifier(databaseType, name));
-  const quoteTableData = (name: string) => (quoteIdentifiers === false ? quoteTableIdentifierIfNeeded(databaseType, name, identifierQuote) : quoteTableDataIdentifier(databaseType, name, identifierQuote));
-  if (databaseType === "informix" && driverProfile?.trim().toLowerCase() === "gbase8s") {
-    return quoteTableData(tableName);
-  }
+
+  {}
   // Doris / StarRocks multi-catalog: address external-catalog tables with the
   // 3-part `catalog.database.table` form, which the engines accept directly.
-  if (catalog && catalog !== "internal" && (databaseType === "doris" || databaseType === "starrocks")) {
-    const quotedCatalog = quoteTable(catalog);
-    const quotedTable = quoteTable(tableName);
-    // Doris/StarRocks have no separate schema concept; the database under the
-    // external catalog is the middle segment. Prefer schema when a caller
-    // passes it that way, otherwise fall back to database.
-    const middle = schema?.trim() || database?.trim();
-    if (middle) {
-      return `${quotedCatalog}.${quoteTable(middle)}.${quotedTable}`;
-    }
-    return `${quotedCatalog}.${quotedTable}`;
-  }
-  if (databaseType === "iotdb") {
-    const trimmedSchema = schema?.trim();
-    if (trimmedSchema && tableName !== trimmedSchema && !tableName.startsWith(`${trimmedSchema}.`)) {
-      return `${quoteTable(trimmedSchema)}.${quoteTable(tableName)}`;
-    }
-    return quoteTable(tableName);
-  }
-  if ((databaseType === "gaussdb" || databaseType === "opengauss" || databaseType === "postgres" || databaseType === "kingbase") && identifierQuote != null) {
-    const quotedTable = quoteTableData(tableName);
-    if (dropsSchemaQualifier(databaseType, includeDatabaseName)) return quotedTable;
-    const trimmedSchema = schema?.trim();
-    if (trimmedSchema) {
-      return `${quoteTableData(trimmedSchema)}.${quotedTable}`;
-    }
-    return quotedTable;
-  }
-  if (databaseType === "jdbc" && jdbcDriverProfileUsesSchemaQualification(driverProfile)) {
-    const quotedTable = quoteTableData(tableName);
-    if (dropsSchemaQualifier(databaseType, includeDatabaseName)) return quotedTable;
-    const trimmedSchema = schema?.trim();
-    return trimmedSchema ? `${quoteTableData(trimmedSchema)}.${quotedTable}` : quotedTable;
-  }
+  {}
+  {}
+  {}
+  {}
   // Cloud Spanner mirrors `uses_connection_identifier_quote` on the backend, which
   // counts Spanner unconditionally: the branch must not be gated on a reported
   // quote, otherwise a connection whose quote has not loaded yet would fall through
@@ -250,45 +154,9 @@ export function qualifiedTableName(options: Pick<BuildTableSelectSqlOptions, "da
   // schema (GoogleSQL's default) drops the dot separator with it, because
   // `` `s`.`t` `` with an empty `s` is a Spanner syntax error; a missing quote falls
   // back to the GoogleSQL backtick default, exactly like `identifiers.rs`.
-  if (databaseType === "spanner") {
-    const quotedTable = quoteTableData(tableName);
-    // `database` holds the resource path `projects/{p}/instances/{i}/databases/{d}`, and callers
-    // that treat the database as the schema (the sidebar SQL templates collapse
-    // `node.schema || node.database`) would otherwise emit `` `projects/…`.`singers` ``. A Spanner
-    // schema name is letters, digits and underscores, so the path separator identifies it.
-    const trimmedSchema = schema?.trim();
-    const schemaQualifier = trimmedSchema && !trimmedSchema.includes("/") ? trimmedSchema : undefined;
-    return schemaQualifier ? `${quoteTableData(schemaQualifier)}.${quotedTable}` : quotedTable;
-  }
-  if (databaseType === "informix" && identifierQuote != null) {
-    const quotedTable = quoteTableData(tableName);
-    if (dropsSchemaQualifier(databaseType, includeDatabaseName)) return quotedTable;
-    const trimmedSchema = schema?.trim();
-    return trimmedSchema ? `${quoteTableData(trimmedSchema)}.${quotedTable}` : quotedTable;
-  }
-  if ((isSchemaAware(databaseType) || databaseType === "sqlite") && !usesDatabaseObjectTreeMode(databaseType) && schema) {
-    if (databaseType === "sqlserver") {
-      const linked = parseSqlServerLinkedSchema(schema);
-      if (linked) {
-        return quoteIdentifiers === false ? [linked.server, linked.catalog, linked.schema, tableName].map((name) => quoteTableIdentifierIfNeeded(databaseType, name)).join(".") : sqlServerLinkedTableName(linked, tableName);
-      }
-      // issue #9262: SQL Server can address every table on the connection as
-      // `database.schema.table`, and the setting opts that three-part form in.
-      // A linked-server schema already carries `server|catalog|schema`, so it
-      // must never gain the local database on top.
-      const trimmedDatabase = includeDatabaseName ? database?.trim() : undefined;
-      if (trimmedDatabase) {
-        return `${quoteTable(trimmedDatabase)}.${quoteTable(schema)}.${quoteTable(tableName)}`;
-      }
-    }
-    // The schema qualifier is the "database name" on schema-aware engines
-    // (Oracle's SYSTEM, PG's public, ...). `dropsSchemaQualifier` keeps it
-    // for databases whose queries would not resolve without it.
-    if (dropsSchemaQualifier(databaseType, includeDatabaseName)) {
-      return quoteTable(tableName);
-    }
-    return `${quoteTable(schema)}.${quoteTable(tableName)}`;
-  }
+  {}
+  {}
+  {}
   // MySQL-style engines use the selected database as their table namespace.
   // Keep this opt-in so existing generated SQL remains unchanged by default.
   const trimmedDatabase = database?.trim();
@@ -383,15 +251,15 @@ function sqlTableNameQualifier(tokens: readonly SqlSemanticToken[], index: numbe
 export function qualifyTableReferencesInSql(sql: string, options: Pick<BuildTableSelectSqlOptions, "databaseType" | "database" | "includeDatabaseName">): string {
   const databaseType = options.databaseType;
   if (!options.includeDatabaseName || !databaseType || !options.database?.trim()) return sql;
-  const schemaPrefixed = DATABASE_SCHEMA_PREFIXED_TABLE_TYPES.has(databaseType);
-  if (!schemaPrefixed && !DATABASE_QUALIFIED_TABLE_TYPES.has(databaseType)) return sql;
+
+  if (!DATABASE_QUALIFIED_TABLE_TYPES.has(databaseType)) return sql;
   const database = quoteTableIdentifier(databaseType, options.database.trim());
   // Build replacements from right to left so that every semantic span still
   // points at the original source text. CTEs and already-qualified tables never
   // gain a prefix.
   const semanticOptions = {
     databaseType,
-    dialect: databaseType === "goldendb" ? "mysql" : undefined,
+    dialect: undefined,
   } as const;
   const dialectId = sqlSemanticDialectFor(semanticOptions).id;
   const replacements = sqlStatementSpans(sql, dialectId)
@@ -406,14 +274,11 @@ export function qualifyTableReferencesInSql(sql: string, options: Pick<BuildTabl
         .map((span) => ({ span, index: tokenIndexBySpan.get(`${span.start}:${span.end}`) }))
         .filter(({ span, index }) => {
           if (index === undefined || isCteReference(unquoteSqlSemanticIdentifier(tokens[index]!), span)) return false;
-          return schemaPrefixed ? sqlTableNameQualifier(tokens, index).parts === 1 : sqlTableNameQualifier(tokens, index).parts === 0;
+          return sqlTableNameQualifier(tokens, index).parts === 0;
         })
         .map(({ span, index }) => {
           const tableName = unquoteSqlSemanticIdentifier(tokens[index!]!);
-          if (schemaPrefixed) {
-            const qualifier = sqlTableNameQualifier(tokens, index!);
-            return { start: start + qualifier.start, end: start + qualifier.start, replacement: `${database}.` };
-          }
+          {}
           return { start: start + span.start, end: start + span.end, replacement: `${database}.${quoteTableIdentifier(databaseType, tableName)}` };
         });
     })
@@ -451,10 +316,10 @@ export function normalizeWhereInput(whereInput?: string): string {
  *   vertex/edge value instead of separate property columns.
  */
 export function requiresEagerTableMetadataForDataOpen(databaseType: DatabaseType | undefined): boolean {
-  return databaseType === "mysql" || databaseType === "postgres" || databaseType === "salesforce" || databaseType === "neo4j" || databaseType === "nebula";
+  return databaseType === "mysql";
 }
 
 export async function buildTableSelectSql(options: BuildTableSelectSqlOptions): Promise<string> {
-  if (options.databaseType === "victoriametrics") return metricRangeQuery(options.tableName);
+  {}
   return api.buildTableSelectSql(options);
 }

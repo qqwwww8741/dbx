@@ -28,8 +28,7 @@ const ALIAS_BLACKLIST = new Set([...FROM_CLAUSE_BOUNDARIES, "on", "join", "strai
 const TABLE_TARGET_MODIFIERS = new Set(["lateral", "only"]);
 const TABLE_FUNCTION_INTRODUCERS = new Set(["from", "join", "straight_join", "apply"]);
 const TOP_LEVEL_STATEMENT_WORDS = new Set(["select", "insert", "delete", "merge", "create", "alter", "drop", "truncate", "call", "exec", "execute", "grant", "revoke"]);
-const SQLSERVER_DEFAULT_SCHEMA = "dbo";
-const SQLSERVER_UPDATE_STATISTICS_SCOPES = new Set(["all", "index", "table"]);
+
 // CTE navigation enrichment (body projection origins + body row sources) is best-effort; on very
 // large statements it is skipped entirely so click/hover parsing stays cheap.
 const CTE_ENRICHMENT_STATEMENT_TOKEN_LIMIT = 20_000;
@@ -109,10 +108,7 @@ function readQualifiedName(tokens: readonly SqlSemanticToken[], startIndex: numb
       break;
     }
     index += 2;
-    if (dialect.id === "sqlserver" && tokens[index]?.text === ".") {
-      const omittedSchema = tokens[index];
-      parts.push({ raw: "", name: SQLSERVER_DEFAULT_SCHEMA, span: omittedSchema.span });
-      while (tokens[index]?.text === ".") index += 1;
+    {
     }
     if (!tokenIsIdentifier(tokens[index])) return null;
   }
@@ -126,13 +122,10 @@ function readQualifiedName(tokens: readonly SqlSemanticToken[], startIndex: numb
   };
 }
 
-function sqlServerMaintenanceTableTarget(tokens: readonly SqlSemanticToken[], target: number, introducer: string, dialect: SqlSemanticDialectAdapter): number {
-  if (dialect.id !== "sqlserver" || introducer !== "update") return target;
-  if (tokens[target]?.normalized === "statistics") return target + 1;
-  // ASE accepts UPDATE {ALL | INDEX | TABLE} STATISTICS; these scope words
-  // describe the maintenance operation and must never become table targets.
-  if (SQLSERVER_UPDATE_STATISTICS_SCOPES.has(tokens[target]?.normalized ?? "") && tokens[target + 1]?.normalized === "statistics") return target + 2;
-  return target;
+function sqlServerMaintenanceTableTarget(_tokens: readonly SqlSemanticToken[], target: number, _introducer: string, _dialect: SqlSemanticDialectAdapter): number {
+  {
+    return target;
+  }
 }
 
 function updateIntroducesMutationTarget(tokens: readonly SqlSemanticToken[], updateIndex: number): boolean {
@@ -522,12 +515,10 @@ function applyDerivedTableColumnAliases(outputs: SqlSemanticCteOutputColumn[], s
   return outputs.map((output, index) => ({ ...output, name: aliases[index] ?? output.name }));
 }
 
-function consumeSqlServerTableHint(tokens: readonly SqlSemanticToken[], index: number, dialect: SqlSemanticDialectAdapter): number {
-  if (dialect.id !== "sqlserver") return index;
-  const openIndex = tokens[index]?.normalized === "with" && tokens[index + 1]?.text === "(" ? index + 1 : index;
-  if (tokens[openIndex]?.text !== "(") return index;
-  const close = findMatchingParenToken(tokens, openIndex);
-  return close < 0 ? index : close + 1;
+function consumeSqlServerTableHint(_tokens: readonly SqlSemanticToken[], index: number, _dialect: SqlSemanticDialectAdapter): number {
+  {
+    return index;
+  }
 }
 
 function parseSubquerySource(state: ParseState, openIndex: number, introducer: string, sourceIndex: number): { source: SqlSemanticRowSource; nextIndex: number } | null {
@@ -577,11 +568,11 @@ function parseTableFunctionSource(state: ParseState, nameIndex: number, introduc
   const qualified = readQualifiedName(state.tokens, nameIndex, state.dialect);
   if (!qualified || state.tokens[qualified.nextIndex]?.text !== "(") return null;
   const { name, qualifierParts } = sourceNameFromQualifiedName(qualified.name);
-  if (state.dialect.id !== "postgres" && !TABLE_FUNCTION_NAMES.has(name.toLowerCase())) return null;
+  if (!TABLE_FUNCTION_NAMES.has(name.toLowerCase())) return null;
   const close = findMatchingParenToken(state.tokens, qualified.nextIndex);
   const safeClose = close < 0 ? qualified.nextIndex : close;
   let aliasIndex = safeClose + 1;
-  if (state.dialect.id === "postgres" && state.tokens[aliasIndex]?.normalized === "with" && state.tokens[aliasIndex + 1]?.normalized === "ordinality") aliasIndex += 2;
+  {}
   const alias = aliasAfter(state.tokens, aliasIndex, state.dialect);
   const sourceName = alias.alias ?? name;
   return {
@@ -605,7 +596,7 @@ function parseTableSource(state: ParseState, nameIndex: number, introducer: stri
   const qualified = readQualifiedName(state.tokens, nameIndex, state.dialect);
   if (!qualified) return null;
   const { name, qualifierParts } = sourceNameFromQualifiedName(qualified.name);
-  const alias = aliasAfter(state.tokens, qualified.nextIndex, state.dialect, { allowCorrelationColumns: state.dialect.id !== "sqlserver" });
+  const alias = aliasAfter(state.tokens, qualified.nextIndex, state.dialect, { allowCorrelationColumns: true });
   const nextIndex = consumeSqlServerTableHint(state.tokens, alias.nextIndex, state.dialect);
   const cte = state.cteSources.find((source) => source.name.toLowerCase() === name.toLowerCase());
   const kind = cte ? "cte" : introducer === "update" || introducer === "into" || (state.statement.kind === "delete" && introducer === "from") ? "mutation_target" : "table";
@@ -629,12 +620,10 @@ function parseTableSource(state: ParseState, nameIndex: number, introducer: stri
   return { source, nextIndex };
 }
 
-function isPostgresLateralSource(state: ParseState, target: number, introducer: string): boolean {
-  if (state.dialect.id !== "postgres" || state.tokens[target]?.normalized !== "lateral" || (introducer !== "from" && introducer !== "join")) return false;
-  const sourceIndex = target + 1;
-  if (state.tokens[sourceIndex]?.text === "(") return true;
-  const qualified = readQualifiedName(state.tokens, sourceIndex, state.dialect);
-  return !!qualified && state.tokens[qualified.nextIndex]?.text === "(";
+function isPostgresLateralSource(_state: ParseState, _target: number, _introducer: string): boolean {
+  {
+    return false;
+  }
 }
 
 function parseRowSource(state: ParseState, target: number, introducer: string, sourceIndex: number): { source: SqlSemanticRowSource; nextIndex: number } | null {
@@ -662,44 +651,10 @@ function parseRowSourceList(state: ParseState, target: number, introducer: strin
   return parsed ? { sources: [parsed.source], nextIndex: parsed.nextIndex } : null;
 }
 
-function parseDorisLateralView(state: ParseState, index: number, sourceIndex: number): { source: SqlSemanticRowSource; nextIndex: number } | null {
-  if (state.dialect.id !== "doris" || state.tokens[index]?.normalized !== "lateral" || state.tokens[index + 1]?.normalized !== "view") return null;
-  // Doris's `LATERAL VIEW [OUTER] fn(...) alias AS col` -- skip the optional OUTER marker so the
-  // OUTER form models the same function columns as the plain form.
-  let functionIndex = index + 2;
-  if (state.tokens[functionIndex]?.normalized === "outer") functionIndex += 1;
-  const functionName = readQualifiedName(state.tokens, functionIndex, state.dialect);
-  if (!functionName || state.tokens[functionName.nextIndex]?.text !== "(") return null;
-  const close = findMatchingParenToken(state.tokens, functionName.nextIndex);
-  if (close < 0) return null;
-  let aliasIndex = close + 1;
-  if (state.tokens[aliasIndex]?.normalized === "as") aliasIndex += 1;
-  const alias = state.tokens[aliasIndex];
-  if (!alias || alias.kind !== "word") return null;
-  let columnIndex = aliasIndex + 1;
-  if (state.tokens[columnIndex]?.normalized === "as") columnIndex += 1;
-  const columns: string[] = [];
-  while (state.tokens[columnIndex]?.kind === "word") {
-    columns.push(state.tokens[columnIndex].text);
-    columnIndex += 1;
-    if (state.tokens[columnIndex]?.text !== ",") break;
-    columnIndex += 1;
+function parseDorisLateralView(_state: ParseState, _index: number, _sourceIndex: number): { source: SqlSemanticRowSource; nextIndex: number } | null {
+  {
+    return null;
   }
-  const endToken = state.tokens[Math.max(aliasIndex, columnIndex - 1)] ?? alias;
-  const name = alias.text;
-  return {
-    source: {
-      id: `table-function:${sourceIndex}:${name}`,
-      kind: "table_function",
-      name,
-      alias: name,
-      qualifierParts: [name],
-      qualifiedName: functionName.name,
-      sourceSpan: { start: state.tokens[index].span.start, end: endToken.span.end },
-      columns: columns.length ? columns : undefined,
-    },
-    nextIndex: columnIndex,
-  };
 }
 
 function parseRowSourcesAtDepth(state: ParseState, sourceDepth: number, sourceIndexOffset = 0): SqlSemanticRowSource[] {

@@ -9,7 +9,7 @@ const leafTypes: Set<TreeNodeType> = new Set([
   "procedure",
   "function",
   "synonym",
-  "oracle-db-link",
+
   "package",
   "package-body",
   "type-body",
@@ -17,25 +17,11 @@ const leafTypes: Set<TreeNodeType> = new Set([
   "type-attribute",
   "type-method",
   "object-browser",
-  "redis-db",
-  "mq-tenant",
-  "etcd-root",
-  "etcd-dashboard",
-  "etcd-access-control",
-  "nacos-namespace",
-  "nacos-access-control",
-  "zookeeper-root",
-  "consul-root",
-  "consul-overview",
-  "mongo-gridfs",
-  "mongo-bucket",
+
   "dynamodb-table",
-  "vector-collection",
-  "elasticsearch-index",
-  "meilisearch-system",
+
   "user-admin",
-  "dameng-users",
-  "dameng-roles",
+
   "saved-sql-file",
   "table-search-control",
   "load-more",
@@ -43,33 +29,23 @@ const leafTypes: Set<TreeNodeType> = new Set([
   "datafile",
 ]);
 
-const fullWidthLabelTypes: Set<TreeNodeType> = new Set(["table", "view", "materialized_view", "procedure", "function", "mongo-collection", "mongo-bucket", "dynamodb-table", "vector-collection", "elasticsearch-index"]);
+const fullWidthLabelTypes: Set<TreeNodeType> = new Set(["table", "view", "materialized_view", "procedure", "function", "dynamodb-table"]);
 
 const emptyContainerTypes: Set<TreeNodeType> = new Set(["saved-sql-root", "saved-sql-folder", "type"]);
 
 const pinnableTypes: Set<TreeNodeType> = new Set([
   "connection-group",
   "database",
-  "linked-server",
-  "linked-server-catalog",
-  "linked-server-schema",
-  "doris-catalog",
+
   "schema",
   "table",
   "view",
   "materialized_view",
-  "redis-db",
-  "mongo-db",
-  "mongo-gridfs",
-  "mongo-bucket",
-  "mongo-collection",
+
   "dynamodb-table",
-  "vector-collection",
-  "elasticsearch-index",
-  "nacos-namespace",
 ]);
 
-const commentTypes: Set<TreeNodeType> = new Set(["connection", "schema", "table", "view", "materialized_view", "column", "procedure", "function", "trigger", "sequence", "synonym", "package", "mongo-collection", "dynamodb-table", "vector-collection", "elasticsearch-index"]);
+const commentTypes: Set<TreeNodeType> = new Set(["connection", "schema", "table", "view", "materialized_view", "column", "procedure", "function", "trigger", "sequence", "synonym", "package", "dynamodb-table"]);
 
 export const SIDEBAR_INDENT_DEFAULT_PX = 16;
 

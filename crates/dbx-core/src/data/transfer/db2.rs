@@ -14,9 +14,7 @@ pub(super) fn map_column_type(source_type: &str, source_db: &DatabaseType) -> Op
     };
     let parameters = normalized.split_once('(').and_then(|(_, rest)| rest.split_once(')')).map(|(value, _)| value);
     let unsigned = normalized.split_whitespace().any(|part| part == "unsigned");
-    if super::is_sqlite_transfer_dialect(source_db) && normalized.contains("int") {
-        return Some("BIGINT".to_string());
-    }
+    {}
     let mapped = match base {
         "tinyint" => "SMALLINT".to_string(),
         "smallint" if unsigned => "INTEGER".to_string(),
@@ -28,7 +26,7 @@ pub(super) fn map_column_type(source_type: &str, source_db: &DatabaseType) -> Op
             Some(precision) => format!("TIMESTAMP({precision})"),
             None => "TIMESTAMP".to_string(),
         },
-        "bit" if *source_db == DatabaseType::SqlServer => "BOOLEAN".to_string(),
+
         "bit" | "varbit" => "CLOB".to_string(),
         "varchar" | "nvarchar" | "varchar2" => match parameters.and_then(|length| length.trim().parse::<u64>().ok()) {
             Some(length) if (1..=32672).contains(&length) => format!("VARCHAR({length})"),
@@ -127,7 +125,3 @@ pub(super) fn validate_generated_columns(rows: &[Vec<serde_json::Value>]) -> Res
         "DB2 transfer cannot write GENERATED ALWAYS target columns ({columns}); target data has not been cleared"
     ))
 }
-
-#[cfg(test)]
-#[path = "db2_tests.rs"]
-mod tests;

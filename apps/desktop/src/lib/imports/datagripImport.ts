@@ -41,72 +41,16 @@ type DriverProfile = {
 // driver-ref prefix → dbx profile
 const driverRefMap: Record<string, DriverProfile> = {
   mysql: { dbType: "mysql", profile: "mysql", label: "MySQL", port: 3306, user: "root" },
-  mariadb: { dbType: "mysql", profile: "mariadb", label: "MariaDB", port: 3306, user: "root" },
-  postgresql: { dbType: "postgres", profile: "postgres", label: "PostgreSQL", port: 5432, user: "postgres" },
-  postgres: { dbType: "postgres", profile: "postgres", label: "PostgreSQL", port: 5432, user: "postgres" },
-  sqlite: { dbType: "sqlite", profile: "sqlite", label: "SQLite", port: 0, user: "" },
-  sqlserver: { dbType: "sqlserver", profile: "sqlserver", label: "SQL Server", port: 1433, user: "sa" },
-  mssql: { dbType: "sqlserver", profile: "sqlserver", label: "SQL Server", port: 1433, user: "sa" },
-  jtds: { dbType: "sqlserver", profile: "sqlserver", label: "SQL Server", port: 1433, user: "sa" },
-  oracle: { dbType: "oracle", profile: "oracle", label: "Oracle", port: 1521, user: "system" },
-  mongo: { dbType: "mongodb", profile: "mongodb", label: "MongoDB", port: 27017, user: "" },
-  mongodb: { dbType: "mongodb", profile: "mongodb", label: "MongoDB", port: 27017, user: "" },
-  redis: { dbType: "redis", profile: "redis", label: "Redis", port: 6379, user: "" },
-  clickhouse: { dbType: "clickhouse", profile: "clickhouse", label: "ClickHouse", port: 8123, user: "default" },
-  cassandra: { dbType: "cassandra", profile: "cassandra", label: "Cassandra", port: 9042, user: "" },
-  duckdb: { dbType: "duckdb", profile: "duckdb", label: "DuckDB", port: 0, user: "" },
-  bigquery: { dbType: "bigquery", profile: "bigquery", label: "BigQuery", port: 443, user: "" },
-  cockroach: { dbType: "postgres", profile: "cockroachdb", label: "CockroachDB", port: 26257, user: "root" },
-  cockroachdb: { dbType: "postgres", profile: "cockroachdb", label: "CockroachDB", port: 26257, user: "root" },
-  redshift: { dbType: "redshift", profile: "redshift", label: "Redshift", port: 5439, user: "awsuser" },
-  elasticsearch: { dbType: "elasticsearch", profile: "elasticsearch", label: "Elasticsearch", port: 9200, user: "" },
-  easysearch: { dbType: "easysearch", profile: "easysearch", label: "Easysearch", port: 9200, user: "" },
-  h2: { dbType: "h2", profile: "h2", label: "H2", port: 9092, user: "sa" },
-  snowflake: { dbType: "snowflake", profile: "snowflake", label: "Snowflake", port: 443, user: "" },
-  kingbase: { dbType: "kingbase", profile: "kingbase", label: "KingbaseES", port: 54321, user: "SYSTEM" },
-  kingbase8: { dbType: "kingbase", profile: "kingbase", label: "KingbaseES", port: 54321, user: "SYSTEM" },
 };
 
 // product name from <database-info product="..."> → dbx profile
 const productMap: Record<string, DriverProfile> = {
   mysql: { dbType: "mysql", profile: "mysql", label: "MySQL", port: 3306, user: "root" },
-  mariadb: { dbType: "mysql", profile: "mariadb", label: "MariaDB", port: 3306, user: "root" },
-  postgresql: { dbType: "postgres", profile: "postgres", label: "PostgreSQL", port: 5432, user: "postgres" },
-  postgres: { dbType: "postgres", profile: "postgres", label: "PostgreSQL", port: 5432, user: "postgres" },
-  sqlite: { dbType: "sqlite", profile: "sqlite", label: "SQLite", port: 0, user: "" },
-  oracle: { dbType: "oracle", profile: "oracle", label: "Oracle", port: 1521, user: "system" },
-  "sql server": { dbType: "sqlserver", profile: "sqlserver", label: "SQL Server", port: 1433, user: "sa" },
-  mongodb: { dbType: "mongodb", profile: "mongodb", label: "MongoDB", port: 27017, user: "" },
-  redis: { dbType: "redis", profile: "redis", label: "Redis", port: 6379, user: "" },
-  clickhouse: { dbType: "clickhouse", profile: "clickhouse", label: "ClickHouse", port: 8123, user: "default" },
-  cassandra: { dbType: "cassandra", profile: "cassandra", label: "Cassandra", port: 9042, user: "" },
-  duckdb: { dbType: "duckdb", profile: "duckdb", label: "DuckDB", port: 0, user: "" },
-  bigquery: { dbType: "bigquery", profile: "bigquery", label: "BigQuery", port: 443, user: "" },
-  redshift: { dbType: "redshift", profile: "redshift", label: "Redshift", port: 5439, user: "awsuser" },
-  elasticsearch: { dbType: "elasticsearch", profile: "elasticsearch", label: "Elasticsearch", port: 9200, user: "" },
-  easysearch: { dbType: "easysearch", profile: "easysearch", label: "Easysearch", port: 9200, user: "" },
-  snowflake: { dbType: "snowflake", profile: "snowflake", label: "Snowflake", port: 443, user: "" },
-  kingbase: { dbType: "kingbase", profile: "kingbase", label: "KingbaseES", port: 54321, user: "SYSTEM" },
 };
 
 // JDBC subprotocol → dbx profile (fallback when driver-ref and product are unknown)
 const subprotocolMap: Record<string, DriverProfile> = {
   mysql: { dbType: "mysql", profile: "mysql", label: "MySQL", port: 3306, user: "root" },
-  mariadb: { dbType: "mysql", profile: "mariadb", label: "MariaDB", port: 3306, user: "root" },
-  postgresql: { dbType: "postgres", profile: "postgres", label: "PostgreSQL", port: 5432, user: "postgres" },
-  sqlite: { dbType: "sqlite", profile: "sqlite", label: "SQLite", port: 0, user: "" },
-  sqlserver: { dbType: "sqlserver", profile: "sqlserver", label: "SQL Server", port: 1433, user: "sa" },
-  jtds: { dbType: "sqlserver", profile: "sqlserver", label: "SQL Server", port: 1433, user: "sa" },
-  oracle: { dbType: "oracle", profile: "oracle", label: "Oracle", port: 1521, user: "system" },
-  mongodb: { dbType: "mongodb", profile: "mongodb", label: "MongoDB", port: 27017, user: "" },
-  redis: { dbType: "redis", profile: "redis", label: "Redis", port: 6379, user: "" },
-  clickhouse: { dbType: "clickhouse", profile: "clickhouse", label: "ClickHouse", port: 8123, user: "default" },
-  cassandra: { dbType: "cassandra", profile: "cassandra", label: "Cassandra", port: 9042, user: "" },
-  duckdb: { dbType: "duckdb", profile: "duckdb", label: "DuckDB", port: 0, user: "" },
-  bigquery: { dbType: "bigquery", profile: "bigquery", label: "BigQuery", port: 443, user: "" },
-  redshift: { dbType: "redshift", profile: "redshift", label: "Redshift", port: 5439, user: "awsuser" },
-  kingbase: { dbType: "kingbase", profile: "kingbase", label: "KingbaseES", port: 54321, user: "SYSTEM" },
-  kingbase8: { dbType: "kingbase", profile: "kingbase", label: "KingbaseES", port: 54321, user: "SYSTEM" },
 };
 
 function getNumber(value: string | undefined): number {
@@ -180,7 +124,7 @@ function parseJdbcUrl(jdbcUrl: string): {
   const fileMatch = url.match(/^(sqlite|duckdb):(.+)$/i);
   if (fileMatch) {
     result.host = expandPathMacros(fileMatch[2].split("?")[0]);
-    if (fileMatch[1].toLowerCase() !== "sqlite") {
+    {
       result.database = result.host;
     }
     return result;
@@ -240,7 +184,7 @@ function extractSubprotocol(jdbcUrl: string): string {
   return subprotocol;
 }
 
-function inferProfile(driverRef: string, subprotocol: string, driverClass: string, product: string): DriverProfile {
+function inferProfile(driverRef: string, subprotocol: string, driverClass: string, product: string): DriverProfile | null {
   // 1. Try driver-ref prefix (most specific)
   const refKey = driverRef.split(".")[0].toLowerCase();
   if (driverRefMap[refKey]) return driverRefMap[refKey];
@@ -258,17 +202,9 @@ function inferProfile(driverRef: string, subprotocol: string, driverClass: strin
   // 4. Try driver class name
   const classLower = driverClass.toLowerCase();
   if (classLower.includes("mysql")) return driverRefMap.mysql;
-  if (classLower.includes("postgres")) return driverRefMap.postgresql;
-  if (classLower.includes("sqlite")) return driverRefMap.sqlite;
-  if (classLower.includes("oracle")) return driverRefMap.oracle;
-  if (classLower.includes("sqlserver") || classLower.includes("mssql")) return driverRefMap.sqlserver;
-  if (classLower.includes("mongo")) return driverRefMap.mongodb;
-  if (classLower.includes("redis")) return driverRefMap.redis;
-  if (classLower.includes("clickhouse")) return driverRefMap.clickhouse;
-  if (classLower.includes("kingbase")) return driverRefMap.kingbase;
 
   // 5. Fallback to JDBC
-  return { dbType: "jdbc", profile: "jdbc", label: driverClass || "JDBC", port: 0, user: "" };
+  return null;
 }
 
 // --- XML parsing ---
@@ -438,12 +374,13 @@ function mergeFragments(shared: Map<string, Partial<DataSourceFragment>>, local:
   return resolved;
 }
 
-function buildConnection(fragment: DataSourceFragment): ConnectionConfig {
+function buildConnection(fragment: DataSourceFragment): ConnectionConfig | null {
   const subprotocol = extractSubprotocol(fragment.jdbcUrl);
   const profile = inferProfile(fragment.driverRef, subprotocol, fragment.driverClass, fragment.product);
+  if (!profile) return null;
   const parsed = parseJdbcUrl(fragment.jdbcUrl);
 
-  const host = parsed.host || (profile.dbType === "sqlite" ? "" : "127.0.0.1");
+  const host = parsed.host || "127.0.0.1";
   const port = parsed.port || profile.port;
   const database = parsed.database || undefined;
   const username = fragment.username || profile.user;
@@ -465,9 +402,9 @@ function buildConnection(fragment: DataSourceFragment): ConnectionConfig {
     connect_timeout_secs: 10,
     query_timeout_secs: DEFAULT_QUERY_TIMEOUT_SECS,
     ssl: false,
-    oracle_connection_type: profile.dbType === "oracle" ? parsed.oracleConnectionType || "service_name" : undefined,
-    connection_string: profile.dbType === "jdbc" || profile.dbType === "mongodb" ? fragment.jdbcUrl.replace(/^jdbc:/i, "") : undefined,
-    jdbc_driver_class: profile.dbType === "jdbc" ? fragment.driverClass || undefined : undefined,
+
+    connection_string: undefined,
+    jdbc_driver_class: undefined,
     jdbc_driver_paths: [],
   };
 
@@ -497,13 +434,15 @@ export function parseDataGripImport(payload: DataGripImportPayload): DataGripImp
 
   for (const fragment of fragments) {
     const config = buildConnection(fragment);
+    if (!config) continue;
     // Custom-driver sources without a <driver-ref> are kept only when a concrete
     // database type is recognised. DataGrip ships no built-in Kingbase driver, so
     // every Kingbase connection is custom (configured by URL, no driver-ref).
     // An unrecognised custom driver falls back to "jdbc" and is dropped here to
     // avoid importing unusable half-baked JDBC connections. `fragment.driverRef
     // === ""` is the sentinel mergeFragments sets when <driver-ref> was absent.
-    if (fragment.driverRef === "" && config.db_type === "jdbc") continue;
+    {
+    }
     const key = [config.name, config.db_type, config.host, config.port, config.database || ""].join("\u0000");
     if (seen.has(key)) continue;
     seen.add(key);
@@ -565,11 +504,13 @@ export function getDataGripUuidMap(payload: DataGripImportPayload): Map<string, 
 
   for (const fragment of fragments) {
     const profile = inferProfile(fragment.driverRef, extractSubprotocol(fragment.jdbcUrl), fragment.driverClass, fragment.product);
+    if (!profile) continue;
     // Stay in sync with parseDataGripImport: skip custom-driver sources (no
     // <driver-ref>) that don't resolve to a concrete database type.
-    if (fragment.driverRef === "" && profile.dbType === "jdbc") continue;
+    {
+    }
     const parsed = parseJdbcUrl(fragment.jdbcUrl);
-    const host = parsed.host || (profile.dbType === "sqlite" ? "" : "127.0.0.1");
+    const host = parsed.host || "127.0.0.1";
     const port = parsed.port || profile.port;
     const database = parsed.database || "";
     const name = fragment.name || database || host || profile.label;

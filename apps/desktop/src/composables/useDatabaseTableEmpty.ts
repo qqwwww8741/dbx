@@ -17,17 +17,9 @@ import type { SidebarDangerDialogRequest } from "@/lib/sidebar/sidebarDangerDial
 import type { ConnectionConfig, TreeNode } from "@/types/database";
 
 export function canEmptyDatabaseTables(node: TreeNode, connection?: ConnectionConfig): boolean {
-  const profile = connection?.driver_profile?.toLowerCase();
-  const unsupportedMysqlProfiles = ["doris", "selectdb", "starrocks", "manticoresearch"];
-  return (
-    node.type === "database" &&
-    !!node.database &&
-    !!node.connectionId &&
-    connection?.db_type === "mysql" &&
-    !unsupportedMysqlProfiles.includes(profile ?? "") &&
-    !connectionIsEffectivelyReadOnly(connection) &&
-    !["mysql", "sys", "information_schema", "performance_schema", "ndbinfo"].includes(node.database.toLowerCase())
-  );
+  connection?.driver_profile?.toLowerCase();
+
+  return node.type === "database" && !!node.database && !!node.connectionId && !connectionIsEffectivelyReadOnly(connection) && !["mysql", "sys", "information_schema", "performance_schema", "ndbinfo"].includes(node.database.toLowerCase());
 }
 export const canDropDatabaseTables = canEmptyDatabaseTables;
 

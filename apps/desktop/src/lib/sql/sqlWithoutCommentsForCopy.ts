@@ -15,7 +15,7 @@ function collapseBlankLines(whitespace: string): string {
 export function sqlWithoutCommentsForCopy(sql: string, databaseType?: DatabaseType): string {
   if (!sql) return "";
   const dialectId = resolveSqlDialectId({ databaseType });
-  const mysqlLike = dialectId === "mysql" || dialectId === "doris";
+  const mysqlLike = dialectId === "mysql";
   const tokens = tokenizeSqlSemantic(sql, dialectId, {
     mysqlDashCommentRequiresWhitespace: mysqlLike,
     mysqlBackslashEscape: !!databaseType && BACKSLASH_ESCAPE_STRING_DIALECTS.has(databaseType),

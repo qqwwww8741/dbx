@@ -73,7 +73,6 @@ export function tableVGroupKindOfContainerNode(node: Pick<TreeNode, "type" | "ta
   switch (node.type) {
     case "database":
     case "schema":
-    case "linked-server-schema":
     case "group-tables":
       return "tables";
     case "group-views":

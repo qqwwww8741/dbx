@@ -24,7 +24,6 @@ use crate::database_export::{
     build_export_insert_statements_excluding_with_dialect, is_export_cancelled, is_internal_export_column,
     BuildExportInsertStatementsOptions, SqlExportProjection, SqlInsertDialect, SqlInsertMode,
 };
-use crate::db::agent_driver::AgentTableReadStartParams;
 use crate::models::connection::DatabaseType;
 use crate::query::{
     close_query_session, execute_sql_statement_with_options, query_timeout_duration, QueryExecutionOptions,
@@ -251,7 +250,7 @@ fn resolve_requested_export_columns(
 /// column extras) and SQL Server (TDS reports `rowversion` as `varbinary`,
 /// never as `timestamp`).
 fn requested_sql_export_needs_column_metadata(database_type: DatabaseType, format: &str) -> bool {
-    matches!(database_type, DatabaseType::Mysql | DatabaseType::SqlServer) && format.eq_ignore_ascii_case("sql")
+    matches!(database_type, DatabaseType::Mysql) && format.eq_ignore_ascii_case("sql")
 }
 
 fn ensure_sql_insert_export_types_supported(format: &str, column_types: &[Option<String>]) -> Result<(), String> {
@@ -308,9 +307,7 @@ fn resolve_requested_export_column_types(
                 .filter(|column_type| !column_type.trim().is_empty());
             let metadata_type =
                 table_columns_by_name.get(&requested.to_ascii_lowercase()).map(|column| column.data_type.clone());
-            if database_type == DatabaseType::SqlServer {
-                metadata_type.filter(|column_type| !column_type.trim().is_empty()).or(requested_type)
-            } else {
+            {
                 requested_type.or(metadata_type)
             }
         })
@@ -400,11 +397,7 @@ fn table_export_sql_context<'a>(
 ) -> TableExportSqlContext<'a> {
     // GBase8s selects from the active database and rejects the owner-qualified
     // names produced for MySQL-family GBase connections.
-    if database_type == DatabaseType::Gbase
-        && driver_profile.is_some_and(|profile| profile.eq_ignore_ascii_case("gbase8s"))
     {
-        TableExportSqlContext { database_type: DatabaseType::Informix, schema: None }
-    } else {
         TableExportSqlContext { database_type, schema }
     }
 }
@@ -414,38 +407,9 @@ fn table_export_query_columns<'a>(
     sql_context: &TableExportSqlContext<'_>,
     columns: &'a [String],
 ) -> Result<Cow<'a, [String]>, String> {
-    if sql_context.database_type != DatabaseType::Iotdb {
+    {
         return Ok(Cow::Borrowed(columns));
     }
-
-    let full_table = crate::sql_dialect::table_data_qualified_table_name(
-        Some(sql_context.database_type),
-        sql_context.schema,
-        &request.table_name,
-        request.identifier_quote.as_deref(),
-    );
-    let measurement_prefix = format!("{full_table}.");
-    if !columns.iter().any(|column| column.eq_ignore_ascii_case("Time") || column.starts_with(&measurement_prefix)) {
-        return Ok(Cow::Borrowed(columns));
-    }
-
-    // IoTDB returns absolute timeseries labels, but its SELECT list accepts
-    // only paths relative to the queried device. Keep the labels unchanged
-    // for export output and normalize only the query projection here.
-    let query_columns = columns
-        .iter()
-        .filter_map(|column| {
-            if column.eq_ignore_ascii_case("Time") {
-                None
-            } else {
-                Some(column.strip_prefix(&measurement_prefix).unwrap_or(column).to_string())
-            }
-        })
-        .collect::<Vec<_>>();
-    if query_columns.is_empty() {
-        return Err("IoTDB table export requires at least one non-Time column".to_string());
-    }
-    Ok(Cow::Owned(query_columns))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -460,11 +424,7 @@ fn table_page_sql(
     offset: u64,
     batch_size: usize,
 ) -> String {
-    let default_order_columns = if sql_context.database_type == DatabaseType::InfluxDb {
-        primary_keys.iter().find(|column| column.eq_ignore_ascii_case("time")).map(std::slice::from_ref).unwrap_or(&[])
-    } else {
-        primary_keys
-    };
+    let default_order_columns = { primary_keys };
     let sql = if use_keyset {
         keyset_pagination_sql_with_identifier_quote(
             col_names,
@@ -506,7 +466,7 @@ fn mysql_spatial_export_select_list(
     col_names: &[String],
     column_types: &[Option<String>],
 ) -> Option<String> {
-    if *db_type != DatabaseType::Mysql || !request.format.eq_ignore_ascii_case("sql") {
+    if false || !request.format.eq_ignore_ascii_case("sql") {
         return None;
     }
     let mut has_spatial_column = false;
@@ -630,71 +590,23 @@ fn is_agent_table_read_unsupported(error: &str) -> bool {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TableExportCursorKind {
-    Agent,
-    ExternalDriver,
-}
+enum TableExportCursorKind {}
 
 fn table_export_cursor_allowed(database_type: DatabaseType, cursor_kind: TableExportCursorKind) -> bool {
     // HighGo's JDBC driver may materialize the complete unbounded result before
     // startTableRead can return its first cursor page. Use the existing bounded
     // keyset/LIMIT-OFFSET table export path instead.
-    database_type != DatabaseType::Highgo || cursor_kind != TableExportCursorKind::Agent
+    true
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum TableExportCursorSession {
-    Agent(String),
-    ExternalDriver(String),
-}
+enum TableExportCursorSession {}
 
 async fn table_export_cursor_kind(state: &AppState, pool_key: &str) -> Option<TableExportCursorKind> {
     let pool_handle = state.pool_handle(pool_key).await;
     match pool_handle.as_ref() {
-        Some(PoolKind::Agent(_)) => Some(TableExportCursorKind::Agent),
-        Some(PoolKind::ExternalDriver { .. }) => Some(TableExportCursorKind::ExternalDriver),
         _ => None,
     }
-}
-
-async fn table_export_query_timeout_secs(state: &AppState, pool_key: &str) -> u64 {
-    let configs = state.configs.read().await;
-    config_for_pool_key(pool_key, &configs).map(|config| config.query_timeout_secs).unwrap_or(0)
-}
-
-async fn execute_external_driver_export_page(
-    state: &AppState,
-    pool_key: &str,
-    request: &TableExportRequest,
-    sql_context: &TableExportSqlContext<'_>,
-    query_col_names: &[String],
-    column_types: &[Option<String>],
-    primary_keys: &[String],
-    active_batch_size: usize,
-    result_session_id: Option<String>,
-    cancel_token: CancellationToken,
-) -> Result<QueryResult, String> {
-    let sql = table_cursor_sql(request, sql_context, query_col_names, column_types, primary_keys);
-    let max_rows = request.row_limit.unwrap_or(i32::MAX as usize).min(i32::MAX as usize).max(1);
-    let timeout_secs = table_export_query_timeout_secs(state, pool_key).await;
-    execute_sql_statement_with_options(
-        state,
-        &request.connection_id,
-        &request.database,
-        &sql,
-        request.schema.as_deref(),
-        Some(cancel_token),
-        QueryExecutionOptions {
-            max_rows: Some(max_rows),
-            fetch_size: Some(active_batch_size),
-            page_size: Some(active_batch_size),
-            result_session_id,
-            client_session_id: Some(table_export_client_session_id(&request.export_id)),
-            timeout_secs: Some(timeout_secs),
-            ..Default::default()
-        },
-    )
-    .await
 }
 
 async fn execute_table_export_count(
@@ -704,7 +616,7 @@ async fn execute_table_export_count(
     sql: &str,
     cancel_token: CancellationToken,
 ) -> Result<QueryResult, String> {
-    if table_export_cursor_kind(state, pool_key).await != Some(TableExportCursorKind::ExternalDriver) {
+    {
         // execute_read_on_pool 不接受取消令牌；用 select! 让导出在取消时不必等待大表
         // COUNT(*) 跑完（否则点“停止”在 COUNT 阶段毫无反应）。取消时返回 Err，调用方
         // 会将其视作 total_rows=None 并继续，由后续 is_export_cancelled 收尾为已取消。
@@ -713,24 +625,6 @@ async fn execute_table_export_count(
             _ = cancel_token.cancelled() => Err("table export count cancelled".to_string()),
         };
     }
-
-    let timeout_secs = table_export_query_timeout_secs(state, pool_key).await;
-    execute_sql_statement_with_options(
-        state,
-        &request.connection_id,
-        &request.database,
-        sql,
-        request.schema.as_deref(),
-        Some(cancel_token),
-        QueryExecutionOptions {
-            max_rows: Some(1),
-            fetch_size: Some(1),
-            client_session_id: Some(table_export_client_session_id(&request.export_id)),
-            timeout_secs: Some(timeout_secs),
-            ..Default::default()
-        },
-    )
-    .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -776,174 +670,19 @@ async fn fetch_table_export_batch(
     // VictoriaMetrics metrics are read through MetricsQL rather than SQL table
     // pagination. Execute the range query once and let the normal writers emit
     // the returned matrix/vector rows.
-    if *db_type == DatabaseType::VictoriaMetrics {
-        *table_read_attempted = true;
-        *table_read_completed = true;
-        let query = crate::db::victoriametrics_driver::metric_range_query(&request.table_name, "1h");
-        return execute_sql_statement_with_options(
-            state,
-            &request.connection_id,
-            &request.database,
-            &query,
-            request.schema.as_deref(),
-            Some(cancel_token),
-            QueryExecutionOptions {
-                max_rows: request.row_limit,
-                client_session_id: Some(table_export_client_session_id(&request.export_id)),
-                ..Default::default()
-            },
-        )
-        .await;
-    }
+    {}
 
     if !*table_read_attempted {
         let cursor_kind = table_export_cursor_kind(state, pool_key)
             .await
             .filter(|cursor_kind| table_export_cursor_allowed(*db_type, *cursor_kind));
         match cursor_kind {
-            Some(TableExportCursorKind::Agent) => {
-                *table_read_attempted = true;
-                let sql = table_cursor_sql(request, sql_context, query_col_names, column_types, primary_keys);
-                let max_rows = request.row_limit.unwrap_or(i32::MAX as usize);
-                let query_timeout = table_export_query_timeout_secs(state, pool_key).await;
-                let rpc_timeout = query_timeout_duration(Some(query_timeout));
-                let params = AgentTableReadStartParams {
-                    sql,
-                    database: Some(request.database.clone()),
-                    schema: request.schema.clone(),
-                    page_size: active_batch_size,
-                    max_rows,
-                    fetch_size: Some(active_batch_size),
-                    timeout_secs: (query_timeout > 0).then_some(query_timeout),
-                };
-                let pool_handle = state.pool_handle(pool_key).await;
-                let Some(PoolKind::Agent(client)) = pool_handle.as_ref() else {
-                    return Err("Agent table read requires an agent connection".to_string());
-                };
-                let client = client.clone();
-                let mut client = client.lock().await;
-                match client
-                    .start_table_read_with_timeout_and_cancel::<QueryResult>(
-                        params,
-                        rpc_timeout,
-                        Some(cancel_token.clone()),
-                    )
-                    .await
-                {
-                    Ok(result) => {
-                        *cursor_session = result.session_id.clone().map(TableExportCursorSession::Agent);
-                        if result.session_id.is_none() && !result.has_more {
-                            *table_read_completed = true;
-                        }
-                        return Ok(result);
-                    }
-                    Err(error) if is_agent_table_read_unsupported(&error) => {
-                        log::debug!("Agent table-read cursor unsupported, falling back to paginated export: {error}");
-                    }
-                    Err(error) => return Err(error),
-                }
-            }
-            Some(TableExportCursorKind::ExternalDriver) => {
-                *table_read_attempted = true;
-                let result = execute_external_driver_export_page(
-                    state,
-                    pool_key,
-                    request,
-                    sql_context,
-                    query_col_names,
-                    column_types,
-                    primary_keys,
-                    active_batch_size,
-                    None,
-                    cancel_token.clone(),
-                )
-                .await?;
-                if result.has_more {
-                    let session_id = result
-                        .session_id
-                        .clone()
-                        .ok_or("JDBC export cursor did not return a session id for additional rows")?;
-                    *cursor_session = Some(TableExportCursorSession::ExternalDriver(session_id));
-                } else {
-                    *table_read_completed = true;
-                }
-                return Ok(result);
-            }
             None => {}
         }
     }
 
     if let Some(session) = cursor_session.clone() {
-        return match session {
-            TableExportCursorSession::Agent(session_id) => {
-                let pool_handle = state.pool_handle(pool_key).await;
-                let Some(PoolKind::Agent(client)) = pool_handle.as_ref() else {
-                    return Err("Table read session requires an agent connection".to_string());
-                };
-                let client = client.clone();
-                let mut client = client.lock().await;
-                let query_timeout = table_export_query_timeout_secs(state, pool_key).await;
-                match client
-                    .fetch_table_read_page_with_timeout_and_cancel::<QueryResult>(
-                        &session_id,
-                        active_batch_size,
-                        query_timeout_duration(Some(query_timeout)),
-                        Some(cancel_token.clone()),
-                    )
-                    .await
-                {
-                    Ok(result) => {
-                        *cursor_session =
-                            result.session_id.clone().or(Some(session_id)).map(TableExportCursorSession::Agent);
-                        if !result.has_more {
-                            *cursor_session = None;
-                            *table_read_completed = true;
-                        }
-                        Ok(result)
-                    }
-                    Err(error) => {
-                        let _ = client.close_table_read_session::<bool>(&session_id).await;
-                        *cursor_session = None;
-                        Err(error)
-                    }
-                }
-            }
-            TableExportCursorSession::ExternalDriver(session_id) => {
-                match execute_external_driver_export_page(
-                    state,
-                    pool_key,
-                    request,
-                    sql_context,
-                    query_col_names,
-                    column_types,
-                    primary_keys,
-                    active_batch_size,
-                    Some(session_id.clone()),
-                    cancel_token.clone(),
-                )
-                .await
-                {
-                    Ok(result) => {
-                        if result.has_more {
-                            let next_session_id = result.session_id.clone().unwrap_or(session_id);
-                            *cursor_session = Some(TableExportCursorSession::ExternalDriver(next_session_id));
-                        } else {
-                            *cursor_session = None;
-                            *table_read_completed = true;
-                        }
-                        Ok(result)
-                    }
-                    Err(error) => {
-                        if cancel_token.is_cancelled() {
-                            cursor_session.take();
-                        } else {
-                            close_table_export_cursor_if_open(state, pool_key, request, cursor_session).await;
-                        }
-                        Err(error)
-                    }
-                }
-            }
-        };
+        return match session {};
     }
 
     fetch_paginated_table_export_batch(
@@ -999,29 +738,7 @@ async fn close_table_export_cursor_if_open(
     let Some(session) = cursor_session.take() else {
         return;
     };
-    match session {
-        TableExportCursorSession::Agent(session_id) => {
-            let pool_handle = state.pool_handle(pool_key).await;
-            let Some(PoolKind::Agent(client)) = pool_handle.as_ref() else {
-                return;
-            };
-            let client = client.clone();
-            let mut client = client.lock().await;
-            let _ = client.close_table_read_session::<bool>(&session_id).await;
-        }
-        TableExportCursorSession::ExternalDriver(session_id) => {
-            let client_session_id = table_export_client_session_id(&request.export_id);
-            let _ = close_query_session(
-                state,
-                &request.connection_id,
-                &request.database,
-                &session_id,
-                Some(&client_session_id),
-                None,
-            )
-            .await;
-        }
-    }
+    match session {}
 }
 
 async fn start_export_cancel_watcher(export_id: String, cancelled: Arc<AtomicBool>, token: CancellationToken) {
@@ -1049,11 +766,11 @@ async fn stream_native_table_rows(
     match pool_handle.as_ref() {
         Some(PoolKind::Mysql(pool, mode)) => {
             let pool = pool.clone();
-            let bare = *mode == MysqlMode::Bare;
+            let bare = false;
             crate::db::mysql::stream_query_rows(
                 &pool,
                 sql,
-                bare,
+                false,
                 row_limit,
                 crate::db::mysql::MySqlQueryDialect::for_connection(*db_type, None),
                 cancelled,
@@ -1062,24 +779,7 @@ async fn stream_native_table_rows(
             .await?;
             Ok(true)
         }
-        Some(PoolKind::Postgres(pool)) => {
-            let pool = pool.clone();
-            crate::db::postgres::stream_query_rows(&pool, sql, row_limit, cancelled, on_row).await?;
-            Ok(true)
-        }
-        Some(PoolKind::SqlServer(client)) => {
-            let client = client.clone();
-            let mut on_row = on_row;
-            let mut client = client.lock().await;
-            crate::db::sqlserver::stream_first_result_set(&mut client, sql, row_limit, Some(cancel_token), |item| {
-                if let crate::db::sqlserver::SqlServerStreamItem::Row(row) = item {
-                    on_row(row)?;
-                }
-                Ok(())
-            })
-            .await?;
-            Ok(true)
-        }
+
         _ => Ok(false),
     }
 }
@@ -1707,7 +1407,7 @@ async fn export_table_data_core_inner(
     // When no PK is available, falls back to offset-based pagination.
     let has_custom_filter_or_order = request.where_input.as_ref().is_some_and(|value| !value.trim().is_empty())
         || request.order_by.as_ref().is_some_and(|value| !value.trim().is_empty());
-    let use_keyset = db_type != DatabaseType::InfluxDb
+    let use_keyset = true
         && !has_custom_filter_or_order
         && !primary_keys.is_empty()
         && primary_keys.iter().all(|pk| col_names.contains(pk));
@@ -1723,7 +1423,7 @@ async fn export_table_data_core_inner(
     // grid exports skip this by default because COUNT can be the slowest query
     // on large HANA/JDBC tables, especially with filters.
     let row_limit = request.row_limit;
-    let total_rows = if request.skip_count || db_type == DatabaseType::VictoriaMetrics {
+    let total_rows = if request.skip_count || false {
         None
     } else {
         let count_query = count_sql_with_where_and_identifier_quote(
@@ -2665,125 +2365,6 @@ mod tests {
         })
     }
 
-    async fn spawn_influxdb_table_export_server() -> (String, tokio::task::JoinHandle<Vec<String>>) {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        let server = tokio::spawn(async move {
-            let mut queries = Vec::new();
-            loop {
-                let (mut socket, _) = listener.accept().await.unwrap();
-                let request = read_table_export_http_request(&mut socket).await;
-                let target = request.lines().next().unwrap().split_whitespace().nth(1).unwrap();
-                let query = table_export_query_param(target, "q").expect("InfluxDB request must include q");
-                if query != "SHOW DATABASES" {
-                    assert_eq!(table_export_query_param(target, "db").as_deref(), Some("dbx_issue_8022"));
-                }
-                let final_page = query.ends_with("ORDER BY \"time\" LIMIT 1 OFFSET 2");
-                let body = match query.as_str() {
-                    "SHOW DATABASES" => {
-                        r#"{"results":[{"statement_id":0,"series":[{"name":"databases","columns":["name"],"values":[["dbx_issue_8022"]]}]}]}"#
-                    }
-                    "SHOW TAG KEYS FROM \"weather\"" => {
-                        r#"{"results":[{"statement_id":0,"series":[{"name":"weather","columns":["tagKey"],"values":[["location"]]}]}]}"#
-                    }
-                    "SHOW FIELD KEYS FROM \"weather\"" => {
-                        r#"{"results":[{"statement_id":0,"series":[{"name":"weather","columns":["fieldKey","fieldType"],"values":[["temperature","float"]]}]}]}"#
-                    }
-                    value if value.ends_with("ORDER BY \"time\" LIMIT 1 OFFSET 0") => {
-                        r#"{"results":[{"statement_id":0,"series":[{"name":"weather","columns":["time","location","temperature"],"values":[["2023-09-03T12:00:00Z","us-midwest",82]]}]}]}"#
-                    }
-                    value if value.ends_with("ORDER BY \"time\" LIMIT 1 OFFSET 1") => {
-                        r#"{"results":[{"statement_id":0,"series":[{"name":"weather","columns":["time","location","temperature"],"values":[["2023-09-03T12:01:00Z","us-midwest",83]]}]}]}"#
-                    }
-                    value if value.ends_with("ORDER BY \"time\" LIMIT 1 OFFSET 2") => {
-                        r#"{"results":[{"statement_id":0}]}"#
-                    }
-                    unexpected => panic!("unexpected InfluxDB export query: {unexpected}"),
-                };
-                queries.push(query);
-                write_table_export_http_json(&mut socket, "200 OK", body).await;
-                if final_page {
-                    break;
-                }
-            }
-            queries
-        });
-        (format!("http://{address}"), server)
-    }
-
-    #[tokio::test]
-    async fn influxdb_table_export_exports_paginated_rows() {
-        let (base_url, server) = spawn_influxdb_table_export_server().await;
-        let port = base_url.rsplit_once(':').unwrap().1.parse::<u16>().unwrap();
-        let dir = std::env::temp_dir().join(format!("dbx-influxdb-table-export-test-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let config: ConnectionConfig = serde_json::from_value(json!({
-            "id": "conn-influxdb-export",
-            "name": "InfluxDB export",
-            "db_type": "influxdb",
-            "host": "127.0.0.1",
-            "port": port,
-            "username": "",
-            "password": "",
-            "database": "dbx_issue_8022",
-            "query_timeout_secs": 30
-        }))
-        .unwrap();
-        let storage = crate::persistence::test_storage::open(&dir.join("storage.db")).await.unwrap();
-        let state = AppState::new(storage);
-        state.configs.write().await.insert(config.id.clone(), config);
-        let export_id = format!("export-{}", uuid::Uuid::new_v4());
-        let output = dir.join("weather.csv");
-        let request = TableExportRequest {
-            export_id,
-            connection_id: "conn-influxdb-export".to_string(),
-            database: "dbx_issue_8022".to_string(),
-            schema: None,
-            identifier_quote: None,
-            table_name: "weather".to_string(),
-            file_path: output.to_string_lossy().into_owned(),
-            format: "csv".to_string(),
-            insert_mode: Default::default(),
-            insert_dialect: Default::default(),
-            csv_quote_mode: CsvQuoteMode::All,
-            null_literal: String::new(),
-            exclude_primary_keys: false,
-            columns: None,
-            selected_columns: None,
-            column_types: None,
-            column_extras: None,
-            primary_keys: None,
-            where_input: None,
-            order_by: None,
-            skip_count: true,
-            batch_size: Some(1),
-            row_limit: None,
-            date_time_format: None,
-            numeric_column_right_align: false,
-            column_comments: None,
-            auto_filter: None,
-            split_max_mb: None,
-            omit_database_qualifier: None,
-        };
-
-        export_table_data_core(&state, &request, |_| {}).await.unwrap();
-        let queries = tokio::time::timeout(std::time::Duration::from_secs(5), server)
-            .await
-            .expect("InfluxDB export server did not receive the final page")
-            .unwrap();
-        let csv = std::fs::read_to_string(&output).unwrap_or_default();
-        let _ = std::fs::remove_dir_all(&dir);
-
-        let first_page = queries.iter().find(|query| query.contains("LIMIT 1 OFFSET 0")).unwrap();
-        assert!(first_page.contains("ORDER BY \"time\""));
-        assert!(!first_page.contains("ORDER BY \"time\", \"location\""));
-        assert!(csv.contains("location"));
-        assert!(csv.contains("temperature"));
-        assert!(csv.contains("us-midwest"));
-        assert!(csv.contains("82"));
-        assert!(csv.contains("83"));
-    }
-
     /// Read and decompress a single entry from an in-memory XLSX (ZIP) buffer.
     fn read_zip_entry(bytes: &[u8], path: &str) -> String {
         let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes.to_vec())).expect("open xlsx as zip archive");
@@ -2890,463 +2471,11 @@ mod tests {
     }
 
     #[test]
-    fn highgo_table_export_avoids_unbounded_agent_cursor() {
-        assert!(!table_export_cursor_allowed(DatabaseType::Highgo, TableExportCursorKind::Agent));
-        assert!(table_export_cursor_allowed(DatabaseType::Highgo, TableExportCursorKind::ExternalDriver));
-        assert!(table_export_cursor_allowed(DatabaseType::Oracle, TableExportCursorKind::Agent));
-    }
-
-    #[test]
     fn export_batch_size_respects_row_limit_remaining_rows() {
         assert_eq!(next_export_batch_size(None, 12_000, 10_000), Some(10_000));
         assert_eq!(next_export_batch_size(Some(15_000), 0, 10_000), Some(10_000));
         assert_eq!(next_export_batch_size(Some(15_000), 10_000, 10_000), Some(5_000));
         assert_eq!(next_export_batch_size(Some(15_000), 15_000, 10_000), None);
-    }
-
-    #[test]
-    fn iotdb_table_export_omits_implicit_time_from_all_query_paths() {
-        let request = TableExportRequest {
-            export_id: "export-iotdb".to_string(),
-            connection_id: "conn-1".to_string(),
-            database: "root.test".to_string(),
-            schema: Some("root.test".to_string()),
-            identifier_quote: None,
-            table_name: "device2".to_string(),
-            file_path: "device2.csv".to_string(),
-            format: "csv".to_string(),
-            insert_mode: Default::default(),
-            insert_dialect: Default::default(),
-            columns: None,
-            selected_columns: None,
-            column_types: None,
-            column_extras: None,
-            primary_keys: None,
-            exclude_primary_keys: false,
-            where_input: Some("WHERE temperature > 1".to_string()),
-            order_by: Some("Time DESC".to_string()),
-            skip_count: true,
-            batch_size: Some(50),
-            row_limit: None,
-            date_time_format: None,
-            csv_quote_mode: CsvQuoteMode::All,
-            null_literal: String::new(),
-            numeric_column_right_align: false,
-            column_comments: None,
-            auto_filter: None,
-            split_max_mb: None,
-            omit_database_qualifier: None,
-        };
-        let context = table_export_sql_context(DatabaseType::Iotdb, None, request.schema.as_deref());
-        let columns = vec!["Time".to_string(), "root.test.device2.temperature".to_string()];
-        let query_columns = table_export_query_columns(&request, &context, &columns).unwrap();
-        assert_eq!(query_columns.as_ref(), &["temperature".to_string()]);
-
-        assert_eq!(
-            table_cursor_sql(&request, &context, query_columns.as_ref(), &[], &[]),
-            "SELECT temperature FROM root.test.device2 WHERE (temperature > 1) ORDER BY Time DESC"
-        );
-        assert_eq!(
-            table_page_sql(&request, &context, query_columns.as_ref(), &[], &[], false, &[], 100, 50),
-            "SELECT temperature FROM \"root.test\".\"device2\" WHERE (temperature > 1) ORDER BY Time DESC LIMIT 50 OFFSET 100"
-        );
-
-        let csv = format_csv(&columns, &[vec![json!(1_700_000_000_000_i64), json!(21.5)]]);
-        assert!(csv.starts_with("\"Time\",\"root.test.device2.temperature\"\n"));
-        assert!(csv.contains("\"1700000000000\",\"21.5\""));
-
-        let workbook = build_xlsx_workbook(&XlsxWorksheetData {
-            sheet_name: Some("device2".to_string()),
-            columns,
-            column_types: vec!["INT64".to_string(), "DOUBLE".to_string()],
-            column_comments: vec![],
-            rows: vec![vec![json!(1_700_000_000_000_i64), json!(21.5)]],
-            numeric_column_right_align: false,
-            auto_filter: None,
-        })
-        .unwrap();
-        let sheet = read_zip_entry(&workbook, "xl/worksheets/sheet1.xml");
-        assert!(sheet.contains("Time"));
-        assert!(sheet.contains("root.test.device2.temperature"));
-    }
-
-    #[test]
-    fn iotdb_table_export_matches_time_case_insensitively() {
-        let request = TableExportRequest {
-            export_id: "export-iotdb-case".to_string(),
-            connection_id: "conn-1".to_string(),
-            database: "root.test".to_string(),
-            schema: Some("root.test".to_string()),
-            identifier_quote: None,
-            table_name: "device2".to_string(),
-            file_path: "device2.csv".to_string(),
-            format: "csv".to_string(),
-            insert_mode: Default::default(),
-            insert_dialect: Default::default(),
-            columns: None,
-            selected_columns: None,
-            column_types: None,
-            column_extras: None,
-            primary_keys: None,
-            exclude_primary_keys: false,
-            where_input: None,
-            order_by: None,
-            skip_count: true,
-            batch_size: Some(50),
-            row_limit: None,
-            date_time_format: None,
-            csv_quote_mode: CsvQuoteMode::All,
-            null_literal: String::new(),
-            numeric_column_right_align: false,
-            column_comments: None,
-            auto_filter: None,
-            split_max_mb: None,
-            omit_database_qualifier: None,
-        };
-        let context = table_export_sql_context(DatabaseType::Iotdb, None, request.schema.as_deref());
-        let columns = vec!["tImE".to_string(), "temperature".to_string()];
-        let query_columns = table_export_query_columns(&request, &context, &columns).unwrap();
-
-        assert_eq!(
-            table_cursor_sql(&request, &context, query_columns.as_ref(), &[], &[]),
-            "SELECT temperature FROM root.test.device2"
-        );
-    }
-
-    #[test]
-    fn iotdb_table_export_rejects_only_implicit_time() {
-        let request = TableExportRequest {
-            export_id: "export-iotdb-time".to_string(),
-            connection_id: "conn-1".to_string(),
-            database: "root.test".to_string(),
-            schema: Some("root.test".to_string()),
-            identifier_quote: None,
-            table_name: "device2".to_string(),
-            file_path: "device2.csv".to_string(),
-            format: "csv".to_string(),
-            insert_mode: Default::default(),
-            insert_dialect: Default::default(),
-            columns: None,
-            selected_columns: None,
-            column_types: None,
-            column_extras: None,
-            primary_keys: None,
-            exclude_primary_keys: false,
-            where_input: None,
-            order_by: None,
-            skip_count: true,
-            batch_size: Some(50),
-            row_limit: None,
-            date_time_format: None,
-            csv_quote_mode: CsvQuoteMode::All,
-            null_literal: String::new(),
-            numeric_column_right_align: false,
-            column_comments: None,
-            auto_filter: None,
-            split_max_mb: None,
-            omit_database_qualifier: None,
-        };
-        let context = table_export_sql_context(DatabaseType::Iotdb, None, request.schema.as_deref());
-        let error = table_export_query_columns(&request, &context, &["TIME".to_string()]).unwrap_err();
-        assert_eq!(error, "IoTDB table export requires at least one non-Time column");
-    }
-
-    #[test]
-    fn iotdb_table_export_does_not_guess_other_device_paths() {
-        let request = TableExportRequest {
-            export_id: "export-iotdb-other-device".to_string(),
-            connection_id: "conn-1".to_string(),
-            database: "root.test".to_string(),
-            schema: Some("root.test".to_string()),
-            identifier_quote: None,
-            table_name: "device2".to_string(),
-            file_path: "device2.csv".to_string(),
-            format: "csv".to_string(),
-            insert_mode: Default::default(),
-            insert_dialect: Default::default(),
-            columns: None,
-            selected_columns: None,
-            column_types: None,
-            column_extras: None,
-            primary_keys: None,
-            exclude_primary_keys: false,
-            where_input: None,
-            order_by: None,
-            skip_count: true,
-            batch_size: Some(50),
-            row_limit: None,
-            date_time_format: None,
-            csv_quote_mode: CsvQuoteMode::All,
-            null_literal: String::new(),
-            numeric_column_right_align: false,
-            column_comments: None,
-            auto_filter: None,
-            split_max_mb: None,
-            omit_database_qualifier: None,
-        };
-        let context = table_export_sql_context(DatabaseType::Iotdb, None, request.schema.as_deref());
-        let columns = vec![
-            "Time".to_string(),
-            "root.test.device2.temperature".to_string(),
-            "root.other.device.temperature".to_string(),
-        ];
-
-        assert_eq!(
-            table_export_query_columns(&request, &context, &columns).unwrap().as_ref(),
-            &["temperature".to_string(), "root.other.device.temperature".to_string()]
-        );
-    }
-
-    #[test]
-    fn non_iotdb_table_export_preserves_columns_named_time() {
-        let request = TableExportRequest {
-            export_id: "export-time-column".to_string(),
-            connection_id: "conn-1".to_string(),
-            database: "app".to_string(),
-            schema: None,
-            identifier_quote: None,
-            table_name: "samples".to_string(),
-            file_path: "samples.csv".to_string(),
-            format: "csv".to_string(),
-            insert_mode: Default::default(),
-            insert_dialect: Default::default(),
-            columns: None,
-            selected_columns: None,
-            column_types: None,
-            column_extras: None,
-            primary_keys: None,
-            exclude_primary_keys: false,
-            where_input: None,
-            order_by: None,
-            skip_count: true,
-            batch_size: Some(25),
-            row_limit: None,
-            date_time_format: None,
-            csv_quote_mode: CsvQuoteMode::All,
-            null_literal: String::new(),
-            numeric_column_right_align: false,
-            column_comments: None,
-            auto_filter: None,
-            split_max_mb: None,
-            omit_database_qualifier: None,
-        };
-        let columns = vec!["Time".to_string(), "value".to_string()];
-
-        for (database_type, cursor_sql, page_sql) in [
-            (
-                DatabaseType::Mysql,
-                "SELECT `Time`, `value` FROM `samples`",
-                "SELECT `Time`, `value` FROM `samples` LIMIT 25 OFFSET 10",
-            ),
-            (
-                DatabaseType::Postgres,
-                "SELECT \"Time\", \"value\" FROM \"samples\"",
-                "SELECT \"Time\", \"value\" FROM \"samples\" LIMIT 25 OFFSET 10",
-            ),
-        ] {
-            let context = table_export_sql_context(database_type, None, None);
-            let query_columns = table_export_query_columns(&request, &context, &columns).unwrap();
-            assert!(matches!(query_columns, Cow::Borrowed(_)));
-            assert_eq!(table_cursor_sql(&request, &context, query_columns.as_ref(), &[], &[]), cursor_sql);
-            assert_eq!(
-                table_page_sql(&request, &context, query_columns.as_ref(), &[], &[], false, &[], 10, 25),
-                page_sql
-            );
-        }
-    }
-
-    #[test]
-    fn oracle_table_cursor_sql_builds_single_ordered_select() {
-        let request = TableExportRequest {
-            export_id: "export-1".to_string(),
-            connection_id: "conn-1".to_string(),
-            database: "ORCL".to_string(),
-            schema: Some("APP".to_string()),
-            identifier_quote: None,
-            table_name: "events".to_string(),
-            file_path: "events.csv".to_string(),
-            format: "csv".to_string(),
-            insert_mode: Default::default(),
-            insert_dialect: Default::default(),
-            columns: None,
-            selected_columns: None,
-            column_types: None,
-            column_extras: None,
-            primary_keys: None,
-            exclude_primary_keys: false,
-            where_input: Some("WHERE status = 'active'".to_string()),
-            order_by: None,
-            skip_count: false,
-            batch_size: Some(500),
-            row_limit: Some(1000),
-            date_time_format: None,
-            csv_quote_mode: CsvQuoteMode::All,
-            null_literal: String::new(),
-            numeric_column_right_align: false,
-            column_comments: None,
-            auto_filter: None,
-            split_max_mb: None,
-            omit_database_qualifier: None,
-        };
-        let context = table_export_sql_context(DatabaseType::Oracle, None, request.schema.as_deref());
-
-        let sql = table_cursor_sql(
-            &request,
-            &context,
-            &[String::from("id"), String::from("status")],
-            &[],
-            &[String::from("id")],
-        );
-
-        assert_eq!(
-            sql,
-            "SELECT \"id\", \"status\" FROM \"APP\".\"events\" WHERE (status = 'active') ORDER BY \"id\" ASC"
-        );
-        assert!(!sql.contains("OFFSET"));
-        assert!(!sql.contains("FETCH NEXT"));
-        assert!(!sql.contains("ROWNUM"));
-    }
-
-    #[test]
-    fn gbase8s_table_export_uses_owner_free_informix_queries() {
-        let request = TableExportRequest {
-            export_id: "export-gbase8s".to_string(),
-            connection_id: "conn-1".to_string(),
-            database: "appdb".to_string(),
-            schema: Some("gbasedbt".to_string()),
-            identifier_quote: Some(String::new()),
-            table_name: "orders".to_string(),
-            file_path: "orders.txt".to_string(),
-            format: "txt".to_string(),
-            insert_mode: Default::default(),
-            insert_dialect: Default::default(),
-            columns: None,
-            selected_columns: None,
-            column_types: None,
-            column_extras: None,
-            primary_keys: None,
-            exclude_primary_keys: false,
-            where_input: None,
-            order_by: None,
-            skip_count: false,
-            batch_size: Some(50),
-            row_limit: None,
-            date_time_format: None,
-            csv_quote_mode: CsvQuoteMode::All,
-            null_literal: String::new(),
-            numeric_column_right_align: false,
-            column_comments: None,
-            auto_filter: None,
-            split_max_mb: None,
-            omit_database_qualifier: None,
-        };
-        let columns = vec!["id".to_string(), "payload".to_string()];
-        let primary_keys = vec!["id".to_string()];
-        let context = table_export_sql_context(DatabaseType::Gbase, Some("gbase8s"), request.schema.as_deref());
-
-        assert_eq!(context.database_type, DatabaseType::Informix);
-        assert_eq!(context.schema, None);
-        assert_eq!(
-            table_cursor_sql(&request, &context, &columns, &[], &primary_keys),
-            "SELECT id, payload FROM orders ORDER BY id ASC"
-        );
-        assert_eq!(
-            table_page_sql(&request, &context, &columns, &[], &primary_keys, false, &[], 100, 50),
-            "SELECT SKIP 100 FIRST 50 id, payload FROM orders ORDER BY id"
-        );
-        assert_eq!(
-            table_page_sql(&request, &context, &columns, &[], &primary_keys, true, &[json!(10)], 0, 50),
-            "SELECT FIRST 50 id, payload FROM orders WHERE id > 10 ORDER BY id ASC"
-        );
-        assert_eq!(
-            count_sql_with_where_and_identifier_quote(
-                &request.table_name,
-                context.schema.unwrap_or(""),
-                &context.database_type,
-                None,
-                None,
-                request.identifier_quote.as_deref(),
-            ),
-            "SELECT COUNT(*) FROM orders"
-        );
-
-        let regular_gbase = table_export_sql_context(DatabaseType::Gbase, Some("gbase8a"), request.schema.as_deref());
-        assert_eq!(regular_gbase.database_type, DatabaseType::Gbase);
-        assert_eq!(regular_gbase.schema, Some("gbasedbt"));
-        assert_eq!(
-            table_page_sql(&request, &regular_gbase, &columns, &[], &primary_keys, false, &[], 100, 50),
-            "SELECT \"id\", \"payload\" FROM \"gbasedbt\".\"orders\" ORDER BY \"id\" LIMIT 50 OFFSET 100"
-        );
-
-        let informix = table_export_sql_context(DatabaseType::Informix, None, request.schema.as_deref());
-        assert_eq!(informix.database_type, DatabaseType::Informix);
-        assert_eq!(informix.schema, Some("gbasedbt"));
-        assert_eq!(
-            table_page_sql(&request, &informix, &columns, &[], &primary_keys, false, &[], 0, 50),
-            "SELECT FIRST 50 id, payload FROM gbasedbt.orders ORDER BY id"
-        );
-    }
-
-    #[test]
-    fn gaussdb_m_table_export_uses_backticks_across_all_query_paths() {
-        let request = TableExportRequest {
-            export_id: "export-gaussdb-m".to_string(),
-            connection_id: "conn-1".to_string(),
-            database: "app".to_string(),
-            schema: Some("app_schema".to_string()),
-            identifier_quote: Some("`".to_string()),
-            table_name: "order".to_string(),
-            file_path: "order.csv".to_string(),
-            format: "csv".to_string(),
-            insert_mode: Default::default(),
-            insert_dialect: Default::default(),
-            columns: None,
-            selected_columns: None,
-            column_types: None,
-            column_extras: None,
-            primary_keys: None,
-            exclude_primary_keys: false,
-            where_input: None,
-            order_by: None,
-            skip_count: false,
-            batch_size: Some(100),
-            row_limit: None,
-            date_time_format: None,
-            csv_quote_mode: CsvQuoteMode::All,
-            null_literal: String::new(),
-            numeric_column_right_align: false,
-            column_comments: None,
-            auto_filter: None,
-            split_max_mb: None,
-            omit_database_qualifier: None,
-        };
-        let columns = vec!["id".to_string(), "DisplayName".to_string()];
-        let primary_keys = vec!["id".to_string()];
-        let context = table_export_sql_context(DatabaseType::Gaussdb, None, request.schema.as_deref());
-
-        assert_eq!(
-            table_cursor_sql(&request, &context, &columns, &[], &primary_keys),
-            "SELECT id, `DisplayName` FROM app_schema.`order` ORDER BY id ASC"
-        );
-        assert_eq!(
-            table_page_sql(&request, &context, &columns, &[], &primary_keys, false, &[], 100, 100),
-            "SELECT id, `DisplayName` FROM app_schema.`order` ORDER BY id LIMIT 100 OFFSET 100"
-        );
-        assert_eq!(
-            table_page_sql(&request, &context, &columns, &[], &primary_keys, true, &[json!(10)], 0, 100,),
-            "SELECT id, `DisplayName` FROM app_schema.`order` WHERE id > 10 ORDER BY id ASC LIMIT 100"
-        );
-        assert_eq!(
-            count_sql_with_where_and_identifier_quote(
-                &request.table_name,
-                request.schema.as_deref().unwrap(),
-                &DatabaseType::Gaussdb,
-                None,
-                None,
-                request.identifier_quote.as_deref(),
-            ),
-            "SELECT COUNT(*) FROM app_schema.`order`"
-        );
     }
 
     #[test]
@@ -3400,73 +2529,6 @@ mod tests {
         csv_request.format = "csv".to_string();
         let csv_sql = table_cursor_sql(&csv_request, &context, &columns, &column_types, &primary_keys);
         assert_eq!(csv_sql, "SELECT `id`, `geom`, `name` FROM `spatial_data` ORDER BY `id` ASC");
-    }
-
-    #[test]
-    fn oracle_requested_export_columns_omit_synthetic_rowid_and_keep_metadata_aligned() {
-        let columns = vec!["__DBX_ROWID".to_string(), "ID".to_string(), "NAME".to_string()];
-        let column_types = vec![Some("VARCHAR2".to_string()), Some("NUMBER".to_string()), Some("VARCHAR2".to_string())];
-        let primary_keys = vec!["__DBX_ROWID".to_string()];
-
-        let (columns, column_types, primary_keys) =
-            resolve_requested_export_columns(DatabaseType::Oracle, &columns, Some(&column_types), Some(&primary_keys));
-
-        assert_eq!(columns, vec!["ID", "NAME"]);
-        assert_eq!(column_types, vec![Some("NUMBER".to_string()), Some("VARCHAR2".to_string())]);
-        assert!(primary_keys.is_empty());
-
-        let request = TableExportRequest {
-            export_id: "export-rowid".to_string(),
-            connection_id: "conn-1".to_string(),
-            database: "ORCL".to_string(),
-            schema: Some("APP".to_string()),
-            identifier_quote: None,
-            table_name: "USERS".to_string(),
-            file_path: "users.sql".to_string(),
-            format: "sql".to_string(),
-            insert_mode: Default::default(),
-            insert_dialect: Default::default(),
-            columns: None,
-            selected_columns: None,
-            column_types: None,
-            column_extras: None,
-            primary_keys: None,
-            exclude_primary_keys: false,
-            where_input: None,
-            order_by: None,
-            skip_count: false,
-            batch_size: Some(100),
-            row_limit: None,
-            date_time_format: None,
-            csv_quote_mode: CsvQuoteMode::All,
-            null_literal: String::new(),
-            numeric_column_right_align: false,
-            column_comments: None,
-            auto_filter: None,
-            split_max_mb: None,
-            omit_database_qualifier: None,
-        };
-        let context = table_export_sql_context(DatabaseType::Oracle, None, request.schema.as_deref());
-        let sql = table_cursor_sql(&request, &context, &columns, &[], &primary_keys);
-        assert_eq!(sql, "SELECT \"ID\", \"NAME\" FROM \"APP\".\"USERS\"");
-
-        let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-            database_type: Some(DatabaseType::Oracle),
-            identifier_quote: request.identifier_quote,
-            schema: request.schema,
-            table_name: Some(request.table_name),
-            qualified_table_name: None,
-            columns,
-            column_types,
-            column_extras: Vec::new(),
-            spatial_columns: Vec::new(),
-            spatial_values: Vec::new(),
-            rows: vec![vec![json!(1), json!("Ada")]],
-            batch_size: Some(100),
-            preserve_original_language: false,
-        })
-        .unwrap();
-        assert_eq!(statements, vec!["INSERT INTO \"APP\".\"USERS\" (\"ID\", \"NAME\") VALUES (1, 'Ada');"]);
     }
 
     #[test]
@@ -3571,110 +2633,6 @@ mod tests {
 
         request.omit_database_qualifier = None;
         assert_eq!(build(&request), vec!["INSERT INTO `warehouse`.`events` (`id`) VALUES (1);"]);
-    }
-
-    #[test]
-    fn requested_export_columns_preserve_regular_oracle_and_non_oracle_columns() {
-        let oracle_columns = vec!["ROW_ID".to_string(), "NAME".to_string()];
-        let (resolved_oracle, _, _) =
-            resolve_requested_export_columns(DatabaseType::Oracle, &oracle_columns, None, None);
-        assert_eq!(resolved_oracle, oracle_columns);
-
-        let mysql_columns = vec!["__DBX_ROWID".to_string(), "name".to_string()];
-        let (resolved_mysql, _, _) = resolve_requested_export_columns(DatabaseType::Mysql, &mysql_columns, None, None);
-        assert_eq!(resolved_mysql, mysql_columns);
-    }
-
-    #[test]
-    fn requested_sql_exports_resolve_column_metadata_for_mysql_and_sqlserver() {
-        let table_columns = vec![
-            crate::db::ColumnInfo {
-                name: "ID".to_string(),
-                data_type: "int".to_string(),
-                extra: Some("auto_increment".to_string()),
-                ..Default::default()
-            },
-            crate::db::ColumnInfo {
-                name: "virtual_total".to_string(),
-                data_type: "geometry".to_string(),
-                extra: Some("VIRTUAL GENERATED".to_string()),
-                ..Default::default()
-            },
-        ];
-        let requested_columns = vec!["virtual_total".to_string(), "id".to_string(), "missing".to_string()];
-
-        assert!(requested_sql_export_needs_column_metadata(DatabaseType::Mysql, "SQL"));
-        assert!(requested_sql_export_needs_column_metadata(DatabaseType::SqlServer, "sql"));
-        for format in ["csv", "json", "xlsx"] {
-            assert!(!requested_sql_export_needs_column_metadata(DatabaseType::Mysql, format));
-        }
-        assert!(!requested_sql_export_needs_column_metadata(DatabaseType::Postgres, "sql"));
-        assert!(!requested_sql_export_needs_column_metadata(DatabaseType::SqlServer, "csv"));
-        assert_eq!(
-            resolve_requested_export_column_types(
-                DatabaseType::Mysql,
-                &requested_columns,
-                &[Some("".to_string()), Some("bigint".to_string())],
-                &table_columns,
-            ),
-            vec![Some("geometry".to_string()), Some("bigint".to_string()), None]
-        );
-        assert_eq!(
-            resolve_requested_export_column_extras(&requested_columns, &table_columns),
-            vec![Some("VIRTUAL GENERATED".to_string()), Some("auto_increment".to_string()), None]
-        );
-
-        // SQL Server: result-set types report `rowversion` as `varbinary`, so the
-        // table metadata types must win — this is what makes the `timestamp` /
-        // `computed` omission rules hit on grid SQL exports.
-        let sqlserver_columns = vec![
-            crate::db::ColumnInfo { name: "id".to_string(), data_type: "int".to_string(), ..Default::default() },
-            crate::db::ColumnInfo {
-                name: "row_version".to_string(),
-                data_type: "timestamp".to_string(),
-                ..Default::default()
-            },
-            crate::db::ColumnInfo {
-                name: "total".to_string(),
-                data_type: "int".to_string(),
-                extra: Some("computed".to_string()),
-                ..Default::default()
-            },
-        ];
-        let sqlserver_requested = vec!["id".to_string(), "row_version".to_string(), "total".to_string()];
-        assert_eq!(
-            resolve_requested_export_column_types(
-                DatabaseType::SqlServer,
-                &sqlserver_requested,
-                &[Some("int4".to_string()), Some("varbinary".to_string()), Some("int4".to_string())],
-                &sqlserver_columns,
-            ),
-            vec![Some("int".to_string()), Some("timestamp".to_string()), Some("int".to_string())]
-        );
-        assert_eq!(
-            resolve_requested_export_column_extras(&sqlserver_requested, &sqlserver_columns),
-            vec![None, None, Some("computed".to_string())]
-        );
-    }
-
-    #[test]
-    fn requested_column_extras_stay_aligned_with_filtered_columns() {
-        let columns = vec!["table_id".to_string(), "table_name".to_string()];
-        let extras = vec![Some("identity(1,1)".to_string()), None];
-        assert_eq!(
-            resolve_requested_column_extras_by_position(DatabaseType::SqlServer, &columns, Some(&extras)),
-            vec![Some("identity(1,1)".to_string()), None]
-        );
-        assert!(resolve_requested_column_extras_by_position(DatabaseType::SqlServer, &columns, None).is_empty());
-
-        // The synthetic ROWID column never reaches the export, so its EXTRA entry
-        // must be dropped with it instead of shifting the remaining columns.
-        let oracle_columns = vec!["__DBX_ROWID".to_string(), "id".to_string()];
-        let oracle_extras = vec![Some("synthetic".to_string()), Some("identity".to_string())];
-        assert_eq!(
-            resolve_requested_column_extras_by_position(DatabaseType::Oracle, &oracle_columns, Some(&oracle_extras)),
-            vec![Some("identity".to_string())]
-        );
     }
 
     #[test]

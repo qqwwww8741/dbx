@@ -15,7 +15,7 @@ describe("model generation", () => {
   });
 
   it("preserves metadata while rendering a target", () => {
-    const shape = modelShapeFromTable(node, columns, "postgres");
+    const shape = modelShapeFromTable(node, columns, "mysql");
     const code = generateModel(shape, "csharp", { includeHeaderComments: true });
     expect(code).toContain("UserAccounts");
     expect(code).toContain("Identifier");
@@ -24,7 +24,7 @@ describe("model generation", () => {
   });
 
   it("hides generated schema comments by default", () => {
-    const shape = modelShapeFromTable(node, columns, "postgres");
+    const shape = modelShapeFromTable(node, columns, "mysql");
     const code = generateModel(shape, "go-struct");
     expect(code).not.toContain("// id: bigint");
     expect(generateModel(shape, "go-struct", { includeHeaderComments: true })).toContain("// id: bigint");

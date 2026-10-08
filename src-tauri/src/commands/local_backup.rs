@@ -145,19 +145,6 @@ fn write_local_backup(path: &Path, snapshot: &SyncSnapshot) -> Result<LocalBacku
     Ok(LocalBackupExportSummary { bytes })
 }
 
-fn write_backup_archive(file: File, manifest_bytes: &[u8], snapshot_bytes: &[u8]) -> Result<u64, String> {
-    let mut archive = ZipWriter::new(file);
-    let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated).unix_permissions(0o600);
-    archive.start_file(MANIFEST_ENTRY, options).map_err(|error| error.to_string())?;
-    archive.write_all(manifest_bytes).map_err(|error| error.to_string())?;
-    archive.start_file(SNAPSHOT_ENTRY, options).map_err(|error| error.to_string())?;
-    archive.write_all(snapshot_bytes).map_err(|error| error.to_string())?;
-    let file = archive.finish().map_err(|error| error.to_string())?;
-    file.sync_all().map_err(|error| error.to_string())?;
-    let bytes = file.metadata().map_err(|error| error.to_string())?.len();
-    Ok(bytes)
-}
-
 fn temporary_backup_path(path: &Path) -> Result<PathBuf, String> {
     let file_name = path.file_name().ok_or_else(|| "Local backup path has no filename.".to_string())?;
     let mut temporary_name = std::ffi::OsString::from(".");
@@ -260,4 +247,17 @@ mod tests {
 
         assert_eq!(fs::read(&destination).unwrap(), b"previous backup");
     }
+}
+
+fn write_backup_archive(file: File, manifest_bytes: &[u8], snapshot_bytes: &[u8]) -> Result<u64, String> {
+    let mut archive = ZipWriter::new(file);
+    let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated).unix_permissions(0o600);
+    archive.start_file(MANIFEST_ENTRY, options).map_err(|error| error.to_string())?;
+    archive.write_all(manifest_bytes).map_err(|error| error.to_string())?;
+    archive.start_file(SNAPSHOT_ENTRY, options).map_err(|error| error.to_string())?;
+    archive.write_all(snapshot_bytes).map_err(|error| error.to_string())?;
+    let file = archive.finish().map_err(|error| error.to_string())?;
+    file.sync_all().map_err(|error| error.to_string())?;
+    let bytes = file.metadata().map_err(|error| error.to_string())?.len();
+    Ok(bytes)
 }

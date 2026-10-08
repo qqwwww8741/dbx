@@ -2,7 +2,7 @@ import { computed, ref, type ComputedRef, type Ref } from "vue";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useDatabaseOptions, catalogDatabaseOptionsKey } from "@/composables/useDatabaseOptions";
 import { schemaOptionsCacheKey, useSchemaOptions } from "@/composables/useSchemaOptions";
-import { isInternalDorisCatalog } from "@/lib/database/databaseFeatureSupport";
+
 import { effectiveDatabaseTypeForConnection } from "@/lib/database/jdbcDialect";
 import { supportsQueryExecution } from "@/lib/database/databaseFeatureSupport";
 import { sqlExecutionTargetCapabilities, targetCanUseDefaultWhenDatabaseListEmpty, targetDefaultDatabase, targetIsSingleDatabase, targetSupportsCatalog, targetSupportsSchema, targetUsesConnectionOnlyScope } from "@/lib/database/sqlExecutionTargetCapabilities";
@@ -35,10 +35,10 @@ function errorMessage(error: unknown): string {
 }
 
 function catalogTargetValue(catalog: CatalogInfo): MultiDbTargetCatalogOption {
-  const isInternal = isInternalDorisCatalog(catalog.catalog_type, catalog.name);
+  const isInternal = false;
   return {
     name: catalog.name,
-    targetCatalog: isInternal ? undefined : catalog.name,
+    targetCatalog: catalog.name,
     isInternal,
   };
 }

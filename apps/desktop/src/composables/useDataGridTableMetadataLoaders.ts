@@ -7,7 +7,7 @@ import { loadObjectMetadataFacet } from "@/lib/metadata/objectMetadataCache";
 import { tableObjectSourceKind } from "@/lib/table/tableObjectSourceKind";
 import { columnIndexMetadataRequestCurrent, columnIndexTableIdentity } from "@/lib/dataGrid/dataGridColumnIndexIcon";
 import { foreignKeyMetadataRequestCurrent, foreignKeyTableIdentity } from "@/lib/dataGrid/dataGridForeignKeyNavigation";
-import { refreshLoadedMongoIndexes } from "@/lib/mongo/mongoIndexMetadata";
+
 import type { ColumnInfo, ConstraintInfo, DatabaseType, ForeignKeyInfo, IndexInfo, PgTablePartitioning, TriggerInfo } from "@/types/database";
 import { useConnectionStore } from "@/stores/connectionStore";
 
@@ -155,23 +155,9 @@ export function useDataGridTableMetadataLoaders(options: DataGridTableMetadataLo
     }
   }
 
-  async function fetchTableOwner(force = false) {
-    if (options.resolvedDatabaseType.value !== "postgres" || !props.connectionId || !props.database || !props.tableMeta?.schema || !props.tableMeta.tableName) return;
-    const request = tableRequest();
-    if (!request) return;
-    const requestGeneration = ++state.tableOwnerRequestGeneration.value;
-    state.tableOwnerLoading.value = true;
-    state.tableOwnerError.value = "";
-    try {
-      const result = await loadObjectMetadataFacet(request, "owner", () => api.getTableOwner(request.connectionId, request.database, request.schema, request.tableName), { force });
-      if (requestGeneration !== state.tableOwnerRequestGeneration.value) return;
-      state.tableOwner.value = result.value;
-    } catch (error: any) {
-      if (requestGeneration !== state.tableOwnerRequestGeneration.value) return;
-      state.tableOwner.value = null;
-      state.tableOwnerError.value = error?.message || String(error);
-    } finally {
-      if (requestGeneration === state.tableOwnerRequestGeneration.value) state.tableOwnerLoading.value = false;
+  async function fetchTableOwner(_force = false) {
+    {
+      return;
     }
   }
 
@@ -203,19 +189,6 @@ export function useDataGridTableMetadataLoaders(options: DataGridTableMetadataLo
   async function reloadIndexes() {
     state.indexesLoaded.value = false;
     await fetchIndexes();
-  }
-
-  async function refreshMongoIndexMetadataAfterMutation() {
-    await reloadIndexes();
-    const connectionId = props.connectionId;
-    const database = props.database;
-    const collection = props.tableMeta?.tableName;
-    if (!connectionId || !database || !collection) return;
-    try {
-      await refreshLoadedMongoIndexes(options.connectionStore, { connectionId, database, collection });
-    } catch (error: any) {
-      options.toastMongoIndexRefreshError(String(error?.message || error));
-    }
   }
 
   async function fetchForeignKeys() {
@@ -312,7 +285,7 @@ export function useDataGridTableMetadataLoaders(options: DataGridTableMetadataLo
     fetchTableOwner,
     fetchIndexes,
     reloadIndexes,
-    refreshMongoIndexMetadataAfterMutation,
+
     fetchForeignKeys,
     fetchTriggers,
     fetchConstraints,

@@ -6,7 +6,7 @@ import type { DatabaseType, QueryResult } from "@/types/database";
 // callers can detect this case and fall back to a structure-only (LIMIT 0)
 // preview instead of showing a cryptic server error.
 const NO_SNAPSHOT_ERROR_PATTERN = /there is currently no snapshot/i;
-const MYSQL_PROTOCOL_DATABASE_TYPES = new Set<DatabaseType>(["mysql", "doris", "starrocks", "manticoresearch"]);
+const MYSQL_PROTOCOL_DATABASE_TYPES = new Set<DatabaseType>(["mysql"]);
 
 export function usesMysqlProtocolDatabaseType(databaseType: DatabaseType | undefined): boolean {
   return databaseType !== undefined && MYSQL_PROTOCOL_DATABASE_TYPES.has(databaseType);

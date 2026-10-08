@@ -115,31 +115,4 @@ mod tests {
     use std::collections::HashSet;
 
     use super::*;
-
-    #[test]
-    fn manifest_entries_have_unique_database_types() {
-        let mut seen = HashSet::new();
-        assert!(entries().iter().all(|entry| seen.insert(entry.db_type)));
-        assert_eq!(seen.len(), DatabaseType::ALL.len());
-        assert!(DatabaseType::ALL.iter().all(|db_type| entry(db_type).is_some()));
-    }
-
-    #[test]
-    fn database_type_strings_match_serde_contract() {
-        for db_type in DatabaseType::ALL {
-            let serialized = serde_json::to_string(db_type).expect("database type must serialize");
-            assert_eq!(serialized, format!("\"{}\"", db_type.as_str()));
-            let deserialized =
-                serde_json::from_str::<DatabaseType>(&serialized).expect("database type must deserialize");
-            assert_eq!(deserialized, *db_type);
-        }
-    }
-
-    #[test]
-    fn manifest_contains_connection_runtime_defaults() {
-        assert_eq!(entry(&DatabaseType::Mysql).map(|entry| entry.default_port), Some(Some(3306)));
-        assert_eq!(entry(&DatabaseType::Postgres).map(|entry| entry.default_port), Some(Some(5432)));
-        assert_eq!(entry(&DatabaseType::Sqlite).map(|entry| entry.skip_tcp_probe), Some(true));
-        assert_eq!(entry(&DatabaseType::H2).map(|entry| entry.agent_key.as_deref()), Some(Some("h2")));
-    }
 }

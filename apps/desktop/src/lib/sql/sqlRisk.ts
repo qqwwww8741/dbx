@@ -1,8 +1,4 @@
-import { classifyElasticsearchRequestRisk, classifyElasticsearchSourceRisk, type ElasticsearchRequestRisk } from "@/lib/elasticsearch/elasticsearchRequestRisk";
-import { classifySolrRequestRisk, classifySolrSourceRisk } from "@/lib/solr/solrRequestRisk";
-import { classifyCouchDbRequestRisk, classifyCouchDbSourceRisk, type CouchDbRequestRisk } from "@/lib/couchdb/couchdbRequestRisk";
-import { mongoAggregateWriteStage, splitMongoCommandRanges, type MongoCommand } from "@/lib/mongo/mongoShellCommand";
-import { isCouchDbDatabaseType, isElasticsearchCompatibleDatabaseType, isSolrDatabaseType, type DatabaseType } from "@/types/database";
+import { type DatabaseType } from "@/types/database";
 
 export type SqlRiskLevel = "read" | "write" | "ddl" | "transaction" | "unknown";
 
@@ -48,7 +44,7 @@ const SAFE_READ_PRAGMA_NAMES = new Set(["table_info", "table_xinfo", "index_list
  * backslashes literal can only split more statements than before, which raises
  * the assessed risk rather than lowering it.
  */
-const MYSQL_LEXER_DATABASE_TYPES = new Set<string>(["mysql", "doris", "starrocks", "manticoresearch", "goldendb"]);
+const MYSQL_LEXER_DATABASE_TYPES = new Set<string>(["mysql"]);
 
 export function usesMysqlLexerRules(dialect?: DatabaseType | string): boolean {
   return typeof dialect === "string" && MYSQL_LEXER_DATABASE_TYPES.has(dialect.trim().toLowerCase());
@@ -70,31 +66,12 @@ export function splitSqlStatementsForSafety(sql: string, dialect?: DatabaseType 
 }
 
 export function classifySqlRisk(sql: string, options: SqlRiskOptions = {}): SqlRiskAssessment {
-  const mongoStatements = mongoShellStatements(sql, options.dialect);
-  if (mongoStatements) {
-    const highest = highestRiskStatement(mongoStatements);
-    return { ...highest, statements: mongoStatements };
-  }
-
-  // REST requests carry a JSON body that must not be split on semicolons, and
-  // every request in the text is classified so the highest risk wins.
-  const searchEngineRisk = searchEngineAssessment(sql, options.dialect, { elasticsearch: classifyElasticsearchSourceRisk, solr: classifySolrSourceRisk, couchdb: classifyCouchDbSourceRisk });
-  if (searchEngineRisk) return { ...searchEngineRisk, statements: [searchEngineRisk] };
-
   const statements = splitSqlStatementsForSafety(sql, options.dialect).map((statement) => classifySqlStatementRisk(statement, options));
   if (!statements.length) return { risk: "unknown", statements: [] };
-  const highest = statements.reduce<SqlRiskStatementAssessment>((current, statement) => (RISK_ORDER[statement.risk] > RISK_ORDER[current.risk] ? statement : current), { risk: "read" });
-  return { ...highest, statements };
+  return { ...highestRiskStatement(statements), statements };
 }
 
-export function classifySqlStatementRisk(sql: string, options: SqlRiskOptions = {}): SqlRiskStatementAssessment {
-  const mongoStatements = mongoShellStatements(sql, options.dialect);
-  if (mongoStatements) return highestRiskStatement(mongoStatements);
-
-  const dynamodbRisk = classifyDynamoDbStatementRisk(sql, options.dialect);
-  if (dynamodbRisk) return dynamodbRisk;
-  const searchEngineRisk = searchEngineAssessment(sql, options.dialect, { elasticsearch: classifyElasticsearchRequestRisk, solr: classifySolrRequestRisk, couchdb: classifyCouchDbRequestRisk });
-  if (searchEngineRisk) return searchEngineRisk;
+export function classifySqlStatementRisk(sql: string, _options: SqlRiskOptions = {}): SqlRiskStatementAssessment {
   return classifyTokens(tokenizeSqlForRisk(sql));
 }
 
@@ -109,21 +86,6 @@ export function classifySqlStatementRisk(sql: string, options: SqlRiskOptions = 
  * is a schema change, ...), which a request path does not carry. Reporting
  * `rest` keeps REST mutations as opaque as they were before this branch existed.
  */
-function searchEngineAssessment(
-  sql: string,
-  dialect: DatabaseType | string | undefined,
-  classify: { elasticsearch: (value: string) => ElasticsearchRequestRisk | null; solr: (value: string) => ElasticsearchRequestRisk | null; couchdb: (value: string) => CouchDbRequestRisk | null },
-): SqlRiskStatementAssessment | null {
-  const databaseType = dialect as DatabaseType | undefined;
-  const classifier = isSolrDatabaseType(databaseType) ? classify.solr : isCouchDbDatabaseType(databaseType) ? classify.couchdb : isElasticsearchCompatibleDatabaseType(databaseType) ? classify.elasticsearch : null;
-  if (!classifier) return null;
-  const risk = classifier(sql);
-  if (!risk) return null;
-  return { risk: risk === "read" ? "read" : risk === "write" ? "write" : "ddl", firstKeyword: "rest" };
-}
-
-const MONGO_READ_KINDS = new Set<MongoCommand["kind"]>(["find", "findExplain", "findOne", "countDocuments", "distinct", "getIndexes", "collectionStats", "version", "showDatabases", "use"]);
-const MONGO_DDL_KINDS = new Set<MongoCommand["kind"]>(["createIndex", "dropIndex", "dropIndexes", "dropCollection", "createUser"]);
 
 /**
  * Mongo query tabs execute shell commands through the structured Mongo path,
@@ -132,44 +94,9 @@ const MONGO_DDL_KINDS = new Set<MongoCommand["kind"]>(["createIndex", "dropIndex
  * Unknown or unparsed commands remain unsafe by falling through to the generic
  * classifier.
  */
-function mongoShellStatements(sql: string, dialect: DatabaseType | string | undefined): SqlRiskStatementAssessment[] | null {
-  if (dialect !== "mongodb") return null;
-  const commands = splitMongoCommandRanges(sql);
-  if (!commands.length) return null;
-
-  return commands.map(({ command }) => ({
-    risk: mongoCommandRisk(command),
-    firstKeyword: command.kind,
-  }));
-}
 
 function highestRiskStatement(statements: SqlRiskStatementAssessment[]): SqlRiskStatementAssessment {
   return statements.reduce<SqlRiskStatementAssessment>((current, statement) => (RISK_ORDER[statement.risk] > RISK_ORDER[current.risk] ? statement : current), { risk: "read" });
-}
-
-function mongoCommandRisk(command: MongoCommand): SqlRiskLevel {
-  if (MONGO_READ_KINDS.has(command.kind)) return "read";
-  if (command.kind === "aggregate") return mongoAggregateWriteStage(command.pipeline) ? "write" : "read";
-  if (command.kind === "runCommand") return "unknown";
-  if (MONGO_DDL_KINDS.has(command.kind)) return "ddl";
-  return "write";
-}
-
-function classifyDynamoDbStatementRisk(sql: string, dialect?: DatabaseType | string): SqlRiskStatementAssessment | null {
-  if (dialect !== "dynamodb") return null;
-  const header = sql
-    .split(/\r?\n/)
-    .find((line) => line.trim())
-    ?.trim()
-    .toUpperCase();
-  if (header === "DBX DYNAMODB SCAN" || header === "DBX DYNAMODB QUERY / SCAN") {
-    return { risk: "read", firstKeyword: "dbx" };
-  }
-  if (header === "DBX DYNAMODB INSERT ITEM" || header === "DBX DYNAMODB PUT ITEM" || header === "DBX DYNAMODB DELETE ITEM") {
-    return { risk: "write", firstKeyword: "dbx" };
-  }
-  if (header?.startsWith("DBX DYNAMODB")) return { risk: "unknown", firstKeyword: "dbx" };
-  return null;
 }
 
 export function isSqlRiskMutation(risk: SqlRiskLevel): boolean {

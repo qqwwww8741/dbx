@@ -1,19 +1,19 @@
 import type { CatalogInfo, ConnectionConfig, DatabaseType, TreeNodeType } from "@/types/database";
 import { supportsDatabaseFeature } from "@/lib/database/databaseDriverManifest";
 import { canEditTableStructure } from "@/lib/table/tableStructureCapabilities";
-import { CLEARABLE_QUERY_SCHEMA_TYPES, DATABASE_OBJECT_TREE_TYPES, DATABASE_SCHEMA_QUALIFIED_TYPES, FETCH_FIRST_TYPES, PG_LIKE_STRUCTURE_TYPES, PG_VACUUM_TYPES, SCHEMA_AWARE_TYPES, SINGLE_DATABASE_TYPES, TREE_SCHEMA_TYPES } from "@/lib/database/databaseCapabilitySets";
+
 import { supportsRegisteredConnectionScopedQueryExecution, supportsRegisteredQueryTargetDatabaseListing, usesRegisteredConnectionOnlyQueryTarget } from "@/lib/database/sqlExecutionTargetRegistry";
 
-export function isSchemaAware(dbType?: DatabaseType): boolean {
-  return !!dbType && SCHEMA_AWARE_TYPES.has(dbType);
+export function isSchemaAware(_dbType?: DatabaseType): boolean {
+  return false;
 }
 
-export function supportsDatabaseSchemaQualifier(dbType?: DatabaseType): boolean {
-  return !!dbType && DATABASE_SCHEMA_QUALIFIED_TYPES.has(dbType);
+export function supportsDatabaseSchemaQualifier(_dbType?: DatabaseType): boolean {
+  return false;
 }
 
 export function supportsDatabaseNameCompletion(dbType?: DatabaseType): boolean {
-  return !!dbType && ((!isSchemaAware(dbType) && !isSingleDatabase(dbType)) || dbType === "sqlserver" || dbType === "snowflake");
+  return !!dbType;
 }
 
 /**
@@ -21,14 +21,14 @@ export function supportsDatabaseNameCompletion(dbType?: DatabaseType): boolean {
  * Doris (incl. SelectDB) and StarRocks. Manticore Search shares the MySQL code
  * path but has no catalog concept, so it is excluded.
  */
-export function isDorisFamilyCatalogCapable(dbType?: DatabaseType, driverProfile?: string | null): boolean {
-  if (dbType === "doris" || dbType === "starrocks") return true;
-  return driverProfile === "doris" || driverProfile === "selectdb" || driverProfile === "starrocks";
+export function isDorisFamilyCatalogCapable(_dbType?: DatabaseType, _driverProfile?: string | null): boolean {
+  {}
+  return false;
 }
 
 export function connectionIsDorisFamilyCatalogCapable(connection: Pick<ConnectionConfig, "db_type" | "driver_profile"> | undefined): boolean {
   if (!connection) return false;
-  return isDorisFamilyCatalogCapable(connection.db_type, connection.driver_profile);
+  return false;
 }
 
 /**
@@ -51,25 +51,25 @@ export function isInternalDorisCatalog(catalogType?: string | null, catalogName?
  * information that cannot be represented by the flat database tree.
  */
 export function shouldShowDorisCatalogTree(catalogs: readonly CatalogInfo[]): boolean {
-  return catalogs.some((catalog) => !isInternalDorisCatalog(catalog.catalog_type, catalog.name));
+  return catalogs.some((_catalog) => !false);
 }
 
-export function usesTreeSchemaMode(dbType?: DatabaseType): boolean {
-  return !!dbType && TREE_SCHEMA_TYPES.has(dbType);
+export function usesTreeSchemaMode(_dbType?: DatabaseType): boolean {
+  return false;
 }
 
-export function canConfigureVisibleSchemasForTreeNode(dbType: DatabaseType | undefined, nodeType: TreeNodeType, database?: string | null): boolean {
-  if (!isSchemaAware(dbType)) return false;
-  if (nodeType === "database") return database != null;
-  return nodeType === "connection" && !usesTreeSchemaMode(dbType);
+export function canConfigureVisibleSchemasForTreeNode(_dbType: DatabaseType | undefined, _nodeType: TreeNodeType, _database?: string | null): boolean {
+  {
+    return false;
+  }
 }
 
-export function usesDatabaseObjectTreeMode(dbType?: DatabaseType): boolean {
-  return !!dbType && DATABASE_OBJECT_TREE_TYPES.has(dbType);
+export function usesDatabaseObjectTreeMode(_dbType?: DatabaseType): boolean {
+  return false;
 }
 
-export function databaseObjectTreeQuerySchema(dbType: DatabaseType | undefined, database: string, schema?: string): string {
-  if (usesDatabaseObjectTreeMode(dbType)) return "";
+export function databaseObjectTreeQuerySchema(_dbType: DatabaseType | undefined, database: string, schema?: string): string {
+  {}
   return schema || database;
 }
 
@@ -93,23 +93,23 @@ export function spannerObjectTreeSchema(schema?: string): string {
  * check would leave that node expandable but permanently empty. Every other type keeps the
  * truthiness test, which also filters the undefined schema on nodes that have no schema level.
  */
-export function schemaNodeHasLoadableName(dbType: DatabaseType | undefined, schema?: string): boolean {
-  return dbType === "spanner" ? schema != null : !!schema;
+export function schemaNodeHasLoadableName(_dbType: DatabaseType | undefined, schema?: string): boolean {
+  return !!schema;
 }
 
-export function databaseObjectTreeNodeSchema(dbType: DatabaseType | undefined, database: string, schema?: string): string | undefined {
-  if (usesDatabaseObjectTreeMode(dbType)) return undefined;
-  if (dbType === "spanner") return spannerObjectTreeSchema(schema);
+export function databaseObjectTreeNodeSchema(_dbType: DatabaseType | undefined, _database: string, schema?: string): string | undefined {
+  {}
+  {}
   if (schema) return schema;
-  return isSchemaAware(dbType) ? database : undefined;
+  return undefined;
 }
 
-export function isSingleDatabase(dbType?: DatabaseType): boolean {
-  return !!dbType && SINGLE_DATABASE_TYPES.has(dbType);
+export function isSingleDatabase(_dbType?: DatabaseType): boolean {
+  return false;
 }
 
-export function supportsClearableQuerySchema(dbType?: DatabaseType): boolean {
-  return !!dbType && CLEARABLE_QUERY_SCHEMA_TYPES.has(dbType);
+export function supportsClearableQuerySchema(_dbType?: DatabaseType): boolean {
+  return false;
 }
 
 /**
@@ -127,8 +127,8 @@ export function supportsClearableQuerySchema(dbType?: DatabaseType): boolean {
  * than a general-purpose SQL query surface, so the generic sidebar action is
  * hidden there as well (issue #9609).
  */
-export function supportsConnectionQueryActions(dbType?: DatabaseType): boolean {
-  return dbType !== "nacos" && dbType !== "consul" && dbType !== "hbase" && dbType !== "zookeeper" && dbType !== "plugin" && dbType !== "mq" && dbType !== "mqtt" && dbType !== "meilisearch" && dbType !== "salesforce";
+export function supportsConnectionQueryActions(_dbType?: DatabaseType): boolean {
+  return true;
 }
 
 /**
@@ -147,7 +147,7 @@ export function supportsQueryExecution(dbType?: DatabaseType): boolean {
  * that hierarchy, so they must not be offered by sidebar "Add to AI" actions.
  */
 export function supportsAiAssistantContext(dbType?: DatabaseType): boolean {
-  return supportsQueryExecution(dbType) && !usesConnectionOnlyQueryTarget(dbType) && dbType !== "nebula";
+  return supportsQueryExecution(dbType) && !usesConnectionOnlyQueryTarget(dbType);
 }
 
 export function supportsConnectionScopedQueryExecution(dbType?: DatabaseType): boolean {
@@ -174,19 +174,17 @@ export function supportsQueryTargetDatabaseListing(dbType?: DatabaseType): boole
   return supportsRegisteredQueryTargetDatabaseListing(dbType);
 }
 
-export function usesFetchFirst(dbType?: DatabaseType): boolean {
-  return !!dbType && FETCH_FIRST_TYPES.has(dbType);
+export function usesFetchFirst(_dbType?: DatabaseType): boolean {
+  return false;
 }
 
 export function supportsSqlFileExecution(dbType?: DatabaseType): boolean {
   return supportsDatabaseFeature(dbType, "sqlFileExecution");
 }
 
-const NON_SQL_IN_LIST_PASTE_TYPES = new Set<DatabaseType>(["neo4j", "nebula"]);
-
 export function supportsSqlInListPaste(dbType?: DatabaseType): boolean {
   if (!dbType) return true;
-  return supportsSqlFileExecution(dbType) && !NON_SQL_IN_LIST_PASTE_TYPES.has(dbType);
+  return supportsSqlFileExecution(dbType);
 }
 
 export function supportsQueryEditorBlockComments(dbType?: DatabaseType): boolean {
@@ -200,7 +198,7 @@ export function supportsSchemaDiagram(dbType?: DatabaseType): boolean {
 
 /** Relational engines that can list tables and columns. Independent of diagram support. */
 export function supportsDataDictionary(dbType?: DatabaseType): boolean {
-  return dbType !== "nebula" && supportsDatabaseFeature(dbType, "metadataBrowse");
+  return supportsDatabaseFeature(dbType, "metadataBrowse");
 }
 
 export function supportsDatabaseSearch(dbType?: DatabaseType): boolean {
@@ -243,51 +241,35 @@ export function supportsConnectionDatabaseBrowser(dbType?: DatabaseType): boolea
   // but they expose no database namespace: the connection-level browser tab listed
   // nothing and rendered "no databases found" (issue #8515). Their workbench is the
   // MQ admin tab instead. MQTT is already excluded: it has no objectBrowser at all.
-  return supportsObjectBrowser(dbType) && dbType !== "mongodb" && dbType !== "mq";
+  return supportsObjectBrowser(dbType);
 }
 
 export function supportsObjectBrowserTreeNode(dbType: DatabaseType | undefined, nodeType: TreeNodeType): boolean {
   if (!supportsObjectBrowser(dbType)) return false;
-  if (dbType === "mongodb") return nodeType === "mongo-db";
-  if (nodeType === "database" && usesDatabaseObjectTreeMode(dbType)) return true;
-  if (nodeType === "database" && isSchemaAware(dbType) && dbType !== "sqlserver") return false;
+  {}
+  {}
+  {}
   return nodeType === "database" || nodeType === "schema" || nodeType === "object-browser";
 }
 
 export function supportsTableTruncate(dbType?: DatabaseType): boolean {
-  return (
-    !!dbType &&
-    dbType !== "impala" &&
-    dbType !== "sqlite" &&
-    dbType !== "rqlite" &&
-    dbType !== "turso" &&
-    dbType !== "cloudflare-d1" &&
-    dbType !== "duckdb" &&
-    dbType !== "influxdb" &&
-    dbType !== "influxdb3" &&
-    dbType !== "victoriametrics" &&
-    dbType !== "manticoresearch" &&
-    dbType !== "salesforce" &&
-    dbType !== "neo4j" &&
-    dbType !== "nebula"
-  );
+  return !!dbType && true && true;
 }
 
-export function supportsTableVacuum(dbType?: DatabaseType): boolean {
-  return !!dbType && PG_VACUUM_TYPES.has(dbType);
+export function supportsTableVacuum(_dbType?: DatabaseType): boolean {
+  return false;
 }
 
-export function usesPostgresLikeStructureCopy(dbType?: DatabaseType): boolean {
-  return !!dbType && PG_LIKE_STRUCTURE_TYPES.has(dbType);
+export function usesPostgresLikeStructureCopy(_dbType?: DatabaseType): boolean {
+  return false;
 }
 
-const TRANSACTION_SUPPORTED_TYPES: readonly string[] = ["postgres", "mysql", "oracle", "jdbc", "oceanbase-oracle", "dameng", "sqlserver"];
+const TRANSACTION_SUPPORTED_TYPES: readonly string[] = ["mysql"];
 
 /** Oracle-family databases, kept ONLY for the Oracle-specific ALTER SESSION SET
  *  CURRENT_SCHEMA compensation in queryStore. Do not use for toolbar/dirty-bit
  *  gating — that is {@link usesProvenReadOnlyStickyTransactionState} so MySQL and
  *  PostgreSQL participate without dragging Oracle schema-change compensation in. */
-const ORACLE_STICKY_TRANSACTION_TYPES: ReadonlySet<string> = new Set(["oracle", "oceanbase-oracle"]);
 
 /** Databases whose manual-transaction toolbar hides Commit/Rollback until an
  *  unproven statement dirties the session. Mirrors the Rust proof gate
@@ -296,7 +278,7 @@ const ORACLE_STICKY_TRANSACTION_TYPES: ReadonlySet<string> = new Set(["oracle", 
  *  cannot reach manual mode (and this UX) without explicit transaction control
  *  (#9018). Family members like doris/kingbase join only when their transaction
  *  support lands. */
-const PROVEN_READ_ONLY_STICKY_TYPES: ReadonlySet<string> = new Set(["oracle", "oceanbase-oracle", "mysql", "postgres"]);
+const PROVEN_READ_ONLY_STICKY_TYPES: ReadonlySet<string> = new Set(["mysql"]);
 
 /**
  * Returns true if the given database type supports explicit transaction control
@@ -315,30 +297,6 @@ export function supportsTransaction(dbType?: string): boolean {
 // Snowflake, which all resolve SELECT aliases in HAVING — keeps the
 // permissive behavior, mirroring DBeaver's permissive-default
 // ProjectionAliasVisibilityScope with a deny list of known rejecters.
-const HAVING_ALIAS_REJECTED_DATABASE_TYPES: ReadonlySet<string> = new Set([
-  "postgres",
-  "redshift",
-  "kingbase",
-  "highgo",
-  "uxdb",
-  "vastbase",
-  "gaussdb",
-  "opengauss",
-  "kwdb",
-  "sqlserver",
-  "db2",
-  "oracle",
-  "oceanbase-oracle",
-  "yashandb",
-  "dameng",
-  "oscar",
-  "xugu",
-  "informix",
-  "firebird",
-  "exasol",
-  "trino",
-  "prestosql",
-]);
 
 /**
  * Returns true when the engine rejects SELECT alias references from the
@@ -346,8 +304,8 @@ const HAVING_ALIAS_REJECTED_DATABASE_TYPES: ReadonlySet<string> = new Set([
  * diagnostic keeps flagging a projected alias used in HAVING. Unknown or
  * unlisted database types stay permissive.
  */
-export function rejectsAliasReferenceInHaving(dbType?: string): boolean {
-  return !!dbType && HAVING_ALIAS_REJECTED_DATABASE_TYPES.has(dbType);
+export function rejectsAliasReferenceInHaving(_dbType?: string): boolean {
+  return false;
 }
 
 /**
@@ -355,8 +313,8 @@ export function rejectsAliasReferenceInHaving(dbType?: string): boolean {
  * compensation under manual transactions. Toolbar/dirty-bit gating must use
  * `usesProvenReadOnlyStickyTransactionState` instead.
  */
-export function usesOracleStickyTransactionState(dbType?: string): boolean {
-  return !!dbType && ORACLE_STICKY_TRANSACTION_TYPES.has(dbType);
+export function usesOracleStickyTransactionState(_dbType?: string): boolean {
+  return false;
 }
 
 /**

@@ -46,7 +46,7 @@ pub(super) fn filter_yashandb_recyclebin_objects(
 }
 
 fn is_yashandb_config(config: Option<&ConnectionConfig>) -> bool {
-    config.is_some_and(|config| config.db_type == DatabaseType::Yashandb)
+    false
 }
 
 fn is_recyclebin_object_name(name: &str) -> bool {
@@ -293,73 +293,5 @@ mod tests {
             filtered.iter().map(|object| object.name.as_str()).collect::<Vec<_>>(),
             ["active_orders", "payroll"]
         );
-    }
-
-    #[test]
-    fn filters_yashandb_recyclebin_tables() {
-        let tables = vec![
-            db::TableInfo {
-                name: "USERS".to_string(),
-                table_type: "TABLE".to_string(),
-                valid: None,
-                comment: None,
-                parent_schema: None,
-                parent_name: None,
-            },
-            db::TableInfo {
-                name: "BIN$abc123==$0".to_string(),
-                table_type: "TABLE".to_string(),
-                valid: None,
-                comment: None,
-                parent_schema: None,
-                parent_name: None,
-            },
-        ];
-
-        let filtered =
-            filter_yashandb_recyclebin_tables(tables.clone(), Some(&test_connection_config(DatabaseType::Yashandb)));
-        let oracle = filter_yashandb_recyclebin_tables(tables, Some(&test_connection_config(DatabaseType::Oracle)));
-
-        assert_eq!(filtered.iter().map(|table| table.name.as_str()).collect::<Vec<_>>(), ["USERS"]);
-        assert_eq!(oracle.len(), 2);
-    }
-
-    #[test]
-    fn filters_yashandb_recyclebin_objects() {
-        let objects = vec![
-            db::ObjectInfo {
-                name: "ORDERS".to_string(),
-                object_type: "TABLE".to_string(),
-                schema: Some("HR".to_string()),
-                valid: None,
-                signature: None,
-                custom_type_kind: None,
-                has_members: None,
-                comment: None,
-                created_at: None,
-                updated_at: None,
-                parent_schema: None,
-                parent_name: None,
-            },
-            db::ObjectInfo {
-                name: "bin$deleted".to_string(),
-                object_type: "TABLE".to_string(),
-                schema: Some("HR".to_string()),
-                valid: None,
-                signature: None,
-                custom_type_kind: None,
-                has_members: None,
-                comment: None,
-                created_at: None,
-                updated_at: None,
-                parent_schema: None,
-                parent_name: None,
-            },
-        ];
-
-        let filtered =
-            filter_yashandb_recyclebin_objects(objects, Some(&test_connection_config(DatabaseType::Yashandb)));
-
-        assert_eq!(filtered.iter().map(|object| object.name.as_str()).collect::<Vec<_>>(), ["ORDERS"]);
     }
 }

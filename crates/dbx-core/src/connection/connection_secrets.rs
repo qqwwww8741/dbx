@@ -131,7 +131,7 @@ pub fn save_connections_to_file(
         persist_mq_token_signing_secret(store, config)?;
         persist_mqtt_auth_secrets(store, config)?;
         persist_cassandra_tls_secrets(store, config)?;
-        persist_salesforce_auth_secrets(store, config)?;
+
         delete_secret_prefix(store, &config.id, PLUGIN_CONNECTION_SECRET_PREFIX)?;
         for (key, secret) in &config.connection_secrets {
             persist_secret(store, &config.id, &plugin_connection_secret_key(key)?, secret)?;
@@ -206,7 +206,7 @@ pub fn load_connections_from_file(
         hydrate_mq_token_signing_secret(store, config, &mut needs_rewrite)?;
         hydrate_mqtt_auth_secrets(store, config, &mut needs_rewrite)?;
         hydrate_cassandra_tls_secrets(store, config, &mut needs_rewrite)?;
-        hydrate_salesforce_auth_secrets(store, config, &mut needs_rewrite)?;
+
         let plugin_secret_keys = config.connection_secrets.keys().cloned().collect::<Vec<_>>();
         for key in plugin_secret_keys {
             let storage_key = plugin_connection_secret_key(&key)?;
@@ -439,61 +439,17 @@ fn delete_secret_prefix(
 }
 
 fn persist_mq_auth_secrets(store: &dyn ConnectionSecretStore, config: &ConnectionConfig) -> Result<(), String> {
-    if config.db_type != DatabaseType::MessageQueue {
+    {
         delete_secret_prefix(store, &config.id, MQ_AUTH_SECRET_PREFIX)?;
         return Ok(());
-    }
-
-    let Some(auth) = mq_auth_object(config.external_config.as_ref()) else {
-        delete_secret_prefix(store, &config.id, MQ_AUTH_SECRET_PREFIX)?;
-        return Ok(());
-    };
-
-    match mq_auth_kind(auth).as_deref() {
-        Some("none") => delete_secret_prefix(store, &config.id, MQ_AUTH_SECRET_PREFIX)?,
-        Some("token") => replace_mq_auth_secret(store, &config.id, MQ_AUTH_TOKEN_KEY, auth, "token")?,
-        Some("basic") => replace_mq_auth_secret(store, &config.id, MQ_AUTH_PASSWORD_KEY, auth, "password")?,
-        Some("apiKey") | Some("api_key") | Some("apikey") => {
-            replace_mq_auth_secret(store, &config.id, MQ_AUTH_API_KEY_VALUE_KEY, auth, "value")?
-        }
-        Some("oauth2") => replace_mq_auth_secret(store, &config.id, MQ_AUTH_CLIENT_SECRET_KEY, auth, "clientSecret")?,
-        _ => delete_secret_prefix(store, &config.id, MQ_AUTH_SECRET_PREFIX)?,
-    }
-
-    Ok(())
-}
-
-fn replace_mq_auth_secret(
-    store: &dyn ConnectionSecretStore,
-    connection_id: &str,
-    key: &str,
-    auth: &serde_json::Map<String, serde_json::Value>,
-    field: &str,
-) -> Result<(), String> {
-    let current = auth.get(field).and_then(serde_json::Value::as_str).filter(|secret| !secret.is_empty());
-    let existing = if current.is_none() { store.get_secret(connection_id, key)? } else { None };
-    delete_secret_prefix(store, connection_id, MQ_AUTH_SECRET_PREFIX)?;
-    match current {
-        Some(secret) => store.set_secret(connection_id, key, secret),
-        None => match existing {
-            Some(secret) => store.set_secret(connection_id, key, &secret),
-            None => Ok(()),
-        },
     }
 }
 
 fn persist_mq_token_signing_secret(store: &dyn ConnectionSecretStore, config: &ConnectionConfig) -> Result<(), String> {
-    if config.db_type != DatabaseType::MessageQueue {
+    {
         delete_secret_prefix(store, &config.id, MQ_TOKEN_SIGNING_SECRET_PREFIX)?;
         return Ok(());
     }
-
-    let Some(signing) = mq_token_signing_object(config.external_config.as_ref()) else {
-        delete_secret_prefix(store, &config.id, MQ_TOKEN_SIGNING_SECRET_PREFIX)?;
-        return Ok(());
-    };
-
-    persist_json_secret_if_present(store, &config.id, MQ_TOKEN_SIGNING_KEY, signing, "key")
 }
 
 fn hydrate_mq_auth_secrets(
@@ -501,27 +457,9 @@ fn hydrate_mq_auth_secrets(
     config: &mut ConnectionConfig,
     needs_rewrite: &mut bool,
 ) -> Result<(), String> {
-    if config.db_type != DatabaseType::MessageQueue {
+    {
         return Ok(());
     }
-
-    let Some(auth) = mq_auth_object_mut(config.external_config.as_mut()) else {
-        return Ok(());
-    };
-
-    match mq_auth_kind(auth).as_deref() {
-        Some("token") => hydrate_json_secret(store, &config.id, MQ_AUTH_TOKEN_KEY, auth, "token", needs_rewrite)?,
-        Some("basic") => hydrate_json_secret(store, &config.id, MQ_AUTH_PASSWORD_KEY, auth, "password", needs_rewrite)?,
-        Some("apiKey") | Some("api_key") | Some("apikey") => {
-            hydrate_json_secret(store, &config.id, MQ_AUTH_API_KEY_VALUE_KEY, auth, "value", needs_rewrite)?
-        }
-        Some("oauth2") => {
-            hydrate_json_secret(store, &config.id, MQ_AUTH_CLIENT_SECRET_KEY, auth, "clientSecret", needs_rewrite)?
-        }
-        _ => {}
-    }
-
-    Ok(())
 }
 
 fn hydrate_mq_token_signing_secret(
@@ -529,50 +467,9 @@ fn hydrate_mq_token_signing_secret(
     config: &mut ConnectionConfig,
     needs_rewrite: &mut bool,
 ) -> Result<(), String> {
-    if config.db_type != DatabaseType::MessageQueue {
+    {
         return Ok(());
     }
-
-    let Some(signing) = mq_token_signing_object_mut(config.external_config.as_mut()) else {
-        return Ok(());
-    };
-
-    hydrate_json_secret(store, &config.id, MQ_TOKEN_SIGNING_KEY, signing, "key", needs_rewrite)
-}
-
-fn persist_json_secret_if_present(
-    store: &dyn ConnectionSecretStore,
-    connection_id: &str,
-    key: &str,
-    auth: &serde_json::Map<String, serde_json::Value>,
-    field: &str,
-) -> Result<(), String> {
-    match auth.get(field).and_then(serde_json::Value::as_str).filter(|secret| !secret.is_empty()) {
-        Some(secret) => store.set_secret(connection_id, key, secret),
-        None => Ok(()),
-    }
-}
-
-fn hydrate_json_secret(
-    store: &dyn ConnectionSecretStore,
-    connection_id: &str,
-    key: &str,
-    auth: &mut serde_json::Map<String, serde_json::Value>,
-    field: &str,
-    needs_rewrite: &mut bool,
-) -> Result<(), String> {
-    match auth.get(field).and_then(serde_json::Value::as_str).filter(|secret| !secret.is_empty()) {
-        Some(secret) => {
-            store.set_secret(connection_id, key, secret)?;
-            *needs_rewrite = true;
-        }
-        None => {
-            if let Some(secret) = store.get_secret(connection_id, key)? {
-                auth.insert(field.to_string(), serde_json::Value::String(secret));
-            }
-        }
-    }
-    Ok(())
 }
 
 fn scrub_mq_auth_secrets(config: &mut ConnectionConfig) {
@@ -596,24 +493,9 @@ fn scrub_mq_token_signing_secret(config: &mut ConnectionConfig) {
 }
 
 fn persist_cassandra_tls_secrets(store: &dyn ConnectionSecretStore, config: &ConnectionConfig) -> Result<(), String> {
-    if config.db_type != DatabaseType::Cassandra {
+    {
         return delete_secret_prefix(store, &config.id, CASSANDRA_TLS_SECRET_PREFIX);
     }
-    let Some(tls) = cassandra_tls_object(config.external_config.as_ref()) else {
-        return delete_secret_prefix(store, &config.id, CASSANDRA_TLS_SECRET_PREFIX);
-    };
-    persist_secret(
-        store,
-        &config.id,
-        CASSANDRA_TRUSTSTORE_PASSWORD_KEY,
-        tls.get("truststore_password").and_then(serde_json::Value::as_str).unwrap_or(""),
-    )?;
-    persist_secret(
-        store,
-        &config.id,
-        CASSANDRA_KEYSTORE_PASSWORD_KEY,
-        tls.get("keystore_password").and_then(serde_json::Value::as_str).unwrap_or(""),
-    )
 }
 
 fn hydrate_cassandra_tls_secrets(
@@ -621,33 +503,15 @@ fn hydrate_cassandra_tls_secrets(
     config: &mut ConnectionConfig,
     needs_rewrite: &mut bool,
 ) -> Result<(), String> {
-    if config.db_type != DatabaseType::Cassandra {
+    {
         return Ok(());
     }
-    let connection_id = config.id.clone();
-    let Some(tls) = cassandra_tls_object_mut(config.external_config.as_mut()) else {
-        return Ok(());
-    };
-    hydrate_json_secret(
-        store,
-        &connection_id,
-        CASSANDRA_TRUSTSTORE_PASSWORD_KEY,
-        tls,
-        "truststore_password",
-        needs_rewrite,
-    )?;
-    hydrate_json_secret(store, &connection_id, CASSANDRA_KEYSTORE_PASSWORD_KEY, tls, "keystore_password", needs_rewrite)
 }
 
 fn scrub_cassandra_tls_secrets(config: &mut ConnectionConfig) {
-    if config.db_type != DatabaseType::Cassandra {
+    {
         return;
     }
-    let Some(tls) = cassandra_tls_object_mut(config.external_config.as_mut()) else {
-        return;
-    };
-    scrub_json_secret(tls, "truststore_password");
-    scrub_json_secret(tls, "keystore_password");
 }
 
 fn cassandra_tls_object(value: Option<&serde_json::Value>) -> Option<&serde_json::Map<String, serde_json::Value>> {
@@ -660,115 +524,13 @@ fn cassandra_tls_object_mut(
     value?.get_mut("tls")?.as_object_mut()
 }
 
-// ── Salesforce OAuth 密钥持久化 ─────────────────────────────────
-//
-// Persist semantics (mirrors MQ's replace_mq_auth_secret):
-//   1. Incoming empty/missing + secret already stored → preserve existing secret.
-//   2. Incoming non-empty → overwrite.
-//   3. external_config.auth block absent (user switched off OAuth) → delete both secrets.
-// This is required because the frontend edits an existing connection with the
-// sensitive fields blanked out — an empty value must not clobber the stored secret.
-
-fn persist_salesforce_auth_secrets(store: &dyn ConnectionSecretStore, config: &ConnectionConfig) -> Result<(), String> {
-    if config.db_type != DatabaseType::Salesforce {
-        delete_secret_prefix(store, &config.id, SALESFORCE_AUTH_SECRET_PREFIX)?;
-        return Ok(());
-    }
-
-    let Some(auth) = salesforce_auth_object(config.external_config.as_ref()) else {
-        delete_secret_prefix(store, &config.id, SALESFORCE_AUTH_SECRET_PREFIX)?;
-        return Ok(());
-    };
-
-    replace_salesforce_auth_secret(store, &config.id, SALESFORCE_AUTH_CLIENT_SECRET_KEY, auth, "clientSecret")?;
-    replace_salesforce_auth_secret(store, &config.id, SALESFORCE_AUTH_REFRESH_TOKEN_KEY, auth, "refreshToken")?;
-    replace_salesforce_auth_secret(store, &config.id, SALESFORCE_AUTH_PASSWORD_KEY, auth, "password")?;
-
-    Ok(())
-}
-
-fn replace_salesforce_auth_secret(
-    store: &dyn ConnectionSecretStore,
-    connection_id: &str,
-    key: &str,
-    auth: &serde_json::Map<String, serde_json::Value>,
-    field: &str,
-) -> Result<(), String> {
-    let current = auth.get(field).and_then(serde_json::Value::as_str).filter(|secret| !secret.is_empty());
-    let existing = if current.is_none() { store.get_secret(connection_id, key)? } else { None };
-    // Per-key delete: we only manage the exact key we own, so two parallel
-    // replace calls don't wipe each other out.
-    store.delete_secret(connection_id, key)?;
-    match current {
-        Some(secret) => store.set_secret(connection_id, key, secret),
-        None => match existing {
-            Some(secret) => store.set_secret(connection_id, key, &secret),
-            None => Ok(()),
-        },
-    }
-}
-
-fn hydrate_salesforce_auth_secrets(
-    store: &dyn ConnectionSecretStore,
-    config: &mut ConnectionConfig,
-    needs_rewrite: &mut bool,
-) -> Result<(), String> {
-    if config.db_type != DatabaseType::Salesforce {
-        return Ok(());
-    }
-
-    let Some(auth) = salesforce_auth_object_mut(config.external_config.as_mut()) else {
-        return Ok(());
-    };
-
-    hydrate_json_secret(store, &config.id, SALESFORCE_AUTH_CLIENT_SECRET_KEY, auth, "clientSecret", needs_rewrite)?;
-    hydrate_json_secret(store, &config.id, SALESFORCE_AUTH_REFRESH_TOKEN_KEY, auth, "refreshToken", needs_rewrite)?;
-    hydrate_json_secret(store, &config.id, SALESFORCE_AUTH_PASSWORD_KEY, auth, "password", needs_rewrite)?;
-
-    Ok(())
-}
-
-fn scrub_salesforce_auth_secrets(config: &mut ConnectionConfig) {
-    if config.db_type != DatabaseType::Salesforce {
-        return;
-    }
-    let Some(auth) = salesforce_auth_object_mut(config.external_config.as_mut()) else {
-        return;
-    };
-    scrub_json_secret(auth, "clientSecret");
-    scrub_json_secret(auth, "refreshToken");
-    scrub_json_secret(auth, "password");
-}
-
-fn salesforce_auth_object(value: Option<&serde_json::Value>) -> Option<&serde_json::Map<String, serde_json::Value>> {
-    value?.get("auth")?.as_object()
-}
-
-fn salesforce_auth_object_mut(
-    value: Option<&mut serde_json::Value>,
-) -> Option<&mut serde_json::Map<String, serde_json::Value>> {
-    value?.get_mut("auth")?.as_object_mut()
-}
-
 // ── MQTT 密钥持久化 ──────────────────────────────────────────────
 
 fn persist_mqtt_auth_secrets(store: &dyn ConnectionSecretStore, config: &ConnectionConfig) -> Result<(), String> {
-    if config.db_type != DatabaseType::Mqtt {
+    {
         delete_secret_prefix(store, &config.id, MQTT_AUTH_SECRET_PREFIX)?;
         return Ok(());
     }
-
-    let Some(auth) = mqtt_auth_object(config.external_config.as_ref()) else {
-        delete_secret_prefix(store, &config.id, MQTT_AUTH_SECRET_PREFIX)?;
-        return Ok(());
-    };
-
-    match mqtt_auth_kind(auth).as_deref() {
-        Some("password") => replace_mqtt_auth_secret(store, &config.id, MQTT_AUTH_PASSWORD_KEY, auth, "password")?,
-        _ => delete_secret_prefix(store, &config.id, MQTT_AUTH_SECRET_PREFIX)?,
-    }
-
-    Ok(())
 }
 
 fn hydrate_mqtt_auth_secrets(
@@ -776,19 +538,9 @@ fn hydrate_mqtt_auth_secrets(
     config: &mut ConnectionConfig,
     needs_rewrite: &mut bool,
 ) -> Result<(), String> {
-    if config.db_type != DatabaseType::Mqtt {
+    {
         return Ok(());
     }
-
-    let Some(auth) = mqtt_auth_object_mut(config.external_config.as_mut()) else {
-        return Ok(());
-    };
-
-    if let Some("password") = mqtt_auth_kind(auth).as_deref() {
-        hydrate_json_secret(store, &config.id, MQTT_AUTH_PASSWORD_KEY, auth, "password", needs_rewrite)?
-    }
-
-    Ok(())
 }
 
 fn scrub_mqtt_auth_secrets(config: &mut ConnectionConfig) {
@@ -800,31 +552,8 @@ fn scrub_mqtt_auth_secrets(config: &mut ConnectionConfig) {
     }
 }
 
-fn replace_mqtt_auth_secret(
-    store: &dyn ConnectionSecretStore,
-    connection_id: &str,
-    key: &str,
-    auth: &serde_json::Map<String, serde_json::Value>,
-    field: &str,
-) -> Result<(), String> {
-    let current = auth.get(field).and_then(serde_json::Value::as_str).filter(|secret| !secret.is_empty());
-    let existing = if current.is_none() { store.get_secret(connection_id, key)? } else { None };
-    delete_secret_prefix(store, connection_id, MQTT_AUTH_SECRET_PREFIX)?;
-    match current {
-        Some(secret) => store.set_secret(connection_id, key, secret),
-        None => match existing {
-            Some(secret) => store.set_secret(connection_id, key, &secret),
-            None => Ok(()),
-        },
-    }
-}
-
 fn mqtt_auth_kind(auth: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
     auth.get("kind").and_then(serde_json::Value::as_str).map(ToString::to_string)
-}
-
-fn mqtt_auth_object(value: Option<&serde_json::Value>) -> Option<&serde_json::Map<String, serde_json::Value>> {
-    value?.get("auth")?.as_object()
 }
 
 fn mqtt_auth_object_mut(
@@ -942,7 +671,7 @@ fn sanitize_connections(configs: &[ConnectionConfig]) -> Vec<ConnectionConfig> {
             scrub_mq_token_signing_secret(&mut config);
             scrub_mqtt_auth_secrets(&mut config);
             scrub_cassandra_tls_secrets(&mut config);
-            scrub_salesforce_auth_secrets(&mut config);
+
             scrub_plugin_connection_secrets(&mut config);
             config
         })
@@ -961,6 +690,77 @@ pub fn secret_account(connection_id: &str, key: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    fn connection(id: &str, password: &str, _ssh_password: &str) -> ConnectionConfig {
+        ConnectionConfig {
+            oracle_oci_nls_lang: None,
+            oracle_oci_tns_admin: None,
+            docs_notes_path: None,
+            id: id.to_string(),
+            name: format!("{id} connection"),
+            note: String::new(),
+            db_type: DatabaseType::Mysql,
+            driver_profile: None,
+            driver_label: None,
+            url_params: None,
+            agent_java_options: Vec::new(),
+            host: "localhost".to_string(),
+            port: 3306,
+            username: "mysql".to_string(),
+            password: password.to_string(),
+            database: Some("mysql".to_string()),
+            default_schema: None,
+            visible_databases: None,
+            visible_database_patterns: None,
+            visible_schemas: None,
+            show_system_schemas: false,
+            sidebar_auto_load_all_tables: false,
+            attached_databases: Vec::new(),
+            init_script: None,
+            color: None,
+            transport_layers: Vec::new(),
+            connect_timeout_secs: crate::models::connection::default_connect_timeout_secs(),
+            query_timeout_secs: crate::models::connection::default_query_timeout_secs(),
+            idle_timeout_secs: crate::models::connection::default_idle_timeout_secs(),
+            keepalive_interval_secs: crate::models::connection::default_keepalive_interval_secs(),
+            ssl: false,
+            ca_cert_path: String::new(),
+            client_cert_path: String::new(),
+            client_key_path: String::new(),
+            sysdba: false,
+            oracle_connection_type: None,
+            connection_string: None,
+            redis_connection_mode: None,
+            redis_sentinel_master: String::new(),
+            redis_sentinel_nodes: String::new(),
+            redis_sentinel_username: String::new(),
+            redis_sentinel_password: String::new(),
+            redis_sentinel_tls: false,
+            redis_cluster_nodes: String::new(),
+            redis_key_separator: crate::models::connection::default_redis_key_separator(),
+            redis_scan_page_size: None,
+            redis_database_aliases: Default::default(),
+            redis_key_templates: Vec::new(),
+            redis_key_filter: None,
+            redis_key_grouping: None,
+            etcd_endpoints: String::new(),
+            gbase_server: String::new(),
+            informix_server: String::new(),
+            external_config: None,
+            plugin_id: None,
+            plugin_connection_provider: None,
+            plugin_connection_type: None,
+            connection_secrets: Default::default(),
+            jdbc_driver_class: None,
+            jdbc_driver_paths: Vec::new(),
+            one_time: false,
+            save_password: true,
+            read_only: false,
+            is_production: false,
+            production_databases: vec![],
+            database_info: None,
+        }
+    }
+
     use super::{
         load_connections_from_file, save_connections_to_file, ConnectionSecretStore, CASSANDRA_KEYSTORE_PASSWORD_KEY,
         CASSANDRA_TRUSTSTORE_PASSWORD_KEY, CONNECTION_STRING_KEY, INIT_SCRIPT_KEY, MAIN_PASSWORD_KEY,
@@ -1026,77 +826,6 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("dbx-connection-secrets-test-{}-{name}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir.join("connections.json")
-    }
-
-    fn connection(id: &str, password: &str, _ssh_password: &str) -> ConnectionConfig {
-        ConnectionConfig {
-            oracle_oci_nls_lang: None,
-            oracle_oci_tns_admin: None,
-            docs_notes_path: None,
-            id: id.to_string(),
-            name: format!("{id} connection"),
-            note: String::new(),
-            db_type: DatabaseType::Postgres,
-            driver_profile: None,
-            driver_label: None,
-            url_params: None,
-            agent_java_options: Vec::new(),
-            host: "localhost".to_string(),
-            port: 5432,
-            username: "postgres".to_string(),
-            password: password.to_string(),
-            database: Some("postgres".to_string()),
-            default_schema: None,
-            visible_databases: None,
-            visible_database_patterns: None,
-            visible_schemas: None,
-            show_system_schemas: false,
-            sidebar_auto_load_all_tables: false,
-            attached_databases: Vec::new(),
-            init_script: None,
-            color: None,
-            transport_layers: Vec::new(),
-            connect_timeout_secs: crate::models::connection::default_connect_timeout_secs(),
-            query_timeout_secs: crate::models::connection::default_query_timeout_secs(),
-            idle_timeout_secs: crate::models::connection::default_idle_timeout_secs(),
-            keepalive_interval_secs: crate::models::connection::default_keepalive_interval_secs(),
-            ssl: false,
-            ca_cert_path: String::new(),
-            client_cert_path: String::new(),
-            client_key_path: String::new(),
-            sysdba: false,
-            oracle_connection_type: None,
-            connection_string: None,
-            redis_connection_mode: None,
-            redis_sentinel_master: String::new(),
-            redis_sentinel_nodes: String::new(),
-            redis_sentinel_username: String::new(),
-            redis_sentinel_password: String::new(),
-            redis_sentinel_tls: false,
-            redis_cluster_nodes: String::new(),
-            redis_key_separator: crate::models::connection::default_redis_key_separator(),
-            redis_scan_page_size: None,
-            redis_database_aliases: Default::default(),
-            redis_key_templates: Vec::new(),
-            redis_key_filter: None,
-            redis_key_grouping: None,
-            etcd_endpoints: String::new(),
-            gbase_server: String::new(),
-            informix_server: String::new(),
-            external_config: None,
-            plugin_id: None,
-            plugin_connection_provider: None,
-            plugin_connection_type: None,
-            connection_secrets: Default::default(),
-            jdbc_driver_class: None,
-            jdbc_driver_paths: Vec::new(),
-            one_time: false,
-            save_password: true,
-            read_only: false,
-            is_production: false,
-            production_databases: vec![],
-            database_info: None,
-        }
     }
 
     fn ssh_hop(id: &str, password: &str, passphrase: &str) -> SshTunnelConfig {
@@ -1225,7 +954,7 @@ mod tests {
         let legacy = serde_json::json!([{
             "id": "legacy",
             "name": "legacy connection",
-            "db_type": "postgres",
+            "db_type": "mysql",
             "host": "localhost",
             "port": 5432,
             "username": "postgres",
@@ -1271,498 +1000,5 @@ mod tests {
         assert!(store.was_deleted("old", MAIN_PASSWORD_KEY));
         assert!(store.was_deleted("old", SSH_PASSWORD_KEY));
         assert_eq!(store.get_existing("kept", MAIN_PASSWORD_KEY).as_deref(), Some("new-db"));
-    }
-
-    #[test]
-    fn save_connections_moves_connection_string_to_secret_store_and_restores_it() {
-        let path = temp_connections_file("connection-string");
-        let store = MemorySecretStore::default();
-        let mut config = connection("mongo", "", "");
-        config.db_type = DatabaseType::MongoDb;
-        config.connection_string = Some("mongodb://user:secret@localhost/app".to_string());
-
-        save_connections_to_file(&path, &[config], &store).unwrap();
-
-        assert_eq!(
-            store.get_existing("mongo", CONNECTION_STRING_KEY).as_deref(),
-            Some("mongodb://user:secret@localhost/app")
-        );
-        let persisted = read_configs(&path);
-        assert_eq!(persisted[0].connection_string, None);
-
-        let loaded = load_connections_from_file(&path, &store).unwrap();
-        assert_eq!(loaded[0].connection_string.as_deref(), Some("mongodb://user:secret@localhost/app"));
-    }
-
-    #[test]
-    fn save_connections_moves_init_script_to_secret_store_and_restores_it() {
-        let path = temp_connections_file("init-script");
-        let store = MemorySecretStore::default();
-        let mut config = connection("duck", "", "");
-        config.db_type = DatabaseType::DuckDb;
-        config.init_script = Some("CREATE SECRET (TYPE quack, TOKEN 'token-value');".to_string());
-
-        save_connections_to_file(&path, &[config], &store).unwrap();
-
-        assert_eq!(
-            store.get_existing("duck", INIT_SCRIPT_KEY).as_deref(),
-            Some("CREATE SECRET (TYPE quack, TOKEN 'token-value');")
-        );
-        let persisted = read_configs(&path);
-        assert_eq!(persisted[0].init_script, None);
-        assert!(!std::fs::read_to_string(&path).unwrap().contains("token-value"));
-
-        let loaded = load_connections_from_file(&path, &store).unwrap();
-        assert_eq!(loaded[0].init_script.as_deref(), Some("CREATE SECRET (TYPE quack, TOKEN 'token-value');"));
-    }
-
-    #[test]
-    fn save_connections_moves_mq_auth_secrets_to_secret_store_and_restores_them() {
-        let path = temp_connections_file("mq-auth");
-        let store = MemorySecretStore::default();
-        let mut config = connection("pulsar", "", "");
-        config.db_type = DatabaseType::MessageQueue;
-        config.external_config = Some(serde_json::json!({
-            "systemKind": "pulsar",
-            "adminUrl": "http://localhost:8080",
-            "auth": {
-                "kind": "token",
-                "token": "mq-token-secret"
-            }
-        }));
-
-        save_connections_to_file(&path, &[config], &store).unwrap();
-
-        assert_eq!(store.get_existing("pulsar", "mq.auth.token").as_deref(), Some("mq-token-secret"));
-        let persisted_json = std::fs::read_to_string(&path).unwrap();
-        assert!(!persisted_json.contains("mq-token-secret"));
-
-        let loaded = load_connections_from_file(&path, &store).unwrap();
-        let auth = loaded[0].external_config.as_ref().and_then(|value| value.get("auth")).expect("restored MQ auth");
-        assert_eq!(auth.get("token").and_then(serde_json::Value::as_str), Some("mq-token-secret"));
-    }
-
-    #[test]
-    fn save_connections_moves_cassandra_store_passwords_to_secret_store_and_restores_them() {
-        let path = temp_connections_file("cassandra-tls");
-        let store = MemorySecretStore::default();
-        let mut config = connection("cassandra", "", "");
-        config.db_type = DatabaseType::Cassandra;
-        config.external_config = Some(serde_json::json!({
-            "tls": {
-                "truststore_path": "/certs/client.truststore",
-                "truststore_password": "trust-secret",
-                "keystore_path": "/certs/client.keystore",
-                "keystore_password": "key-secret"
-            }
-        }));
-
-        save_connections_to_file(&path, &[config], &store).unwrap();
-
-        assert_eq!(store.get_existing("cassandra", CASSANDRA_TRUSTSTORE_PASSWORD_KEY).as_deref(), Some("trust-secret"));
-        assert_eq!(store.get_existing("cassandra", CASSANDRA_KEYSTORE_PASSWORD_KEY).as_deref(), Some("key-secret"));
-        let persisted_json = std::fs::read_to_string(&path).unwrap();
-        assert!(!persisted_json.contains("trust-secret"));
-        assert!(!persisted_json.contains("key-secret"));
-
-        let loaded = load_connections_from_file(&path, &store).unwrap();
-        let tls = loaded[0].external_config.as_ref().and_then(|value| value.get("tls")).unwrap();
-        assert_eq!(tls.get("truststore_password").and_then(serde_json::Value::as_str), Some("trust-secret"));
-        assert_eq!(tls.get("keystore_password").and_then(serde_json::Value::as_str), Some("key-secret"));
-    }
-
-    #[test]
-    fn save_connections_moves_mq_basic_and_oauth_secrets_to_secret_store_and_restores_them() {
-        let path = temp_connections_file("mq-auth-multiple");
-        let store = MemorySecretStore::default();
-        let mut basic = connection("basic", "", "");
-        basic.db_type = DatabaseType::MessageQueue;
-        basic.external_config = Some(serde_json::json!({
-            "systemKind": "pulsar",
-            "adminUrl": "http://localhost:8080",
-            "auth": {
-                "kind": "basic",
-                "username": "admin",
-                "password": "basic-secret"
-            }
-        }));
-        let mut oauth = connection("oauth", "", "");
-        oauth.db_type = DatabaseType::MessageQueue;
-        oauth.external_config = Some(serde_json::json!({
-            "systemKind": "pulsar",
-            "adminUrl": "http://localhost:8080",
-            "auth": {
-                "kind": "oauth2",
-                "issuerUrl": "https://issuer/token",
-                "clientId": "client",
-                "clientSecret": "oauth-secret"
-            }
-        }));
-
-        save_connections_to_file(&path, &[basic, oauth], &store).unwrap();
-
-        assert_eq!(store.get_existing("basic", "mq.auth.password").as_deref(), Some("basic-secret"));
-        assert_eq!(store.get_existing("oauth", "mq.auth.client_secret").as_deref(), Some("oauth-secret"));
-        let persisted_json = std::fs::read_to_string(&path).unwrap();
-        assert!(!persisted_json.contains("basic-secret"));
-        assert!(!persisted_json.contains("oauth-secret"));
-
-        let loaded = load_connections_from_file(&path, &store).unwrap();
-        let basic_auth = loaded[0].external_config.as_ref().and_then(|value| value.get("auth")).unwrap();
-        let oauth_auth = loaded[1].external_config.as_ref().and_then(|value| value.get("auth")).unwrap();
-        assert_eq!(basic_auth.get("password").and_then(serde_json::Value::as_str), Some("basic-secret"));
-        assert_eq!(oauth_auth.get("clientSecret").and_then(serde_json::Value::as_str), Some("oauth-secret"));
-    }
-
-    #[test]
-    fn save_connections_preserves_existing_mq_secret_when_config_is_sanitized() {
-        let path = temp_connections_file("mq-auth-preserve");
-        let store = MemorySecretStore::default();
-        store.set_existing("pulsar", "mq.auth.token", "existing-token");
-        let mut config = connection("pulsar", "", "");
-        config.db_type = DatabaseType::MessageQueue;
-        config.external_config = Some(serde_json::json!({
-            "systemKind": "pulsar",
-            "adminUrl": "http://localhost:8080",
-            "auth": {
-                "kind": "token",
-                "token": ""
-            }
-        }));
-
-        save_connections_to_file(&path, &[config], &store).unwrap();
-
-        assert_eq!(store.get_existing("pulsar", "mq.auth.token").as_deref(), Some("existing-token"));
-        let loaded = load_connections_from_file(&path, &store).unwrap();
-        let auth = loaded[0].external_config.as_ref().and_then(|value| value.get("auth")).unwrap();
-        assert_eq!(auth.get("token").and_then(serde_json::Value::as_str), Some("existing-token"));
-    }
-
-    #[test]
-    fn save_connections_deletes_stale_mq_auth_secrets_when_kind_changes() {
-        let path = temp_connections_file("mq-auth-kind-change");
-        let store = MemorySecretStore::default();
-        store.set_existing("pulsar", MQ_AUTH_TOKEN_KEY, "old-token");
-        let mut config = connection("pulsar", "", "");
-        config.db_type = DatabaseType::MessageQueue;
-        config.external_config = Some(serde_json::json!({
-            "systemKind": "pulsar",
-            "adminUrl": "http://localhost:8080",
-            "auth": {
-                "kind": "basic",
-                "username": "admin",
-                "password": "basic-secret"
-            }
-        }));
-
-        save_connections_to_file(&path, &[config], &store).unwrap();
-
-        assert_eq!(store.get_existing("pulsar", MQ_AUTH_TOKEN_KEY), None);
-        assert_eq!(store.get_existing("pulsar", MQ_AUTH_PASSWORD_KEY).as_deref(), Some("basic-secret"));
-    }
-
-    #[test]
-    fn save_connections_moves_mq_token_signing_key_to_secret_store_and_restores_it() {
-        let path = temp_connections_file("mq-token-signing");
-        let store = MemorySecretStore::default();
-        let mut config = connection("pulsar", "", "");
-        config.db_type = DatabaseType::MessageQueue;
-        config.external_config = Some(serde_json::json!({
-            "systemKind": "pulsar",
-            "adminUrl": "http://localhost:8080",
-            "auth": { "kind": "none" },
-            "tokenSigning": {
-                "algorithm": "hs256",
-                "key": "broker-signing-secret"
-            }
-        }));
-
-        save_connections_to_file(&path, &[config], &store).unwrap();
-
-        assert_eq!(store.get_existing("pulsar", MQ_TOKEN_SIGNING_KEY).as_deref(), Some("broker-signing-secret"));
-        let persisted_json = std::fs::read_to_string(&path).unwrap();
-        assert!(!persisted_json.contains("broker-signing-secret"));
-
-        let loaded = load_connections_from_file(&path, &store).unwrap();
-        let signing = loaded[0].external_config.as_ref().and_then(|value| value.get("tokenSigning")).unwrap();
-        assert_eq!(signing.get("key").and_then(serde_json::Value::as_str), Some("broker-signing-secret"));
-    }
-
-    // ── MQTT 密钥持久化测试 ────────────────────────────────────────
-
-    #[test]
-    fn save_connections_moves_mqtt_password_to_secret_store_and_redacts_file() {
-        let path = temp_connections_file("mqtt-auth");
-        let store = MemorySecretStore::default();
-        let mut config = connection("mqtt-broker", "", "");
-        config.db_type = DatabaseType::Mqtt;
-        config.external_config = Some(serde_json::json!({
-            "host": "localhost",
-            "port": 1883,
-            "clientId": "dbx-test",
-            "protocolVersion": "v5",
-            "transport": "tcp",
-            "tls": false,
-            "tlsSkipVerify": false,
-            "auth": {
-                "kind": "password",
-                "username": "admin",
-                "password": "mqtt-secret"
-            },
-            "keepAliveSecs": 60,
-            "connectTimeoutSecs": 30
-        }));
-
-        save_connections_to_file(&path, &[config], &store).unwrap();
-
-        assert_eq!(store.get_existing("mqtt-broker", MQTT_AUTH_PASSWORD_KEY).as_deref(), Some("mqtt-secret"));
-        let persisted_json = std::fs::read_to_string(&path).unwrap();
-        assert!(!persisted_json.contains("mqtt-secret"));
-    }
-
-    #[test]
-    fn load_connections_restores_mqtt_password_from_secret_store() {
-        let path = temp_connections_file("mqtt-load");
-        let store = MemorySecretStore::default();
-        store.set_existing("mqtt-broker", MQTT_AUTH_PASSWORD_KEY, "mqtt-secret");
-        let sanitized = vec![{
-            let mut c = connection("mqtt-broker", "", "");
-            c.db_type = DatabaseType::Mqtt;
-            c.external_config = Some(serde_json::json!({
-                "host": "localhost",
-                "port": 1883,
-                "clientId": "dbx-test",
-                "protocolVersion": "v5",
-                "transport": "tcp",
-                "tls": false,
-                "tlsSkipVerify": false,
-                "auth": {
-                    "kind": "password",
-                    "username": "admin",
-                    "password": ""
-                },
-                "keepAliveSecs": 60,
-                "connectTimeoutSecs": 30
-            }));
-            c
-        }];
-        std::fs::write(&path, serde_json::to_string_pretty(&sanitized).unwrap()).unwrap();
-
-        let loaded = load_connections_from_file(&path, &store).unwrap();
-        let auth = loaded[0].external_config.as_ref().and_then(|v| v.get("auth")).unwrap();
-        assert_eq!(auth.get("password").and_then(serde_json::Value::as_str), Some("mqtt-secret"));
-    }
-
-    #[test]
-    fn load_connections_migrates_plaintext_mqtt_password_and_rewrites_sanitized_file() {
-        let path = temp_connections_file("mqtt-migrate");
-        let store = MemorySecretStore::default();
-        let legacy = serde_json::json!([{
-            "id": "mqtt-legacy",
-            "name": "legacy mqtt",
-            "db_type": "mqtt",
-            "host": "localhost",
-            "port": 1883,
-            "username": "",
-            "password": "",
-            "external_config": {
-                "host": "localhost",
-                "port": 1883,
-                "clientId": "dbx-legacy",
-                "protocolVersion": "v5",
-                "transport": "tcp",
-                "tls": false,
-                "tlsSkipVerify": false,
-                "auth": {
-                    "kind": "password",
-                    "username": "admin",
-                    "password": "plain-mqtt-password"
-                },
-                "keepAliveSecs": 60,
-                "connectTimeoutSecs": 30
-            }
-        }]);
-        std::fs::write(&path, serde_json::to_string_pretty(&legacy).unwrap()).unwrap();
-
-        let loaded = load_connections_from_file(&path, &store).unwrap();
-        let auth = loaded[0].external_config.as_ref().and_then(|v| v.get("auth")).unwrap();
-        assert_eq!(auth.get("password").and_then(serde_json::Value::as_str), Some("plain-mqtt-password"));
-        assert_eq!(store.get_existing("mqtt-legacy", MQTT_AUTH_PASSWORD_KEY).as_deref(), Some("plain-mqtt-password"));
-
-        let persisted_json = std::fs::read_to_string(&path).unwrap();
-        assert!(!persisted_json.contains("plain-mqtt-password"));
-    }
-
-    #[test]
-    fn save_connections_preserves_existing_mqtt_secret_when_config_is_sanitized() {
-        let path = temp_connections_file("mqtt-preserve");
-        let store = MemorySecretStore::default();
-        store.set_existing("mqtt-broker", MQTT_AUTH_PASSWORD_KEY, "existing-mqtt-password");
-        let mut config = connection("mqtt-broker", "", "");
-        config.db_type = DatabaseType::Mqtt;
-        config.external_config = Some(serde_json::json!({
-            "host": "localhost",
-            "port": 1883,
-            "clientId": "dbx-test",
-            "protocolVersion": "v5",
-            "transport": "tcp",
-            "tls": false,
-            "tlsSkipVerify": false,
-            "auth": {
-                "kind": "password",
-                "username": "admin",
-                "password": ""
-            },
-            "keepAliveSecs": 60,
-            "connectTimeoutSecs": 30
-        }));
-
-        save_connections_to_file(&path, &[config], &store).unwrap();
-
-        assert_eq!(
-            store.get_existing("mqtt-broker", MQTT_AUTH_PASSWORD_KEY).as_deref(),
-            Some("existing-mqtt-password")
-        );
-        let loaded = load_connections_from_file(&path, &store).unwrap();
-        let auth = loaded[0].external_config.as_ref().and_then(|v| v.get("auth")).unwrap();
-        assert_eq!(auth.get("password").and_then(serde_json::Value::as_str), Some("existing-mqtt-password"));
-    }
-
-    #[test]
-    fn mqtt_none_auth_does_not_store_password() {
-        let path = temp_connections_file("mqtt-none-auth");
-        let store = MemorySecretStore::default();
-        let mut config = connection("mqtt-none", "", "");
-        config.db_type = DatabaseType::Mqtt;
-        config.external_config = Some(serde_json::json!({
-            "host": "localhost",
-            "port": 1883,
-            "clientId": "dbx-test",
-            "protocolVersion": "v5",
-            "transport": "tcp",
-            "tls": false,
-            "tlsSkipVerify": false,
-            "auth": {
-                "kind": "none"
-            },
-            "keepAliveSecs": 60,
-            "connectTimeoutSecs": 30
-        }));
-
-        save_connections_to_file(&path, &[config], &store).unwrap();
-
-        assert_eq!(store.get_existing("mqtt-none", MQTT_AUTH_PASSWORD_KEY), None);
-    }
-
-    #[test]
-    fn mqtt_auth_kind_change_from_password_to_none_clears_stored_secret() {
-        let path = temp_connections_file("mqtt-kind-change");
-        let store = MemorySecretStore::default();
-        store.set_existing("mqtt-broker", MQTT_AUTH_PASSWORD_KEY, "old-mqtt-password");
-        let mut config = connection("mqtt-broker", "", "");
-        config.db_type = DatabaseType::Mqtt;
-        config.external_config = Some(serde_json::json!({
-            "host": "localhost",
-            "port": 1883,
-            "clientId": "dbx-test",
-            "protocolVersion": "v5",
-            "transport": "tcp",
-            "tls": false,
-            "tlsSkipVerify": false,
-            "auth": {
-                "kind": "none"
-            },
-            "keepAliveSecs": 60,
-            "connectTimeoutSecs": 30
-        }));
-
-        save_connections_to_file(&path, &[config], &store).unwrap();
-
-        assert_eq!(store.get_existing("mqtt-broker", MQTT_AUTH_PASSWORD_KEY), None);
-    }
-
-    #[test]
-    fn save_connections_moves_plugin_secrets_to_secret_store_and_restores_them() {
-        let path = temp_connections_file("plugin-connection-secret");
-        let store = MemorySecretStore::default();
-        let mut config = connection("plugin-connection", "", "");
-        config.db_type = DatabaseType::Plugin;
-        config.plugin_id = Some("dbx.example.hello".to_string());
-        config.plugin_connection_provider = Some("hello.connection".to_string());
-        config.plugin_connection_type = Some("hello".to_string());
-        config.external_config = Some(serde_json::json!({ "greeting": "Hello" }));
-        config.connection_secrets.insert("access_token".to_string(), "plugin-secret".to_string());
-
-        save_connections_to_file(&path, &[config], &store).unwrap();
-
-        let raw = std::fs::read_to_string(&path).unwrap();
-        assert!(!raw.contains("plugin-secret"));
-        let persisted: Vec<ConnectionConfig> = serde_json::from_str(&raw).unwrap();
-        assert_eq!(persisted[0].connection_secrets.get("access_token").map(String::as_str), Some(""));
-        assert_eq!(
-            store
-                .get_existing("plugin-connection", &format!("{PLUGIN_CONNECTION_SECRET_PREFIX}access_token"))
-                .as_deref(),
-            Some("plugin-secret")
-        );
-
-        let loaded = load_connections_from_file(&path, &store).unwrap();
-        assert_eq!(loaded[0].connection_secrets.get("access_token").map(String::as_str), Some("plugin-secret"));
-    }
-
-    #[test]
-    fn load_connections_preserves_opaque_null_plugin_secrets() {
-        let path = temp_connections_file("plugin-null-secret");
-        let store = MemorySecretStore::default();
-        let mut config = connection("plugin-connection", "", "");
-        config.db_type = DatabaseType::Plugin;
-        config.plugin_id = Some("io.dbx.ssh".to_string());
-        config.plugin_connection_provider = Some("ssh.connection".to_string());
-        config.plugin_connection_type = Some("ssh".to_string());
-        config.external_config = Some(serde_json::json!({ "sudo_source": "custom" }));
-        config.connection_secrets.insert("sudo_password".to_string(), "null".to_string());
-        config.connection_secrets.insert("totp_secret".to_string(), "".to_string());
-        config.connection_secrets.insert("private_key_passphrase".to_string(), "real-passphrase".to_string());
-
-        save_connections_to_file(&path, &[config], &store).unwrap();
-        store.set_existing("plugin-connection", &format!("{PLUGIN_CONNECTION_SECRET_PREFIX}totp_secret"), "null");
-        let stored = store.values.borrow().clone();
-        let deleted = store.deleted.borrow().clone();
-        let raw_config = std::fs::read(&path).unwrap();
-
-        let loaded = load_connections_from_file(&path, &store).unwrap();
-        let secrets = &loaded[0].connection_secrets;
-        assert_eq!(secrets.get("sudo_password").map(String::as_str), Some("null"));
-        assert_eq!(secrets.get("totp_secret").map(String::as_str), Some("null"));
-        assert_eq!(secrets.get("private_key_passphrase").map(String::as_str), Some("real-passphrase"));
-        assert_eq!(load_connections_from_file(&path, &store).unwrap()[0].connection_secrets, *secrets);
-        assert_eq!(*store.values.borrow(), stored);
-        assert_eq!(*store.deleted.borrow(), deleted);
-        assert_eq!(std::fs::read(&path).unwrap(), raw_config);
-        save_connections_to_file(&path, &loaded, &store).unwrap();
-        assert_eq!(load_connections_from_file(&path, &store).unwrap()[0].connection_secrets, *secrets);
-        assert_eq!(*store.values.borrow(), stored);
-    }
-
-    #[test]
-    fn file_secret_store_preserves_opaque_null_credentials() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("connections.json");
-        let secret_path = dir.path().join("secrets.json");
-        let store = super::FileSecretStore::new(secret_path.clone());
-        let mut config = connection("plugin-connection", "", "");
-        config.db_type = DatabaseType::Plugin;
-        config.connection_secrets.insert("credential".to_string(), "null".to_string());
-        save_connections_to_file(&path, &[config], &store).unwrap();
-        let raw_config = std::fs::read(&path).unwrap();
-        let raw_secrets = std::fs::read(&secret_path).unwrap();
-
-        for _ in 0..2 {
-            let reopened_store = super::FileSecretStore::new(secret_path.clone());
-            let loaded = load_connections_from_file(&path, &reopened_store).unwrap();
-            assert_eq!(loaded[0].connection_secrets.get("credential").map(String::as_str), Some("null"));
-            assert_eq!(std::fs::read(&path).unwrap(), raw_config);
-            assert_eq!(std::fs::read(&secret_path).unwrap(), raw_secrets);
-        }
     }
 }

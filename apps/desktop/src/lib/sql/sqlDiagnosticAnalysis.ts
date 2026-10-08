@@ -2,7 +2,7 @@ import type { DatabaseType, SqlReferenceAnalysis } from "@/types/database";
 import { buildOracleSyntaxDiagnostics } from "./oracleSyntaxDiagnostics";
 import { analyzeMysqlRoutineSyntax, supportsMysqlRoutineSyntaxDiagnostics } from "./mysqlRoutineSyntaxDiagnostics";
 import { buildSqlServerRoutineSyntaxDiagnostics } from "./sqlServerRoutineSyntaxDiagnostics";
-import { isSqlSemanticDiagnosticInputContext, shouldRunSqlSemanticDiagnostics, sqlSemanticDiagnosticRangesForViewport, sqlServerRoutineDefinitionRangesForViewport } from "./semantic/diagnostics";
+import { isSqlSemanticDiagnosticInputContext, shouldRunSqlSemanticDiagnostics, sqlSemanticDiagnosticRangesForViewport } from "./semantic/diagnostics";
 import { buildSqlSemanticModel } from "./semantic/model";
 import { mergeSqlSemanticReferenceAnalysis } from "./semantic/references";
 import type { SqlSemanticBuildOptions } from "./semantic/types";
@@ -23,7 +23,7 @@ export function analyzeSqlDiagnosticDocument(request: SqlDiagnosticAnalysisReque
   const { sql, cursor, databaseType, visibleRanges, parameterOptions } = request;
   const shouldRun = shouldRunSqlSemanticDiagnostics(sql, cursor, { databaseType });
   const diagnosticRanges = shouldRun ? sqlSemanticDiagnosticRangesForViewport(sql, visibleRanges, databaseType, undefined, parameterOptions) : [];
-  const sqlServerRoutineRanges = shouldRun && databaseType === "sqlserver" ? sqlServerRoutineDefinitionRangesForViewport(sql, visibleRanges) : [];
+  const sqlServerRoutineRanges: { from: number; to: number; sql: string }[] = [];
   return {
     shouldRun,
     inputContext: shouldRun && isSqlSemanticDiagnosticInputContext(sql, cursor, { databaseType }),

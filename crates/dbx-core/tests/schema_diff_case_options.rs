@@ -67,7 +67,7 @@ fn options(
         target_tables,
         source_details,
         target_details,
-        database_type: DatabaseType::Postgres,
+        database_type: DatabaseType::Mysql,
         ..Default::default()
     }
 }

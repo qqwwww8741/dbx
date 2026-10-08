@@ -48,32 +48,15 @@ afterEach(() => {
 });
 
 describe("ConnectionIcon", () => {
-  it("uses the plugin connection-provider logo and preserves sizing", async () => {
-    const container = await mountIcon({ ...connection, db_type: "plugin", plugin_id: "sample.plugin", plugin_connection_provider: "sample.connection" });
-    expect(readPluginAsset).toHaveBeenCalledWith("sample.plugin", "assets/connection.svg");
-    expect(container.querySelector("img")?.getAttribute("src")).toBe("blob:connection-icon");
-    expect(container.firstElementChild?.classList.contains("h-3")).toBe(true);
-  });
-
-  it("falls back to the plugin logo without a provider logo", async () => {
-    await mountIcon({ ...connection, db_type: "plugin", plugin_id: "sample.plugin" });
-    expect(readPluginAsset).toHaveBeenCalledWith("sample.plugin", "assets/plugin.svg");
-  });
-
   it("keeps native database logos unchanged", async () => {
     const container = await mountIcon(connection);
     expect(container.querySelector("img")?.getAttribute("src")).toBe("/icons/database/mysql.svg");
     expect(listPlugins).not.toHaveBeenCalled();
   });
 
-  it("shows the Inceptor logo for a saved Transwarp connection", async () => {
-    const container = await mountIcon({ ...connection, db_type: "transwarp", driver_profile: "transwarp-inceptor" });
-    expect(container.querySelector("img")?.getAttribute("src")).toBe("/icons/database/transwarp-inceptor.png");
-  });
-
   it("renders a safe fallback for missing connection metadata", async () => {
     const container = await mountIcon();
-    expect(container.querySelector("img")?.getAttribute("src")).toBe("/icons/database/postgres.svg");
+    expect(container.querySelector("img")?.getAttribute("src")).toBe("/icons/database/mysql.svg");
     expect(listPlugins).not.toHaveBeenCalled();
   });
 });

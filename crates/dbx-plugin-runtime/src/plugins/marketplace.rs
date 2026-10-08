@@ -864,6 +864,35 @@ mod tests {
         }
     }
 
+    fn plugin_package_files(id: &str, name: &str) -> (BTreeMap<String, Vec<u8>>, Vec<u8>) {
+        let manifest = serde_json::to_vec_pretty(&serde_json::json!({
+            "manifest_version": 1,
+            "id": id,
+            "name": name,
+            "version": "1.0.0",
+            "publisher": "example",
+            "engines": { "dbx": ">=0.5.0", "host_api": "^1.0" },
+            "entrypoints": {
+                "backend": {
+                    "protocol_versions": [1],
+                    "transport": "stdio-jsonl",
+                    "executable": "bin/plugin"
+                }
+            }
+        }))
+        .unwrap();
+        let backend = b"#!/bin/sh\nexit 0\n".to_vec();
+        let files = BTreeMap::from([("bin/plugin".to_string(), backend), ("manifest.json".to_string(), manifest)]);
+        let checksums = serde_json::to_vec_pretty(&serde_json::json!({
+            "algorithm": "sha256",
+            "files": files
+                .iter()
+                .map(|(path, bytes)| (path.clone(), format!("{:x}", Sha256::digest(bytes))))
+                .collect::<BTreeMap<_, _>>()
+        }))
+        .unwrap();
+        (files, checksums)
+    }
     #[test]
     fn persists_custom_repositories_without_overriding_official() {
         let root = tempfile::tempdir().unwrap();
@@ -1183,36 +1212,6 @@ mod tests {
         }))
         .unwrap();
         zip_package_files(&files, &checksums, Some(&signature))
-    }
-
-    fn plugin_package_files(id: &str, name: &str) -> (BTreeMap<String, Vec<u8>>, Vec<u8>) {
-        let manifest = serde_json::to_vec_pretty(&serde_json::json!({
-            "manifest_version": 1,
-            "id": id,
-            "name": name,
-            "version": "1.0.0",
-            "publisher": "example",
-            "engines": { "dbx": ">=0.5.0", "host_api": "^1.0" },
-            "entrypoints": {
-                "backend": {
-                    "protocol_versions": [1],
-                    "transport": "stdio-jsonl",
-                    "executable": "bin/plugin"
-                }
-            }
-        }))
-        .unwrap();
-        let backend = b"#!/bin/sh\nexit 0\n".to_vec();
-        let files = BTreeMap::from([("bin/plugin".to_string(), backend), ("manifest.json".to_string(), manifest)]);
-        let checksums = serde_json::to_vec_pretty(&serde_json::json!({
-            "algorithm": "sha256",
-            "files": files
-                .iter()
-                .map(|(path, bytes)| (path.clone(), format!("{:x}", Sha256::digest(bytes))))
-                .collect::<BTreeMap<_, _>>()
-        }))
-        .unwrap();
-        (files, checksums)
     }
 
     fn zip_package_files(files: &BTreeMap<String, Vec<u8>>, checksums: &[u8], signature: Option<&[u8]>) -> Vec<u8> {

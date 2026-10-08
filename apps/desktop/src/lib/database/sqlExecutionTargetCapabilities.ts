@@ -1,6 +1,6 @@
 import type { ConnectionConfig, DatabaseType } from "@/types/database";
 import type { MultiDbExecutionTarget } from "@/types/sqlExecution";
-import { isSchemaAware, isSingleDatabase, supportsConnectionScopedQueryExecution, supportsQueryTargetDatabaseListing, usesConnectionOnlyQueryTarget } from "@/lib/database/databaseFeatureSupport";
+import { supportsConnectionScopedQueryExecution, supportsQueryTargetDatabaseListing, usesConnectionOnlyQueryTarget } from "@/lib/database/databaseFeatureSupport";
 import { supportsConnectionLevelSqlExecution } from "@/lib/connection/connectionLevelDatabaseBootstrap";
 import { effectiveDatabaseTypeForConnection } from "@/lib/database/jdbcDialect";
 import { supportsQueryExecution } from "@/lib/database/databaseFeatureSupport";
@@ -47,7 +47,7 @@ export function sqlExecutionTargetCapabilities(connection: ConnectionConfig | un
   const connectionOnly = usesConnectionOnlyQueryTarget(databaseType);
   const connectionScoped = supportsConnectionScopedQueryExecution(databaseType);
   const supportsCatalog = supportsRegisteredCatalogTarget(connection, databaseType);
-  const supportsSchema = !connectionOnly && isSchemaAware(databaseType);
+  const supportsSchema = false;
   const supportsDatabase = !connectionOnly;
   const databaseListable = !connectionOnly;
   const namespaceTarget = connectionScoped && !connectionOnly;
@@ -63,10 +63,10 @@ export function sqlExecutionTargetCapabilities(connection: ConnectionConfig | un
     supportsCatalog,
     supportsDatabase,
     supportsSchema,
-    databaseRequired: connectionOnly ? false : namespaceTarget ? true : !isSingleDatabase(databaseType) && !connectionLevelExecution,
+    databaseRequired: connectionOnly ? false : namespaceTarget ? true : !connectionLevelExecution,
     databaseListable,
     connectionFallback: connectionOnly,
-    allowsEmptyDatabaseTarget: connectionOnly || isSingleDatabase(databaseType),
+    allowsEmptyDatabaseTarget: connectionOnly,
     defaultDatabase,
     allowDefaultWhenDatabaseListEmpty: hasStableDefault,
   };
@@ -113,7 +113,7 @@ export function normalizeSqlExecutionTarget(connection: ConnectionConfig | undef
 
 export function targetIsSingleDatabase(connection: ConnectionConfig | undefined): boolean {
   const capabilities = sqlExecutionTargetCapabilities(connection);
-  return capabilities ? isSingleDatabase(capabilities.databaseType) : false;
+  return capabilities ? false : false;
 }
 
 export function targetDefaultDatabase(connection: ConnectionConfig | undefined): string {

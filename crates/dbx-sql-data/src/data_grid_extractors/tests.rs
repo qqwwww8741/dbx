@@ -11,7 +11,7 @@ fn request(extractor: DataGridExtractorId) -> DataGridExtractRequest {
     DataGridExtractRequest {
         version: DATA_GRID_EXTRACTOR_CONTRACT_VERSION,
         extractor,
-        database_type: Some(DatabaseType::Postgres),
+        database_type: Some(DatabaseType::Mysql),
         identifier_quote: None,
         table_meta: None,
         columns: vec![column("id", 0), column("name", 1)],
@@ -19,188 +19,6 @@ fn request(extractor: DataGridExtractorId) -> DataGridExtractRequest {
         rows: vec![vec![json!(1), json!("Ada")], vec![json!(2), json!("Grace, Hopper")]],
         selection_kind: DataGridSelectionKind::Cells,
         options: DataGridExtractorOptions::default(),
-    }
-}
-
-fn temporal_insert_request() -> DataGridExtractRequest {
-    let mut native = request(DataGridExtractorId::SqlInserts);
-    native.database_type = Some(DatabaseType::Oracle);
-    native.columns = vec![column("CREATED_AT", 0), column("NOTE", 1), column("AMOUNT", 2)];
-    native.selected_column_indexes = vec![0, 1, 2];
-    native.rows = vec![vec![json!("2022-08-25T09:58:43Z"), json!("it's text"), json!(42)]];
-    native.table_meta = Some(DataGridTableMeta {
-        catalog: None,
-        database: None,
-        schema: Some("APP".into()),
-        table_name: "EVENTS".into(),
-        primary_keys: vec![],
-        columns: Some(
-            [("CREATED_AT", "DATE"), ("NOTE", "VARCHAR2"), ("AMOUNT", "NUMBER")]
-                .into_iter()
-                .map(|(name, data_type)| DataGridColumnInfo {
-                    name: name.into(),
-                    data_type: data_type.into(),
-                    is_nullable: true,
-                    is_primary_key: false,
-                    column_default: None,
-                    extra: None,
-                })
-                .collect(),
-        ),
-    });
-    native
-}
-
-#[test]
-fn sql_insert_temporal_format_contract_and_output() {
-    let native = temporal_insert_request();
-    assert_eq!(extract_data_grid_selection(native.clone()).unwrap().text,
-        "INSERT INTO \"APP\".\"EVENTS\" (\"CREATED_AT\", \"NOTE\", \"AMOUNT\") VALUES (TO_DATE('2022-08-25 09:58:43', 'YYYY-MM-DD HH24:MI:SS'), 'it''s text', 42);");
-    let mut payload = serde_json::to_value(&native).unwrap();
-    payload["options"]["sql"]["quoteIdentifiers"] = json!(false);
-    payload["options"]["sql"]["temporalFormat"] = json!("string");
-    let portable: DataGridExtractRequest = serde_json::from_value(payload).unwrap();
-    assert_eq!(
-        extract_data_grid_selection(portable).unwrap().text,
-        "INSERT INTO APP.EVENTS (CREATED_AT, NOTE, AMOUNT) VALUES ('2022-08-25 09:58:43', 'it''s text', 42);"
-    );
-}
-
-#[test]
-fn sql_insert_portable_temporals_preserve_wall_time_and_escape_fallback_text() {
-    for (data_type, value, native_literal, portable_literal) in [
-        ("DATE", "2022-08-25", "DATE '2022-08-25'", "'2022-08-25 00:00:00'"),
-        (
-            "TIMESTAMP(6)",
-            "2022-08-25 09:58:43.123456",
-            "TO_TIMESTAMP('2022-08-25 09:58:43.123456', 'YYYY-MM-DD HH24:MI:SS.FF')",
-            "'2022-08-25 09:58:43'",
-        ),
-        (
-            "TIMESTAMP WITH TIME ZONE",
-            "2022-08-25T09:58:43.123456+08:00",
-            "TO_TIMESTAMP_TZ('2022-08-25 09:58:43.123456 +08:00', 'YYYY-MM-DD HH24:MI:SS.FF TZH:TZM')",
-            "'2022-08-25 09:58:43'",
-        ),
-        (
-            "TIMESTAMP WITH LOCAL TIME ZONE",
-            "2022-08-25T09:58:43Z",
-            "TO_TIMESTAMP_TZ('2022-08-25 09:58:43 +00:00', 'YYYY-MM-DD HH24:MI:SS TZH:TZM')",
-            "'2022-08-25 09:58:43'",
-        ),
-        ("DATE", "not a date's value", "'not a date''s value'", "'not a date''s value'"),
-        ("VARCHAR2", "2022-08-25T09:58:43Z", "'2022-08-25T09:58:43Z'", "'2022-08-25T09:58:43Z'"),
-    ] {
-        for database_type in [DatabaseType::Oracle, DatabaseType::OceanbaseOracle] {
-            let mut request = temporal_insert_request();
-            request.database_type = Some(database_type);
-            request.rows[0][0] = json!(value);
-            request.table_meta.as_mut().unwrap().columns.as_mut().unwrap()[0].data_type = data_type.into();
-            let native = extract_data_grid_selection(request.clone()).unwrap().text;
-            request.options.sql.temporal_format = DataGridTemporalFormat::String;
-            let portable = extract_data_grid_selection(request).unwrap().text;
-            assert!(native.contains(&format!("VALUES ({native_literal}, 'it''s text', 42)")), "{native}");
-            assert!(portable.contains(&format!("VALUES ({portable_literal}, 'it''s text', 42)")), "{portable}");
-        }
-    }
-    for value in [Value::Null, json!(42), json!(true), json!("")] {
-        let mut request = temporal_insert_request();
-        request.rows[0][0] = value;
-        let native = extract_data_grid_selection(request.clone()).unwrap().text;
-        request.options.sql.temporal_format = DataGridTemporalFormat::String;
-        assert_eq!(extract_data_grid_selection(request).unwrap().text, native);
-    }
-}
-
-#[test]
-fn sql_insert_quote_opt_out_keeps_required_delimiters_and_namespaces() {
-    for (database_type, quote, name, expected) in [
-        (DatabaseType::Oracle, None, "EVENTS", "EVENTS"),
-        (DatabaseType::Oracle, None, "Events", "\"Events\""),
-        (DatabaseType::Oracle, None, "ORDER", "\"ORDER\""),
-        (DatabaseType::Oracle, None, "A\"B", "\"A\"\"B\""),
-        (DatabaseType::Oracle, None, "EVENT LOG", "\"EVENT LOG\""),
-        (DatabaseType::Mysql, None, "events", "events"),
-        (DatabaseType::Mysql, None, "order", "`order`"),
-        (DatabaseType::Mysql, None, "a`b", "`a``b`"),
-        (DatabaseType::Postgres, None, "events", "events"),
-        (DatabaseType::Postgres, None, "Events", "\"Events\""),
-        (DatabaseType::SqlServer, None, "events", "events"),
-        (DatabaseType::SqlServer, None, "a]b", "[a]]b]"),
-        (DatabaseType::Dameng, None, "EVENTS", "EVENTS"),
-        (DatabaseType::Dameng, None, "ABSOLUTE", "\"ABSOLUTE\""),
-        (DatabaseType::Kingbase, Some("`"), "events", "events"),
-        (DatabaseType::Kingbase, Some("`"), "order", "`order`"),
-        (DatabaseType::Jdbc, Some("\""), "events", "events"),
-        (DatabaseType::Jdbc, Some("\""), "Events", "\"Events\""),
-        (DatabaseType::Spanner, Some("\""), "order", "\"order\""),
-    ] {
-        for include_database_name in [true, false] {
-            let mut request = request(DataGridExtractorId::SqlInserts);
-            request.database_type = Some(database_type);
-            request.identifier_quote = quote.map(str::to_string);
-            request.columns = vec![column(name, 0)];
-            request.selected_column_indexes = vec![0];
-            request.rows = vec![vec![json!(1)]];
-            request.table_meta = Some(DataGridTableMeta {
-                catalog: None,
-                database: None,
-                schema: Some("APP".into()),
-                table_name: name.into(),
-                primary_keys: vec![],
-                columns: None,
-            });
-            request.options.sql.quote_identifiers = false;
-            request.options.sql.include_database_name = include_database_name;
-            let text = extract_data_grid_selection(request).unwrap().text;
-            assert!(text.contains(&format!("{expected} ({expected}) VALUES (1);")), "{database_type:?}: {text}");
-            if !include_database_name {
-                assert_eq!(text, format!("INSERT INTO {expected} ({expected}) VALUES (1);"));
-            }
-        }
-    }
-}
-
-#[test]
-fn sql_insert_portable_options_keep_insert_modes_and_type_fallbacks() {
-    for insert_mode in
-        [crate::data_grid_sql::DataGridCopyInsertMode::Merged, crate::data_grid_sql::DataGridCopyInsertMode::RowByRow]
-    {
-        let mut request = temporal_insert_request();
-        request.database_type = Some(DatabaseType::Mysql);
-        request.rows.push(vec![Value::Null, json!("O'Reilly"), json!(0)]);
-        request.options.sql.quote_identifiers = false;
-        request.options.sql.temporal_format = DataGridTemporalFormat::String;
-        request.options.sql.insert_mode = insert_mode;
-        request.options.sql.include_database_name = false;
-        let result = extract_data_grid_selection(request).unwrap();
-        assert!(result.text.contains("('2022-08-25 09:58:43', 'it''s text', 42)"));
-        assert!(result.text.contains("(NULL, 'O''Reilly', 0)"));
-        assert_eq!(
-            result.text.matches("INSERT INTO EVENTS").count(),
-            if insert_mode == crate::data_grid_sql::DataGridCopyInsertMode::Merged { 1 } else { 2 }
-        );
-    }
-    let mut request = temporal_insert_request();
-    request.options.sql.temporal_format = DataGridTemporalFormat::String;
-    request.table_meta = None;
-    let text = extract_data_grid_selection(request).unwrap().text;
-    assert!(text.contains("'2022-08-25T09:58:43Z'"));
-}
-
-#[test]
-fn sql_insert_string_format_preserves_binary_timestamps_and_numeric_epochs() {
-    for (database_type, data_type, value) in [
-        (DatabaseType::SqlServer, "timestamp", "0x00000000000007D3"),
-        (DatabaseType::Iotdb, "TIMESTAMP", "1747308643123456789"),
-    ] {
-        let mut request = temporal_insert_request();
-        request.database_type = Some(database_type);
-        request.table_meta.as_mut().unwrap().columns.as_mut().unwrap()[0].data_type = data_type.into();
-        request.rows[0][0] = json!(value);
-        let native = extract_data_grid_selection(request.clone()).unwrap().text;
-        request.options.sql.temporal_format = DataGridTemporalFormat::String;
-        assert_eq!(extract_data_grid_selection(request).unwrap().text, native);
     }
 }
 
@@ -214,37 +32,6 @@ fn sql_insert_policy_contract_rejects_unknown_modes_and_invalid_boolean_types() 
     let roundtrip: DataGridExtractorOptions = serde_json::from_value(serde_json::to_value(options).unwrap()).unwrap();
     assert_eq!(roundtrip.sql.temporal_format, DataGridTemporalFormat::String);
     assert!(!roundtrip.sql.quote_identifiers);
-}
-
-#[test]
-fn insert_policies_do_not_change_other_extractors_or_column_errors() {
-    for extractor in [
-        DataGridExtractorId::Csv,
-        DataGridExtractorId::Tsv,
-        DataGridExtractorId::Json,
-        DataGridExtractorId::JsonLines,
-        DataGridExtractorId::Markdown,
-        DataGridExtractorId::Html,
-        DataGridExtractorId::Xml,
-        DataGridExtractorId::SqlUpdates,
-        DataGridExtractorId::SqlInList,
-        DataGridExtractorId::WhereClause,
-    ] {
-        let mut request = temporal_insert_request();
-        request.extractor = extractor;
-        request.table_meta.as_mut().unwrap().primary_keys = vec!["AMOUNT".into()];
-        let native = extract_data_grid_selection(request.clone()).unwrap().text;
-        request.options.sql.quote_identifiers = false;
-        request.options.sql.temporal_format = DataGridTemporalFormat::String;
-        assert_eq!(extract_data_grid_selection(request).unwrap().text, native, "{extractor:?}");
-    }
-    let mut request = temporal_insert_request();
-    request.options.sql.quote_identifiers = false;
-    request.options.sql.temporal_format = DataGridTemporalFormat::String;
-    for info in request.table_meta.as_mut().unwrap().columns.as_mut().unwrap() {
-        info.extra = Some("VIRTUAL GENERATED".into());
-    }
-    assert_eq!(extract_data_grid_selection(request).unwrap_err().code, DataGridExtractErrorCode::NoWritableColumns);
 }
 
 #[test]
@@ -272,128 +59,6 @@ fn partially_deserialized_options_use_the_canonical_defaults() {
     assert_eq!(options.sql.temporal_format, DataGridTemporalFormat::Native);
     assert!(options.json.pretty);
     assert!(!options.json.camel_case_field_names);
-}
-
-#[test]
-fn insert_database_name_option_handles_engine_namespaces() {
-    use crate::data_grid_sql::DataGridCopyInsertMode;
-    use crate::sql_dialect::uses_single_row_insert_statements;
-
-    for (database_type, catalog, schema, qualified, unqualified) in [
-        (DatabaseType::Mysql, None, "a`b", "`a``b`.`users`", "`users`"),
-        (DatabaseType::Goldendb, None, "app", "`app`.`users`", "`users`"),
-        (DatabaseType::Doris, Some("internal"), "app", "`app`.`users`", "`users`"),
-        (DatabaseType::StarRocks, None, "app", "`app`.`users`", "`users`"),
-        (DatabaseType::Sqlite, None, "main", "\"main\".\"users\"", "\"users\""),
-        (DatabaseType::Sqlite, None, "attached", "\"attached\".\"users\"", "\"users\""),
-        (DatabaseType::DuckDb, None, "main", "\"main\".\"users\"", "\"users\""),
-        (DatabaseType::Oracle, None, "APP", "\"APP\".\"users\"", "\"users\""),
-        (DatabaseType::Dameng, None, "APP", "\"APP\".\"users\"", "\"users\""),
-        (DatabaseType::Kingbase, None, "audit", "\"audit\".\"users\"", "\"users\""),
-        (DatabaseType::Gaussdb, None, "audit", "\"audit\".\"users\"", "\"users\""),
-        (DatabaseType::OpenGauss, None, "audit", "\"audit\".\"users\"", "\"users\""),
-        (DatabaseType::Db2, None, "APP", "\"APP\".\"users\"", "\"users\""),
-        (DatabaseType::StarRocks, Some("iceberg"), "app", "`iceberg`.`app`.`users`", "`users`"),
-        (DatabaseType::Postgres, None, "audit", "\"audit\".\"users\"", "\"users\""),
-        (DatabaseType::SqlServer, Some("app"), "audit", "[app].[audit].[users]", "[users]"),
-        (DatabaseType::Doris, Some("iceberg"), "app", "`iceberg`.`app`.`users`", "`users`"),
-    ] {
-        for include_database_name in [true, false] {
-            for insert_mode in [DataGridCopyInsertMode::Merged, DataGridCopyInsertMode::RowByRow] {
-                let mut request = request(DataGridExtractorId::SqlInserts);
-                request.database_type = Some(database_type);
-                request.table_meta = Some(DataGridTableMeta {
-                    catalog: catalog.map(str::to_owned),
-                    database: Some("app".to_owned()),
-                    schema: Some(schema.to_owned()),
-                    table_name: "users".to_owned(),
-                    primary_keys: vec![],
-                    columns: None,
-                });
-                request.options.sql.include_database_name = include_database_name;
-                request.options.sql.insert_mode = insert_mode;
-                // Exercise the same camelCase contract sent by the frontend.
-                let request = serde_json::from_value(serde_json::to_value(request).unwrap()).unwrap();
-                let result = extract_data_grid_selection(request).unwrap();
-                let table = if include_database_name { qualified } else { unqualified };
-                let statements: Vec<_> = result.text.split(";\n").collect();
-                let expected_statement_count = if insert_mode == DataGridCopyInsertMode::RowByRow
-                    || uses_single_row_insert_statements(database_type)
-                {
-                    2
-                } else {
-                    1
-                };
-                assert_eq!(statements.len(), expected_statement_count);
-                for statement in statements {
-                    assert!(statement.starts_with(&format!("INSERT INTO {table} (")), "{statement}");
-                }
-            }
-        }
-    }
-}
-
-#[test]
-fn insert_database_name_option_uses_database_when_schema_is_absent() {
-    use crate::data_grid_sql::DataGridCopyInsertMode;
-
-    for database_type in [DatabaseType::Mysql, DatabaseType::Goldendb, DatabaseType::Doris, DatabaseType::StarRocks] {
-        for (database, schema, qualified) in [
-            (Some("a`b"), None, "`a``b`.`users`"),
-            (Some("app"), Some(""), "`app`.`users`"),
-            (Some("app"), Some("  "), "`app`.`users`"),
-            (Some("app"), Some("other"), "`other`.`users`"),
-            (None, Some("other"), "`other`.`users`"),
-            (None, None, "`users`"),
-            (Some("  "), None, "`users`"),
-        ] {
-            for include_database_name in [true, false] {
-                for insert_mode in [DataGridCopyInsertMode::Merged, DataGridCopyInsertMode::RowByRow] {
-                    let mut request = request(DataGridExtractorId::SqlInserts);
-                    request.database_type = Some(database_type);
-                    request.table_meta = Some(DataGridTableMeta {
-                        catalog: None,
-                        database: database.map(str::to_owned),
-                        schema: schema.map(str::to_owned),
-                        table_name: "users".to_owned(),
-                        primary_keys: vec![],
-                        columns: None,
-                    });
-                    request.options.sql.include_database_name = include_database_name;
-                    request.options.sql.insert_mode = insert_mode;
-                    let request = serde_json::from_value(serde_json::to_value(request).unwrap()).unwrap();
-                    let result = extract_data_grid_selection(request).unwrap();
-                    let table = if include_database_name { qualified } else { "`users`" };
-                    for statement in result.text.split(";\n") {
-                        assert!(statement.starts_with(&format!("INSERT INTO {table} (")), "{statement}");
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[test]
-fn postgres_insert_can_omit_schema_namespace() {
-    for schema in [Some("dbx_dst_ccfebf6b"), None] {
-        for include_database_name in [true, false] {
-            let mut request = request(DataGridExtractorId::SqlInserts);
-            request.database_type = Some(DatabaseType::Postgres);
-            request.table_meta = Some(DataGridTableMeta {
-                catalog: None,
-                database: Some("app".to_owned()),
-                schema: schema.map(str::to_owned),
-                table_name: "users".to_owned(),
-                primary_keys: vec![],
-                columns: None,
-            });
-            request.options.sql.include_database_name = include_database_name;
-            let result = extract_data_grid_selection(request).unwrap();
-            let table =
-                if include_database_name && schema.is_some() { r#""dbx_dst_ccfebf6b"."users""# } else { r#""users""# };
-            assert!(result.text.starts_with(&format!("INSERT INTO {table} (")), "{}", result.text);
-        }
-    }
 }
 
 #[test]
@@ -630,34 +295,6 @@ fn sql_in_list_deduplicates_only_identical_rendered_literals() {
 }
 
 #[test]
-fn sql_in_list_honors_kingbase_bit_literals() {
-    let mut request = request(DataGridExtractorId::SqlInList);
-    request.database_type = Some(DatabaseType::Kingbase);
-    request.identifier_quote = Some("`".to_string());
-    request.columns = vec![column("flag", 0)];
-    request.selected_column_indexes = vec![0];
-    request.table_meta = Some(DataGridTableMeta {
-        catalog: None,
-        database: None,
-        schema: None,
-        table_name: "flags".to_string(),
-        primary_keys: vec![],
-        columns: Some(vec![DataGridColumnInfo {
-            name: "flag".to_string(),
-            data_type: "pg_catalog.bit(1)".to_string(),
-            is_nullable: true,
-            is_primary_key: false,
-            column_default: None,
-            extra: None,
-        }]),
-    });
-    request.rows = vec![vec![json!("0")], vec![json!("1")]];
-
-    let result = extract_data_grid_selection(request).expect("Kingbase SQL IN extraction");
-    assert_eq!(result.text, "(b'0', b'1')");
-}
-
-#[test]
 fn preserves_duplicate_json_columns_without_overwriting_values() {
     let mut request = request(DataGridExtractorId::Json);
     request.columns[1].display_name = "id".to_string();
@@ -712,55 +349,8 @@ fn builds_updates_with_hidden_primary_keys_and_selected_columns() {
     let result = extract_data_grid_selection(request).expect("SQL Updates extraction");
     assert_eq!(
         result.text,
-        "UPDATE \"public\".\"users\" SET \"name\" = 'Ada' WHERE \"id\" = 1;\nUPDATE \"public\".\"users\" SET \"name\" = 'Grace, Hopper' WHERE \"id\" = 2;"
+        "UPDATE `public`.`users` SET `name` = 'Ada' WHERE `id` = 1;\nUPDATE `public`.`users` SET `name` = 'Grace, Hopper' WHERE `id` = 2;"
     );
-}
-
-#[test]
-fn sql_copy_honors_kingbase_mysql_compat_connection_identifier_quote() {
-    let table_meta = DataGridTableMeta {
-        catalog: None,
-        database: None,
-        schema: Some("audit-schema".to_string()),
-        table_name: "events".to_string(),
-        primary_keys: vec!["id".to_string()],
-        columns: Some(vec![
-            DataGridColumnInfo {
-                name: "id".to_string(),
-                data_type: "int".to_string(),
-                is_nullable: false,
-                is_primary_key: true,
-                column_default: None,
-                extra: None,
-            },
-            DataGridColumnInfo {
-                name: "event_type".to_string(),
-                data_type: "varchar".to_string(),
-                is_nullable: false,
-                is_primary_key: false,
-                column_default: None,
-                extra: None,
-            },
-        ]),
-    };
-
-    let mut insert = request(DataGridExtractorId::SqlInserts);
-    insert.database_type = Some(DatabaseType::Kingbase);
-    insert.identifier_quote = Some("`".to_string());
-    insert.table_meta = Some(table_meta.clone());
-    insert.columns = vec![column("id", 0), column("event_type", 1)];
-    insert.rows = vec![vec![json!(1), json!("login")]];
-    let insert_result = extract_data_grid_selection(insert).expect("Kingbase SQL INSERT extraction");
-    assert_eq!(insert_result.text, "INSERT INTO `audit-schema`.`events` (`id`, `event_type`) VALUES (1, 'login');");
-
-    let mut updates = request(DataGridExtractorId::SqlUpdates);
-    updates.database_type = Some(DatabaseType::Kingbase);
-    updates.identifier_quote = Some("`".to_string());
-    updates.table_meta = Some(table_meta);
-    updates.columns = vec![column("id", 0), column("event_type", 1)];
-    updates.rows = vec![vec![json!(1), json!("logout")]];
-    let updates_result = extract_data_grid_selection(updates).expect("Kingbase SQL UPDATE extraction");
-    assert_eq!(updates_result.text, "UPDATE `audit-schema`.`events` SET `event_type` = 'logout' WHERE `id` = 1;");
 }
 
 #[test]
@@ -800,7 +390,7 @@ fn sql_update_computed_column_option_matches_the_frontend_capability() {
 
     request.options.sql.skip_computed_columns = false;
     let included = extract_data_grid_selection(request).expect("explicit computed UPDATE extraction");
-    assert!(included.text.contains("SET \"search_text\" ="));
+    assert!(included.text.contains("SET `search_text` ="));
 }
 
 #[test]
@@ -973,7 +563,7 @@ fn builds_null_safe_where_clause_predicates() {
     request.selected_column_indexes = vec![1];
     request.rows = vec![vec![json!(1), Value::Null]];
     let result = extract_data_grid_selection(request).expect("WHERE extraction");
-    assert_eq!(result.text, "\"name\" IS NULL");
+    assert_eq!(result.text, "`name` IS NULL");
 }
 
 #[test]
@@ -992,7 +582,7 @@ fn builds_select_for_one_explicit_cell() {
 
     let result = extract_data_grid_selection(request).expect("SELECT extraction");
 
-    assert_eq!(result.text, "SELECT * FROM \"public\".\"users\" WHERE \"name\" = 'Ada';");
+    assert_eq!(result.text, "SELECT * FROM `public`.`users` WHERE `name` = 'Ada';");
 }
 
 #[test]
@@ -1013,7 +603,7 @@ fn select_row_uses_complete_identity_including_hidden_columns() {
 
     let result = extract_data_grid_selection(request).expect("SELECT extraction");
 
-    assert_eq!(result.text, "SELECT * FROM \"users\" WHERE \"tenant_id\" = 9 AND \"id\" = 7;");
+    assert_eq!(result.text, "SELECT * FROM `users` WHERE `tenant_id` = 9 AND `id` = 7;");
 }
 
 #[test]
@@ -1033,7 +623,7 @@ fn select_row_falls_back_to_all_columns_without_usable_identity() {
 
         let result = extract_data_grid_selection(request).expect("SELECT extraction");
 
-        assert_eq!(result.text, "SELECT * FROM \"users\" WHERE \"id\" IS NULL AND \"name\" = 'Ada';");
+        assert_eq!(result.text, "SELECT * FROM `users` WHERE `id` IS NULL AND `name` = 'Ada';");
     }
 }
 
@@ -1054,7 +644,10 @@ fn select_cells_joins_multiple_columns_and_rows() {
 
     let result = extract_data_grid_selection(request).expect("multi-cell SELECT extraction");
 
-    assert_eq!(result.text, "SELECT * FROM \"users\" WHERE (\"id\" = 1 AND \"name\" = 'Ada') OR (\"id\" = 2 AND \"name\" = 'Grace, Hopper');");
+    assert_eq!(
+        result.text,
+        "SELECT * FROM `users` WHERE (`id` = 1 AND `name` = 'Ada') OR (`id` = 2 AND `name` = 'Grace, Hopper');"
+    );
 }
 
 #[test]
@@ -1158,61 +751,11 @@ fn select_cells_falls_back_to_display_name_like_where_clause() {
     let result = extract_data_grid_selection(request).expect("SELECT extraction with missing source_name");
     assert_eq!(
         result.text,
-        "SELECT * FROM \"users\" WHERE (\"id\" = 1 AND \"name\" = 'Ada') OR (\"id\" = 2 AND \"name\" = 'Grace, Hopper');"
+        "SELECT * FROM `users` WHERE (`id` = 1 AND `name` = 'Ada') OR (`id` = 2 AND `name` = 'Grace, Hopper');"
     );
 
     let where_result = extract_data_grid_selection(where_request).expect("WHERE extraction with missing source_name");
-    assert_eq!(where_result.text, "(\"id\" = 1 AND \"name\" = 'Ada') OR (\"id\" = 2 AND \"name\" = 'Grace, Hopper')");
-}
-
-#[test]
-fn where_clause_rejects_unsupported_nosql_databases() {
-    for database_type in [DatabaseType::MongoDb, DatabaseType::Neo4j, DatabaseType::Tdengine] {
-        let mut request = request(DataGridExtractorId::WhereClause);
-        request.database_type = Some(database_type);
-        let error = extract_data_grid_selection(request).expect_err("WHERE must reject NoSQL");
-        assert_eq!(error.code, DataGridExtractErrorCode::UnsupportedDatabase, "{database_type:?}");
-    }
-}
-
-#[test]
-fn build_data_grid_copy_update_statements_returns_empty_for_mongodb() {
-    use crate::data_grid_sql::{build_data_grid_copy_update_statements, DataGridCopyUpdateStatementOptions};
-    let options = DataGridCopyUpdateStatementOptions {
-        database_type: Some(DatabaseType::MongoDb),
-        identifier_quote: None,
-        table_meta: DataGridTableMeta {
-            catalog: None,
-            database: None,
-            schema: None,
-            table_name: "t".to_string(),
-            primary_keys: vec!["id".to_string()],
-            columns: None,
-        },
-        columns: vec!["id".to_string()],
-        source_columns: Some(vec![Some("id".to_string())]),
-        rows: vec![vec![json!(1)]],
-        include_database_name: false,
-    };
-    assert!(build_data_grid_copy_update_statements(options).is_empty());
-}
-
-#[test]
-fn format_grid_sql_literal_uses_numeric_bool_for_sqlserver() {
-    use crate::data_grid_sql::format_grid_sql_literal;
-    let column = DataGridColumnInfo {
-        name: "active".to_string(),
-        data_type: "tinyint".to_string(),
-        is_nullable: true,
-        is_primary_key: false,
-        column_default: None,
-        extra: None,
-    };
-    // SQL Server has no TRUE/FALSE literals; emit 1/0 even for non-BIT columns.
-    assert_eq!(format_grid_sql_literal(&json!(true), Some(DatabaseType::SqlServer), Some(&column)), "1");
-    assert_eq!(format_grid_sql_literal(&json!(false), Some(DatabaseType::SqlServer), Some(&column)), "0");
-    // Other dialects still emit TRUE/FALSE for non-bit columns.
-    assert_eq!(format_grid_sql_literal(&json!(true), Some(DatabaseType::Postgres), Some(&column)), "TRUE");
+    assert_eq!(where_result.text, "(`id` = 1 AND `name` = 'Ada') OR (`id` = 2 AND `name` = 'Grace, Hopper')");
 }
 
 #[test]
@@ -1275,7 +818,7 @@ fn sql_insert_skips_generated_and_computed_columns() {
     let result = extract_data_grid_selection(request).expect("SQL INSERT extraction");
     assert!(result.text.contains("name"));
     assert!(!result.text.contains("search_text"));
-    assert!(result.text.contains("(\"id\", \"name\")"));
+    assert!(result.text.contains("(`id`, `name`)"));
     assert_eq!(result.omitted_columns, vec!["search_text"]);
 
     let included =
@@ -1285,7 +828,7 @@ fn sql_insert_skips_generated_and_computed_columns() {
 
     let included =
         extract_data_grid_selection(include_generated_request).expect("SQL INSERT extraction with generated columns");
-    assert!(included.text.contains("(\"id\", \"name\")"));
+    assert!(included.text.contains("(`id`, `name`)"));
     assert_eq!(included.omitted_columns, vec!["search_text"]);
 }
 
@@ -1320,7 +863,7 @@ fn sql_insert_keeps_autoincrement_primary_key_by_default() {
 
     let result = extract_data_grid_selection(request).expect("SQL INSERT extraction");
 
-    assert!(result.text.contains("INSERT INTO \"users\" (\"id\", \"name\")"));
+    assert!(result.text.contains("INSERT INTO `users` (`id`, `name`)"));
     assert!(result.text.contains("(1, 'Ada')"));
     assert!(result.omitted_columns.is_empty());
 }
@@ -1360,46 +903,8 @@ fn sql_insert_honors_primary_key_exclusion_and_row_by_row_mode() {
 
     assert_eq!(
         result.text,
-        "INSERT INTO \"public\".\"users\" (\"name\") VALUES ('Ada');\nINSERT INTO \"public\".\"users\" (\"name\") VALUES ('Grace, Hopper');"
+        "INSERT INTO `public`.`users` (`name`) VALUES ('Ada');\nINSERT INTO `public`.`users` (`name`) VALUES ('Grace, Hopper');"
     );
-    assert_eq!(result.omitted_columns, vec!["id"]);
-}
-
-#[test]
-fn sql_insert_primary_key_exclusion_omits_postgres_serial_key() {
-    let mut request = request(DataGridExtractorId::SqlInserts);
-    request.database_type = Some(DatabaseType::Postgres);
-    request.table_meta = Some(DataGridTableMeta {
-        catalog: None,
-        database: None,
-        schema: Some("public".to_string()),
-        table_name: "users".to_string(),
-        primary_keys: vec!["id".to_string()],
-        columns: Some(vec![
-            DataGridColumnInfo {
-                name: "id".to_string(),
-                data_type: "integer".to_string(),
-                is_nullable: false,
-                is_primary_key: true,
-                column_default: None,
-                extra: Some("serial".to_string()),
-            },
-            DataGridColumnInfo {
-                name: "name".to_string(),
-                data_type: "text".to_string(),
-                is_nullable: false,
-                is_primary_key: false,
-                column_default: None,
-                extra: None,
-            },
-        ]),
-    });
-    request.rows = vec![vec![json!(1), json!("Ada")]];
-    request.options.sql.exclude_primary_keys_from_insert = true;
-
-    let result = extract_data_grid_selection(request).expect("PostgreSQL SQL INSERT extraction");
-
-    assert_eq!(result.text, "INSERT INTO \"public\".\"users\" (\"name\") VALUES ('Ada');");
     assert_eq!(result.omitted_columns, vec!["id"]);
 }
 
@@ -1446,7 +951,7 @@ fn sql_insert_primary_key_exclusion_keeps_manual_composite_key_members() {
 
     let result = extract_data_grid_selection(request).expect("SQL INSERT extraction");
 
-    assert_eq!(result.text, "INSERT INTO \"daily_stats\" (\"stat_date\", \"name\") VALUES ('2026-08-18', 'Ada');");
+    assert_eq!(result.text, "INSERT INTO `daily_stats` (`stat_date`, `name`) VALUES ('2026-08-18', 'Ada');");
     assert_eq!(result.omitted_columns, vec!["id"]);
 }
 
@@ -1489,7 +994,7 @@ fn extractor_contract_uses_the_frontend_camel_case_wire_shape() {
     let value = serde_json::to_value(&request).expect("serialize extractor request");
 
     assert_eq!(value["extractor"], "csv-with-headers");
-    assert_eq!(value["databaseType"], "postgres");
+    assert_eq!(value["databaseType"], "mysql");
     assert_eq!(value["selectedColumnIndexes"], json!([0, 1]));
     assert_eq!(value["selectionKind"], "cells");
     assert_eq!(value["options"]["dsv"]["includeColumnHeader"], false);

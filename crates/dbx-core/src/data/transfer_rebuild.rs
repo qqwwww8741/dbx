@@ -50,19 +50,7 @@ pub const DROP_TARGET_EXTERNAL_DEPENDENCIES: &str = "TRANSFER_DROP_TARGET_EXTERN
 /// table rename: their constraint and index names are schema-unique, and the rename
 /// pre-pass has not yet learned to release those names on the backup tables, so a rebuilt
 /// table reusing the source DDL would collide (ORA-00955 / "already an object named").
-const DROP_TARGET_SUPPORTED: &[DatabaseType] = &[
-    DatabaseType::Mysql,
-    DatabaseType::Postgres,
-    DatabaseType::SqlServer,
-    DatabaseType::Kingbase,
-    DatabaseType::Gaussdb,
-    DatabaseType::OpenGauss,
-    DatabaseType::Kwdb,
-    DatabaseType::Goldendb,
-    DatabaseType::Sqlite,
-    DatabaseType::DuckDb,
-    DatabaseType::CloudflareD1,
-];
+const DROP_TARGET_SUPPORTED: &[DatabaseType] = &[DatabaseType::Mysql];
 
 /// Hex characters of the derived hash appended after [`BACKUP_TABLE_MARKER`].
 const BACKUP_HASH_LEN: usize = 8;
@@ -419,9 +407,7 @@ async fn detect_dependent_views(
     target_tables: &[String],
     database_type: DatabaseType,
 ) -> Result<BTreeSet<String>, String> {
-    if matches!(database_type, DatabaseType::Sqlite | DatabaseType::CloudflareD1 | DatabaseType::DuckDb) {
-        return detect_parsed_view_dependencies(state, pool_key, database, schema, target_tables, database_type).await;
-    }
+    {}
     let sql = dependent_views_sql(database_type, database, schema, target_tables).ok_or_else(|| {
         format!("Cannot safely inspect dependent views for {} before rebuilding target tables", database_type.as_str())
     })?;
@@ -431,10 +417,7 @@ async fn detect_dependent_views(
         // target fails this lookup (ER_UNKNOWN_TABLE 1109/42S02), which used to abort the
         // whole rebuild even when the target held no views at all. Inspect the stored view
         // definitions instead: still fail-closed, just without the 8.0-only catalog.
-        Err(error)
-            if matches!(database_type, DatabaseType::Mysql | DatabaseType::Goldendb)
-                && mysql_view_usage_catalog_missing(&error) =>
-        {
+        Err(error) if matches!(database_type, DatabaseType::Mysql) && mysql_view_usage_catalog_missing(&error) => {
             log::info!(
                 "MySQL-compatible target has no information_schema.VIEW_TABLE_USAGE; \
                  inspecting stored view definitions instead"
@@ -470,28 +453,7 @@ fn dependent_views_sql(
 ) -> Option<String> {
     let names = target_tables.iter().map(|table| quote_sql_literal(table)).collect::<Vec<_>>().join(", ");
     match database_type {
-        DatabaseType::Postgres
-        | DatabaseType::Kingbase
-        | DatabaseType::Gaussdb
-        | DatabaseType::OpenGauss
-        | DatabaseType::Kwdb => Some(format!(
-            "SELECT DISTINCT src_ns.nspname, src.relname, tgt.relname, \
-                    CASE WHEN src.relkind = 'm' THEN 'materialized view' ELSE 'view' END \
-             FROM pg_catalog.pg_depend dep \
-             JOIN pg_catalog.pg_rewrite rewrite ON rewrite.oid = dep.objid \
-             JOIN pg_catalog.pg_class src ON src.oid = rewrite.ev_class \
-             JOIN pg_catalog.pg_namespace src_ns ON src_ns.oid = src.relnamespace \
-             JOIN pg_catalog.pg_class tgt ON tgt.oid = dep.refobjid \
-             JOIN pg_catalog.pg_namespace tgt_ns ON tgt_ns.oid = tgt.relnamespace \
-             WHERE dep.classid = 'pg_catalog.pg_rewrite'::regclass \
-               AND dep.refclassid = 'pg_catalog.pg_class'::regclass \
-               AND src.relkind IN ('v', 'm') \
-               AND src.oid <> tgt.oid \
-               AND tgt_ns.nspname = {schema} \
-               AND tgt.relname IN ({names})",
-            schema = quote_sql_literal(schema),
-        )),
-        DatabaseType::Mysql | DatabaseType::Goldendb => Some(format!(
+        DatabaseType::Mysql => Some(format!(
             "SELECT DISTINCT VIEW_SCHEMA, VIEW_NAME, TABLE_NAME, 'view' \
              FROM information_schema.VIEW_TABLE_USAGE \
              WHERE {database_match} AND {table_match}",
@@ -501,24 +463,7 @@ fn dependent_views_sql(
                 &target_tables.iter().map(String::as_str).collect::<Vec<_>>()
             ),
         )),
-        DatabaseType::Oracle | DatabaseType::Dameng | DatabaseType::OceanbaseOracle => Some(format!(
-            "SELECT DISTINCT owner, name, referenced_name, type \
-             FROM all_dependencies \
-             WHERE type IN ('VIEW', 'MATERIALIZED VIEW') \
-               AND referenced_type = 'TABLE' \
-               AND referenced_owner = {schema} \
-               AND referenced_name IN ({names})",
-            schema = quote_sql_literal(schema),
-        )),
-        DatabaseType::SqlServer => Some(format!(
-            "SELECT DISTINCT SCHEMA_NAME(src.schema_id), src.name, tgt.name, 'view' \
-             FROM sys.sql_expression_dependencies dep \
-             JOIN sys.views src ON src.object_id = dep.referencing_id \
-             JOIN sys.tables tgt ON tgt.object_id = dep.referenced_id \
-             WHERE dep.referencing_class = 1 AND dep.referenced_class = 1 \
-               AND SCHEMA_NAME(tgt.schema_id) = {schema} AND tgt.name IN ({names})",
-            schema = quote_sql_literal(schema),
-        )),
+
         _ => None,
     }
 }
@@ -556,33 +501,13 @@ async fn detect_parsed_view_dependencies(
     target_tables: &[String],
     database_type: DatabaseType,
 ) -> Result<BTreeSet<String>, String> {
-    let (database, schema, sql) = if database_type == DatabaseType::DuckDb {
-        let database = resolve_duckdb_dependency_database(state, pool_key, database).await?;
-        let schema = if schema.is_empty() { "main" } else { schema }.to_string();
-        // DuckDB views may reference tables in another schema or attached catalog.
-        let sql =
-            "SELECT database_name, schema_name, view_name, sql FROM duckdb_views() WHERE NOT internal".to_string();
-        (database, schema, sql)
-    } else if matches!(database_type, DatabaseType::Mysql | DatabaseType::Goldendb) {
+    let (database, schema, sql) = {
         // `VIEW_DEFINITION` is the resolved SELECT, and a MySQL database *is* the schema
         // DBX rebuilds in, so the row's `TABLE_SCHEMA` decides which namespace an
         // unqualified relation belongs to. The 8.0 catalog path keys on the database, so
         // the fallback keeps the same spelling: dropping the database here would leave
         // qualified references unmatched whenever the caller passes an empty schema.
         (database.to_string(), schema.to_string(), mysql_view_definition_dependencies_sql(database))
-    } else {
-        let schema = resolve_sqlite_dependency_schema(state, pool_key, database, schema, database_type).await?;
-        let mut sql = format!(
-            "SELECT '', {schema_value}, name, sql FROM {schema_ident}.sqlite_master WHERE type = 'view'",
-            schema_value = quote_sql_literal(&schema),
-            schema_ident = crate::db::sqlite::sqlite_quote_ident(&schema),
-        );
-        // Persistent SQLite views are confined to their own database. TEMP views can
-        // refer to any attached database, so they must be inspected as well.
-        if database_type == DatabaseType::Sqlite && !schema.eq_ignore_ascii_case("temp") {
-            sql.push_str(" UNION ALL SELECT '', 'temp', name, sql FROM temp.sqlite_master WHERE type = 'view'");
-        }
-        (String::new(), schema, sql)
     };
     let result = read_dependency_metadata(state, pool_key, &sql, 4).await?;
     let mut blocking = BTreeSet::new();
@@ -597,34 +522,14 @@ async fn detect_parsed_view_dependencies(
         };
         let ddl = dependency_metadata_text(row, 3)
             .map_err(|error| format!("Cannot safely inspect dependent view {qualified}: {error}"))?;
-        let references = if matches!(database_type, DatabaseType::Mysql | DatabaseType::Goldendb) {
-            mysql_view_definition_target_references(ddl, &database, &schema, view_schema, target_tables)
-        } else {
-            parsed_view_target_references(ddl, database_type, &database, &schema, view_schema, target_tables)
-        }
-        .map_err(|error| format!("Cannot safely inspect dependent view {qualified}: {error}"))?;
+        let references =
+            { mysql_view_definition_target_references(ddl, &database, &schema, view_schema, target_tables) }
+                .map_err(|error| format!("Cannot safely inspect dependent view {qualified}: {error}"))?;
         for referenced in references {
             blocking.insert(format!("view {qualified} -> {schema}.{referenced}"));
         }
     }
     Ok(blocking)
-}
-
-fn parsed_view_target_references(
-    ddl: &str,
-    database_type: DatabaseType,
-    database: &str,
-    schema: &str,
-    view_schema: &str,
-    target_tables: &[String],
-) -> Result<BTreeSet<String>, String> {
-    let dialect: &dyn sqlparser::dialect::Dialect =
-        if database_type == DatabaseType::DuckDb { &DuckDbDialect {} } else { &SQLiteDialect {} };
-    let statements = Parser::parse_sql(dialect, ddl).map_err(|error| error.to_string())?;
-    let [Statement::CreateView(view)] = statements.as_slice() else {
-        return Err("the catalog did not return a complete CREATE VIEW definition".to_string());
-    };
-    view_query_target_references(&view.query, database_type, database, schema, view_schema, target_tables)
 }
 
 /// MySQL stores only the resolved `SELECT` in `information_schema.VIEWS.VIEW_DEFINITION`
@@ -675,18 +580,7 @@ fn view_query_target_references(
             Some((table, qualifiers)) => (qualifiers, *table),
             None => return ControlFlow::Break("a view relation has no object name".to_string()),
         };
-        let same_namespace = if database_type == DatabaseType::DuckDb {
-            match qualifiers {
-                // DuckDB retains unqualified references in its stored view SQL. A
-                // view's own schema does not prove which search_path resolved them.
-                [] => true,
-                [namespace] => namespace.eq_ignore_ascii_case(schema) || namespace.eq_ignore_ascii_case(database),
-                [catalog, namespace] => {
-                    catalog.eq_ignore_ascii_case(database) && namespace.eq_ignore_ascii_case(schema)
-                }
-                _ => return ControlFlow::Break("a DuckDB view relation has an unsupported qualified name".to_string()),
-            }
-        } else if matches!(database_type, DatabaseType::Mysql | DatabaseType::Goldendb) {
+        let same_namespace = {
             // MySQL stores relations with their database name. DBX's `schema` and
             // `database` are the same namespace for MySQL, so either spelling of the
             // target proves an unqualified or single-qualifier reference points at it.
@@ -694,12 +588,6 @@ fn view_query_target_references(
                 [] => view_schema.eq_ignore_ascii_case(schema) || view_schema.eq_ignore_ascii_case(database),
                 [qualified] => qualified.eq_ignore_ascii_case(schema) || qualified.eq_ignore_ascii_case(database),
                 _ => return ControlFlow::Break("a MySQL view relation has an unsupported qualified name".to_string()),
-            }
-        } else {
-            match qualifiers {
-                [] => view_schema.eq_ignore_ascii_case(schema) || view_schema.eq_ignore_ascii_case("temp"),
-                [namespace] => namespace.eq_ignore_ascii_case(schema),
-                _ => return ControlFlow::Break("a SQLite view relation has an unsupported qualified name".to_string()),
             }
         };
         if same_namespace {
@@ -732,36 +620,6 @@ impl Visitor for StaticViewRelations {
             ),
         }
     }
-}
-
-async fn resolve_duckdb_dependency_database(
-    state: &AppState,
-    pool_key: &str,
-    database: &str,
-) -> Result<String, String> {
-    let database = if database.is_empty() || database.eq_ignore_ascii_case("main") {
-        let result = read_dependency_metadata(state, pool_key, "SELECT current_database()", 1).await?;
-        let row = result.rows.first().ok_or("Cannot inspect DuckDB dependencies: current database is unknown")?;
-        dependency_metadata_text(row, 0)?.to_string()
-    } else {
-        database.to_string()
-    };
-    let result =
-        read_dependency_metadata(state, pool_key, "SELECT database_name, type FROM duckdb_databases()", 2).await?;
-    let mut resolved = None;
-    for row in &result.rows {
-        let name = dependency_metadata_text(row, 0)?;
-        let kind = dependency_metadata_text(row, 1)?;
-        if !kind.eq_ignore_ascii_case("duckdb") {
-            return Err(format!(
-                "Cannot safely inspect dependencies in DuckDB catalog '{name}' (engine '{kind}') before rebuilding tables"
-            ));
-        }
-        if name.eq_ignore_ascii_case(&database) {
-            resolved = Some(name.to_string());
-        }
-    }
-    resolved.ok_or_else(|| format!("Cannot inspect DuckDB dependencies: catalog '{database}' is not attached"))
 }
 
 /// Render the fail-fast error for a non-empty set of blocking foreign keys.
@@ -813,29 +671,10 @@ pub async fn detect_external_incoming_foreign_keys(
     if target_tables.is_empty() {
         return Ok(Vec::new());
     }
-    let resolved_database;
-    let target_database = if target_database_type == DatabaseType::DuckDb {
-        resolved_database = resolve_duckdb_dependency_database(state, target_pool_key, target_database).await?;
-        resolved_database.as_str()
-    } else {
-        target_database
-    };
-    let resolved_schema;
-    let target_schema = if matches!(target_database_type, DatabaseType::Sqlite | DatabaseType::CloudflareD1) {
-        resolved_schema = resolve_sqlite_dependency_schema(
-            state,
-            target_pool_key,
-            target_database,
-            target_schema,
-            target_database_type,
-        )
-        .await?;
-        resolved_schema.as_str()
-    } else if target_database_type == DatabaseType::DuckDb && target_schema.is_empty() {
-        "main"
-    } else {
-        target_schema
-    };
+
+    let target_database = { target_database };
+
+    let target_schema = { target_schema };
     let sql = external_incoming_foreign_keys_sql(target_database_type, target_database, target_schema, target_tables)
         .ok_or_else(|| {
         format!(
@@ -899,35 +738,6 @@ fn dependency_metadata_text(row: &[serde_json::Value], index: usize) -> Result<&
     })
 }
 
-async fn resolve_sqlite_dependency_schema(
-    state: &AppState,
-    pool_key: &str,
-    database: &str,
-    schema: &str,
-    database_type: DatabaseType,
-) -> Result<String, String> {
-    let requested = if !schema.trim().is_empty() {
-        schema
-    } else if database_type == DatabaseType::CloudflareD1 || database.trim().is_empty() {
-        "main"
-    } else {
-        database
-    };
-    let result = read_dependency_metadata(state, pool_key, "PRAGMA database_list", 3).await?;
-    let names = result.rows.iter().map(|row| dependency_metadata_text(row, 1)).collect::<Result<Vec<_>, _>>()?;
-    // A real attached alias wins over the legacy file-path -> main normalization.
-    if let Some(name) = names.iter().find(|name| name.eq_ignore_ascii_case(requested)) {
-        return Ok((*name).to_string());
-    }
-    let normalized = crate::db::sqlite::sqlite_quote_schema_ident(requested);
-    if let Some(name) =
-        names.iter().find(|name| crate::db::sqlite::sqlite_quote_ident(name).eq_ignore_ascii_case(&normalized))
-    {
-        return Ok((*name).to_string());
-    }
-    Err(format!("Cannot safely inspect target dependencies: SQLite schema '{requested}' is not attached"))
-}
-
 /// Build the metadata query returning `(referencing_schema, referencing_table,
 /// referenced_table, constraint_name)` for every foreign key that points at
 /// `target_tables` from outside that set.
@@ -947,7 +757,7 @@ fn external_incoming_foreign_keys_sql(
         // REFERENCED_TABLE_SCHEMA. Reading KEY_COLUMN_USAGE alone avoids the
         // catalog-wide scan a join with TABLE_CONSTRAINTS triggers on MySQL 5.7
         // (same reason as db::mysql::list_foreign_keys).
-        DatabaseType::Mysql | DatabaseType::Goldendb => Some(format!(
+        DatabaseType::Mysql => Some(format!(
             "SELECT DISTINCT TABLE_SCHEMA, TABLE_NAME, REFERENCED_TABLE_NAME, CONSTRAINT_NAME \
              FROM information_schema.KEY_COLUMN_USAGE \
              WHERE {target_database_match} AND {target_table_match} \
@@ -963,87 +773,7 @@ fn external_incoming_foreign_keys_sql(
                 &target_tables.iter().map(String::as_str).collect::<Vec<_>>()
             ),
         )),
-        // PostgreSQL family: pg_constraint is indexed on confrelid, so this stays
-        // cheap even on large catalogs. The referencing side is deliberately not
-        // restricted to `schema` — a foreign key from another schema follows the
-        // rename just the same — so the exclusion is namespace-qualified rather
-        // than by bare name.
-        DatabaseType::Postgres
-        | DatabaseType::Kingbase
-        | DatabaseType::Gaussdb
-        | DatabaseType::OpenGauss
-        | DatabaseType::Kwdb => Some(format!(
-            "SELECT DISTINCT src_ns.nspname, src.relname, tgt.relname, con.conname \
-             FROM pg_constraint con \
-             JOIN pg_class src ON src.oid = con.conrelid \
-             JOIN pg_namespace src_ns ON src_ns.oid = src.relnamespace \
-             JOIN pg_class tgt ON tgt.oid = con.confrelid \
-             JOIN pg_namespace tgt_ns ON tgt_ns.oid = tgt.relnamespace \
-             WHERE con.contype = 'f' \
-               AND tgt_ns.nspname = {schema} \
-               AND tgt.relname IN ({name_list}) \
-               AND NOT (src_ns.nspname = {schema} AND src.relname IN ({name_list}))",
-            schema = quote_sql_literal(schema),
-        )),
-        // Oracle family: constraint metadata is owner-qualified and a rename keeps
-        // incoming constraints attached, same as the two families above.
-        DatabaseType::Oracle | DatabaseType::Dameng | DatabaseType::OceanbaseOracle => Some(format!(
-            "SELECT DISTINCT c.owner, c.table_name, r.table_name, c.constraint_name \
-             FROM all_constraints c \
-             JOIN all_constraints r ON r.owner = c.r_owner AND r.constraint_name = c.r_constraint_name \
-             WHERE c.constraint_type = 'R' \
-               AND r.owner = {schema} \
-               AND r.table_name IN ({name_list}) \
-               AND NOT (c.owner = {schema} AND c.table_name IN ({name_list}))",
-            schema = quote_sql_literal(schema),
-        )),
-        DatabaseType::SqlServer => Some(format!(
-            "SELECT DISTINCT SCHEMA_NAME(src.schema_id), src.name, tgt.name, fk.name \
-             FROM sys.foreign_keys fk \
-             JOIN sys.tables src ON src.object_id = fk.parent_object_id \
-             JOIN sys.tables tgt ON tgt.object_id = fk.referenced_object_id \
-             WHERE SCHEMA_NAME(tgt.schema_id) = {schema} \
-               AND tgt.name IN ({name_list}) \
-               AND NOT (SCHEMA_NAME(src.schema_id) = {schema} AND src.name IN ({name_list}))",
-            schema = quote_sql_literal(schema),
-        )),
-        DatabaseType::Sqlite | DatabaseType::CloudflareD1 => Some(format!(
-            "SELECT DISTINCT {schema_value}, src.name, fk.\"table\", 'fk_' || CAST(fk.id AS TEXT) \
-             FROM {schema_ident}.sqlite_master src \
-             JOIN pragma_foreign_key_list(src.name, {schema_value}) fk \
-             WHERE src.type = 'table' \
-               AND fk.\"table\" COLLATE NOCASE IN ({name_list}) \
-               AND src.name COLLATE NOCASE NOT IN ({name_list})",
-            schema_value = quote_sql_literal(schema),
-            schema_ident = crate::db::sqlite::sqlite_quote_ident(schema),
-        )),
-        DatabaseType::DuckDb => {
-            let folded_names = target_tables
-                .iter()
-                .map(|name| format!("lower({})", quote_sql_literal(name)))
-                .collect::<Vec<_>>()
-                .join(", ");
-            Some(format!(
-                "SELECT DISTINCT src.table_catalog || '.' || src.table_schema, src.table_name, tgt.table_name, fk.constraint_name \
-                 FROM information_schema.referential_constraints fk \
-                 JOIN information_schema.key_column_usage src \
-                   ON src.constraint_catalog = fk.constraint_catalog \
-                  AND src.constraint_schema = fk.constraint_schema \
-                  AND src.constraint_name = fk.constraint_name \
-                 JOIN information_schema.key_column_usage tgt \
-                   ON tgt.constraint_catalog = fk.unique_constraint_catalog \
-                  AND tgt.constraint_schema = fk.unique_constraint_schema \
-                  AND tgt.constraint_name = fk.unique_constraint_name \
-                 WHERE lower(tgt.table_catalog) = lower({database}) \
-                   AND lower(tgt.table_schema) = lower({schema}) \
-                   AND lower(tgt.table_name) IN ({folded_names}) \
-                   AND NOT (lower(src.table_catalog) = lower({database}) \
-                        AND lower(src.table_schema) = lower({schema}) \
-                        AND lower(src.table_name) IN ({folded_names}))",
-                database = quote_sql_literal(database),
-                schema = quote_sql_literal(schema),
-            ))
-        }
+
         _ => None,
     }
 }
@@ -1080,278 +810,6 @@ fn quote_sql_literal(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    async fn sqlite_dependency_fixture() -> (AppState, crate::db::sqlite::SqliteHandle, tempfile::TempDir) {
-        let directory = tempfile::tempdir().unwrap();
-        let storage = crate::persistence::test_storage::open(&directory.path().join("storage.db")).await.unwrap();
-        let state = AppState::new(storage);
-        let pool =
-            crate::db::sqlite::connect_path_create_if_missing(directory.path().join("target.db").to_str().unwrap())
-                .await
-                .unwrap();
-        state
-            .update_connection_pools(|connections| {
-                connections.insert("target".to_string(), crate::connection::PoolKind::Sqlite(pool.clone()));
-            })
-            .await;
-        (state, pool, directory)
-    }
-
-    #[tokio::test]
-    async fn sqlite_external_child_blocks_rebuild_without_changing_tables_or_rows() {
-        let (state, pool, _directory) = sqlite_dependency_fixture().await;
-        pool.with_connection(|connection| {
-            connection
-                .execute_batch(
-                    "PRAGMA foreign_keys = ON;
-                     CREATE TABLE parent (id INTEGER PRIMARY KEY);
-                     CREATE TABLE external_child (
-                         id INTEGER PRIMARY KEY,
-                         parent_id INTEGER REFERENCES parent(id) ON DELETE CASCADE
-                     );
-                     INSERT INTO parent VALUES (7);
-                     INSERT INTO external_child VALUES (11, 7);",
-                )
-                .map_err(|error| error.to_string())
-        })
-        .unwrap();
-
-        let result = ensure_no_external_incoming_foreign_keys(
-            &state,
-            "target",
-            "main",
-            "main",
-            &["PARENT".to_string()],
-            DatabaseType::Sqlite,
-        )
-        .await;
-
-        let rows = crate::db::sqlite::execute_query(
-            &pool,
-            "SELECT child.id, parent.id FROM external_child child JOIN parent ON parent.id = child.parent_id",
-        )
-        .await
-        .unwrap();
-        assert_eq!(rows.rows, vec![vec![serde_json::json!(11), serde_json::json!(7)]]);
-        let tables = crate::db::sqlite::execute_query(
-            &pool,
-            "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
-        )
-        .await
-        .unwrap();
-        assert_eq!(tables.rows, vec![vec![serde_json::json!("external_child")], vec![serde_json::json!("parent")]]);
-        let error = result.expect_err("a rename would redirect the external child's cascading FK to the backup");
-        assert!(error.starts_with(DROP_TARGET_EXTERNAL_FOREIGN_KEYS), "{error}");
-        assert!(error.contains("main.external_child"), "{error}");
-    }
-
-    #[tokio::test]
-    async fn sqlite_dependent_view_blocks_rebuild_without_changing_view_or_rows() {
-        let (state, pool, _directory) = sqlite_dependency_fixture().await;
-        pool.with_connection(|connection| {
-            connection
-                .execute_batch(
-                    "CREATE TABLE \"pa'rent\" (id INTEGER PRIMARY KEY);
-                     INSERT INTO \"pa'rent\" VALUES (7);
-                     CREATE VIEW external_view AS
-                         SELECT id FROM (SELECT id FROM \"pa'rent\") nested_parent;",
-                )
-                .map_err(|error| error.to_string())
-        })
-        .unwrap();
-        let result = ensure_no_external_table_dependencies(
-            &state,
-            "target",
-            "main",
-            "main",
-            &["PA'RENT".to_string()],
-            DatabaseType::Sqlite,
-        )
-        .await;
-
-        let rows = crate::db::sqlite::execute_query(&pool, "SELECT id FROM external_view").await.unwrap();
-        assert_eq!(rows.rows, vec![vec![serde_json::json!(7)]]);
-        let error = result.expect_err("SQLite rewrites the external view to reference the renamed backup");
-        assert!(error.contains("main.external_view"), "{error}");
-    }
-
-    #[tokio::test]
-    async fn sqlite_selected_children_and_unrelated_views_do_not_block_rebuild() {
-        let (state, pool, _directory) = sqlite_dependency_fixture().await;
-        pool.with_connection(|connection| {
-            connection
-                .execute_batch(
-                    "CREATE TABLE parent (id INTEGER PRIMARY KEY);
-                     CREATE TABLE selected_child (parent_id INTEGER REFERENCES parent(id));
-                     CREATE TABLE unrelated (id INTEGER);
-                     CREATE VIEW unrelated_view AS SELECT 'parent' AS label, id FROM unrelated;",
-                )
-                .map_err(|error| error.to_string())
-        })
-        .unwrap();
-        ensure_no_external_table_dependencies(
-            &state,
-            "target",
-            "main",
-            "MAIN",
-            &["PARENT".to_string(), "SELECTED_CHILD".to_string()],
-            DatabaseType::Sqlite,
-        )
-        .await
-        .unwrap();
-    }
-
-    #[tokio::test]
-    async fn sqlite_dependency_checks_preserve_quoted_attached_schema_identity() {
-        let (state, pool, _directory) = sqlite_dependency_fixture().await;
-        pool.with_connection(|connection| {
-            connection
-                .execute_batch(
-                    "ATTACH DATABASE ':memory:' AS \"tenant'.db\";
-                     CREATE TABLE main.parent (id INTEGER PRIMARY KEY);
-                     CREATE TABLE main.child (parent_id INTEGER REFERENCES parent(id));
-                     CREATE TABLE \"tenant'.db\".parent (id INTEGER PRIMARY KEY);
-                     CREATE TABLE \"tenant'.db\".child (parent_id INTEGER REFERENCES parent(id));",
-                )
-                .map_err(|error| error.to_string())
-        })
-        .unwrap();
-        let error = ensure_no_external_table_dependencies(
-            &state,
-            "target",
-            "tenant'.db",
-            "tenant'.db",
-            &["parent".to_string()],
-            DatabaseType::Sqlite,
-        )
-        .await
-        .unwrap_err();
-        assert!(error.contains("tenant'.db.child"), "{error}");
-        assert!(!error.contains("main.child"), "{error}");
-    }
-
-    #[tokio::test]
-    async fn sqlite_temp_views_are_checked_against_the_referenced_attached_schema() {
-        let (state, pool, _directory) = sqlite_dependency_fixture().await;
-        pool.with_connection(|connection| {
-            connection
-                .execute_batch(
-                    "ATTACH DATABASE ':memory:' AS reporting;
-                     CREATE TABLE main.parent (id INTEGER PRIMARY KEY);
-                     CREATE TABLE reporting.parent (id INTEGER PRIMARY KEY);
-                     CREATE TEMP VIEW outside_view AS SELECT id FROM reporting.parent;",
-                )
-                .map_err(|error| error.to_string())
-        })
-        .unwrap();
-        ensure_no_external_table_dependencies(
-            &state,
-            "target",
-            "main",
-            "main",
-            &["parent".to_string()],
-            DatabaseType::Sqlite,
-        )
-        .await
-        .unwrap();
-        let error = ensure_no_external_table_dependencies(
-            &state,
-            "target",
-            "reporting",
-            "reporting",
-            &["parent".to_string()],
-            DatabaseType::Sqlite,
-        )
-        .await
-        .unwrap_err();
-        assert!(error.contains("temp.outside_view"), "{error}");
-    }
-
-    #[tokio::test]
-    async fn sqlite_unreadable_view_definition_blocks_rebuild_with_object_name() {
-        let (state, pool, _directory) = sqlite_dependency_fixture().await;
-        pool.with_connection(|connection| {
-            connection
-                .execute_batch(
-                    "CREATE TABLE parent (id INTEGER);
-                     CREATE VIEW unreadable_view AS SELECT id FROM parent;
-                     PRAGMA writable_schema = ON;
-                     UPDATE sqlite_master SET sql = NULL WHERE name = 'unreadable_view';
-                     PRAGMA writable_schema = OFF;",
-                )
-                .map_err(|error| error.to_string())
-        })
-        .unwrap();
-        let error = ensure_no_external_table_dependencies(
-            &state,
-            "target",
-            "main",
-            "main",
-            &["parent".to_string()],
-            DatabaseType::Sqlite,
-        )
-        .await
-        .unwrap_err();
-        assert!(error.contains("main.unreadable_view"), "{error}");
-    }
-
-    #[test]
-    fn duckdb_foreign_keys_are_checked_with_catalog_and_schema_identity() {
-        let sql =
-            external_incoming_foreign_keys_sql(DatabaseType::DuckDb, "analytics", "reporting", &["parent".to_string()])
-                .expect("DuckDB foreign keys must be checked before a rename");
-        assert!(sql.contains("information_schema.referential_constraints"), "{sql}");
-        assert!(sql.contains("tgt.table_catalog"), "{sql}");
-        assert!(sql.contains("'analytics'"), "{sql}");
-        assert!(sql.contains("tgt.table_schema"), "{sql}");
-        assert!(sql.contains("'reporting'"), "{sql}");
-    }
-
-    #[test]
-    fn duckdb_dynamic_view_table_references_cannot_bypass_dependency_check() {
-        let result = parsed_view_target_references(
-            "CREATE VIEW external_view AS SELECT * FROM query_table('parent')",
-            DatabaseType::DuckDb,
-            "analytics",
-            "main",
-            "main",
-            &["parent".to_string()],
-        );
-        assert!(result.is_err(), "table functions can hide dependencies inside strings or macros: {result:?}");
-    }
-
-    #[test]
-    fn postgres_view_dependency_query_tracks_rewrite_and_relation_catalog_identity() {
-        let sql = dependent_views_sql(DatabaseType::Postgres, "shop", "tenant'one", &["orders".to_string()]).unwrap();
-        assert!(sql.contains("JOIN pg_catalog.pg_rewrite rewrite ON rewrite.oid = dep.objid"), "{sql}");
-        assert!(sql.contains("dep.classid = 'pg_catalog.pg_rewrite'::regclass"), "{sql}");
-        assert!(sql.contains("dep.refclassid = 'pg_catalog.pg_class'::regclass"), "{sql}");
-        assert!(sql.contains("src.relkind IN ('v', 'm')"), "{sql}");
-        assert!(sql.contains("tgt_ns.nspname = 'tenant''one'"), "{sql}");
-        assert!(!sql.contains("src_ns.nspname ="), "cross-schema dependent views must be included: {sql}");
-    }
-
-    #[tokio::test]
-    async fn incomplete_metadata_cannot_be_reported_as_no_dependencies() {
-        let (_state, pool, _directory) = sqlite_dependency_fixture().await;
-        let mut result =
-            crate::db::sqlite::execute_query(&pool, "SELECT 'schema', 'table', 'referenced', 'constraint' WHERE 0")
-                .await
-                .unwrap();
-        validate_dependency_metadata(&result, 4).unwrap();
-
-        result.truncated = true;
-        assert!(validate_dependency_metadata(&result, 4).is_err());
-        result.truncated = false;
-        result.has_more = true;
-        assert!(validate_dependency_metadata(&result, 4).is_err());
-        result.has_more = false;
-        result.rows.push(Vec::new());
-        assert!(validate_dependency_metadata(&result, 4).is_err());
-        result.rows.clear();
-        result.columns.pop();
-        assert!(validate_dependency_metadata(&result, 4).is_err());
-    }
 
     #[test]
     fn mysql_metadata_queries_preserve_quotes_and_backslashes_without_sql_mode_assumptions() {
@@ -1472,60 +930,6 @@ mod tests {
     }
 
     #[test]
-    fn backup_name_fits_identifier_budget_per_dialect() {
-        for db in [DatabaseType::Oracle, DatabaseType::Postgres, DatabaseType::Mysql, DatabaseType::SqlServer] {
-            let generated = name(db, LONG_TABLE);
-            assert!(
-                generated.len() <= max_identifier_bytes(db),
-                "{db:?} produced {} bytes for budget {}: {generated}",
-                generated.len(),
-                max_identifier_bytes(db)
-            );
-            assert!(generated.contains(BACKUP_TABLE_MARKER), "{db:?} lost the backup marker: {generated}");
-        }
-    }
-
-    #[test]
-    fn backup_name_uses_the_full_budget_boundaries() {
-        // Oracle 30 / PostgreSQL 63 / MySQL 64 / SQL Server 128 are the four descriptor
-        // values the transfer path can hit; pin them so a descriptor edit is visible here.
-        assert_eq!(max_identifier_bytes(DatabaseType::Oracle), 30);
-        assert_eq!(max_identifier_bytes(DatabaseType::Postgres), 63);
-        assert_eq!(max_identifier_bytes(DatabaseType::Mysql), 64);
-        assert_eq!(max_identifier_bytes(DatabaseType::SqlServer), 128);
-
-        // 30 - len("__dbx_bak_") - 8 = 12 stem bytes on Oracle.
-        let oracle = name(DatabaseType::Oracle, LONG_TABLE);
-        assert_eq!(oracle.len(), 30);
-        assert!(oracle.starts_with("customer_ord"), "unexpected Oracle stem: {oracle}");
-
-        // Short names are left intact.
-        let short = name(DatabaseType::Postgres, "orders");
-        assert!(short.starts_with("orders__dbx_bak_"), "unexpected short name: {short}");
-    }
-
-    #[test]
-    fn distinct_sources_do_not_collide_after_truncation() {
-        let first = backup_table_name(
-            DatabaseType::Oracle,
-            "transfer-1",
-            "shop.customer_order_line_item_a",
-            "customer_order_line_item_a",
-        )
-        .unwrap();
-        let second = backup_table_name(
-            DatabaseType::Oracle,
-            "transfer-1",
-            "shop.customer_order_line_item_b",
-            "customer_order_line_item_b",
-        )
-        .unwrap();
-        assert_ne!(first, second, "truncated stems must stay distinct via the hash");
-        assert_eq!(first.len(), 30);
-        assert_eq!(second.len(), 30);
-    }
-
-    #[test]
     fn same_source_and_transfer_is_idempotent() {
         let first = name(DatabaseType::Mysql, "orders");
         let second = name(DatabaseType::Mysql, "orders");
@@ -1533,13 +937,6 @@ mod tests {
 
         let other_transfer = backup_table_name(DatabaseType::Mysql, "transfer-2", "shop.orders", "orders").unwrap();
         assert_ne!(first, other_transfer, "a different transfer must not reuse the same backup name");
-    }
-
-    #[test]
-    fn multibyte_names_truncate_on_char_boundaries() {
-        let generated = name(DatabaseType::Oracle, "客户订单明细修订历史记录表");
-        assert_eq!(generated.len(), 30, "12 stem bytes = 4 CJK characters: {generated}");
-        assert!(generated.starts_with("客户订单"), "unexpected CJK stem: {generated}");
     }
 
     #[test]
@@ -1572,69 +969,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn high_risk_and_non_tabular_targets_stay_excluded() {
-        for db in [
-            DatabaseType::MongoDb,
-            DatabaseType::ClickHouse,
-            DatabaseType::Questdb,
-            DatabaseType::Hive,
-            DatabaseType::Spark,
-            DatabaseType::Kyuubi,
-            DatabaseType::Impala,
-            DatabaseType::Argo,
-            DatabaseType::Turso,
-            DatabaseType::Rqlite,
-        ] {
-            assert!(!supports_drop_target_before_create(db), "{db:?} must stay excluded");
-        }
-    }
-
     fn sql(db: DatabaseType) -> Option<String> {
         external_incoming_foreign_keys_sql(db, "shop", "public", &["orders".to_string(), "customers".to_string()])
-    }
-
-    #[test]
-    fn external_fk_query_excludes_the_transfer_tables_themselves() {
-        // Without the exclusion every child table inside the transfer would look like a
-        // blocker and no multi-table rebuild could ever start.
-        let mysql = sql(DatabaseType::Mysql).expect("MySQL needs the check");
-        assert!(mysql.contains("BINARY REFERENCED_TABLE_SCHEMA IN ('shop')"), "{mysql}");
-        assert!(mysql.contains("AND NOT ("), "{mysql}");
-        assert!(mysql.contains("BINARY TABLE_NAME IN ('orders', 'customers')"), "{mysql}");
-        assert!(mysql.contains("BINARY LOWER(TABLE_NAME) IN (LOWER('orders'), LOWER('customers'))"), "{mysql}");
-
-        // PostgreSQL qualifies the exclusion by namespace: a same-named table in another
-        // schema is a real blocker, since its foreign key follows the rename too.
-        let postgres = sql(DatabaseType::Postgres).expect("PostgreSQL needs the check");
-        assert!(postgres.contains("con.contype = 'f'"), "{postgres}");
-        assert!(postgres.contains("tgt_ns.nspname = 'public'"), "{postgres}");
-        assert!(
-            postgres.contains("NOT (src_ns.nspname = 'public' AND src.relname IN ('orders', 'customers'))"),
-            "{postgres}"
-        );
-
-        for db in [DatabaseType::Oracle, DatabaseType::SqlServer] {
-            let generated = sql(db).unwrap_or_else(|| panic!("{db:?} needs the check"));
-            assert!(generated.contains("'orders'") && generated.contains("'customers'"), "{db:?}: {generated}");
-            assert!(generated.contains("NOT ("), "{db:?} is missing the self-exclusion: {generated}");
-        }
-    }
-
-    #[test]
-    fn sqlite_compatible_targets_inspect_foreign_keys_before_renaming() {
-        for db in [DatabaseType::Sqlite, DatabaseType::CloudflareD1] {
-            assert!(sql(db).is_some(), "{db:?} renames can redirect incoming foreign keys");
-        }
-    }
-
-    #[test]
-    fn external_fk_query_escapes_quotes_in_table_names() {
-        let generated =
-            external_incoming_foreign_keys_sql(DatabaseType::Postgres, "shop", "public", &["o'brien".to_string()])
-                .expect("PostgreSQL needs the check");
-        assert!(generated.contains("'o''brien'"), "quote was not doubled: {generated}");
-        assert!(!generated.contains("'o'brien'"), "unescaped literal leaked into the query: {generated}");
     }
 
     #[test]

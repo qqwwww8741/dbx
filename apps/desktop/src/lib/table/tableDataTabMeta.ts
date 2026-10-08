@@ -1,4 +1,3 @@
-import { queryResultSourceNameParts } from "@/lib/sql/queryResultSource";
 import type { QueryTab, ColumnInfo, DatabaseType } from "@/types/database";
 
 export type DataTabTableMeta = NonNullable<QueryTab["tableMeta"]>;
@@ -22,26 +21,10 @@ function titleTableName(tab: QueryTab): string {
  * title alone is deliberately not split. The persisted SELECT must independently
  * parse to the same schema-qualified source before the identity is migrated.
  */
-export function repairRestoredDataTabTableIdentity(tab: QueryTab, databaseType: DatabaseType | undefined): boolean {
-  if (databaseType !== "postgres" || tab.mode !== "data" || tab.schema?.trim() || tab.tableMeta?.schema?.trim() || tab.tableMeta?.columns.length) return false;
-
-  const sourceSql = tab.resultBaseSql?.trim() || tab.lastExecutedSql?.trim() || tab.sql.trim();
-  const source = queryResultSourceNameParts(sourceSql, { databaseType });
-  const title = tab.title.trim();
-  if (!source?.qualifier || title !== `${source.qualifier}.${source.name}`) return false;
-
-  const persistedTableName = tab.tableMeta?.tableName.trim();
-  if (persistedTableName && persistedTableName !== title && persistedTableName !== source.name) return false;
-
-  tab.schema = source.qualifier;
-  tab.tableMeta = {
-    ...tab.tableMeta,
-    schema: source.qualifier,
-    tableName: source.name,
-    columns: tab.tableMeta?.columns ?? [],
-    primaryKeys: tab.tableMeta?.primaryKeys ?? [],
-  };
-  return true;
+export function repairRestoredDataTabTableIdentity(_tab: QueryTab, _databaseType: DatabaseType | undefined): boolean {
+  {
+    return false;
+  }
 }
 
 function fallbackColumnInfo(name: string): ColumnInfo {

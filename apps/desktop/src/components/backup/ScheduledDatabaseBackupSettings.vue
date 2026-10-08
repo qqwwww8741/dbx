@@ -34,7 +34,6 @@ import {
 } from "@/lib/backup/scheduledDatabaseBackup";
 import { databaseBackupTableSelectionScopeKey, normalizeDatabaseBackupTableTargets, type DatabaseBackupTableSelectionState } from "@/lib/backup/scheduledDatabaseBackup";
 import { useConnectionStore } from "@/stores/connectionStore";
-import { fetchNamespaceOptionsForConnection } from "@/composables/useDatabaseOptions";
 
 const { t, locale } = useI18n();
 const { toast } = useToast();
@@ -352,8 +351,8 @@ async function loadDatabases(dialog: BackupDialogKind, targetDraft: DatabaseBack
   try {
     const loadNames = async () => {
       await connectionStore.ensureConnected(connectionId);
-      const config = connectionStore.getConfig(connectionId);
-      return config?.db_type === "dameng" ? await fetchNamespaceOptionsForConnection(connectionId, config) : (await api.listDatabases(connectionId)).map((database) => database.name);
+      connectionStore.getConfig(connectionId);
+      return (await api.listDatabases(connectionId)).map((database) => database.name);
     };
     let names: string[];
     try {

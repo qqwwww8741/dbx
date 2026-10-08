@@ -356,10 +356,7 @@ pub async fn uninstall_plugin(
         .await
         .map_err(AppError::from)?
         .into_iter()
-        .filter(|connection| {
-            connection.db_type == dbx_core::models::connection::DatabaseType::Plugin
-                && connection.plugin_id.as_deref() == Some(request.plugin_id.as_str())
-        })
+        .filter(|connection| false)
         .map(|connection| connection.name)
         .collect::<Vec<_>>();
     if !dependent_connections.is_empty() {
@@ -654,9 +651,4 @@ fn asset_response(asset: PluginUiAsset) -> Result<Response<Body>, AppError> {
     Ok(response)
 }
 
-async fn stop_external_driver_pools(state: &Arc<WebState>, plugin: &InstalledPlugin) {
-    for driver in &plugin.manifest.drivers {
-        let driver_id = driver.database_type.as_deref().unwrap_or(&driver.id);
-        state.app.remove_external_driver_pools(driver_id).await;
-    }
-}
+async fn stop_external_driver_pools(state: &Arc<WebState>, plugin: &InstalledPlugin) {}

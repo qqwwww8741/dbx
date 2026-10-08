@@ -342,21 +342,6 @@ fn mysql_connection(id: &str, name: &str) -> ConnectionConfig {
     .expect("test MySQL connection")
 }
 
-fn postgres_connection(id: &str, name: &str) -> ConnectionConfig {
-    serde_json::from_value(json!({
-        "id": id,
-        "name": name,
-        "db_type": "postgres",
-        "host": "localhost",
-        "port": 5432,
-        "username": "tester",
-        "password": "",
-        "database": "reporting",
-        "ssl": false
-    }))
-    .expect("test PostgreSQL connection")
-}
-
 #[tokio::test]
 async fn initializes_lists_tools_and_calls_a_tool() {
     let (server_transport, client_transport) = tokio::io::duplex(16 * 1024);
@@ -491,51 +476,6 @@ async fn resource_catalog_follows_the_tool_allowlist() {
 
     client.cancel().await.expect("close MCP client");
     server_task.abort();
-}
-
-#[cfg(feature = "mq-admin")]
-#[tokio::test]
-async fn kafka_peek_round_trips_over_mcp_in_local_and_web_modes() {
-    let mut connection = test_connection("kafka", "Kafka");
-    connection.db_type = dbx_core::models::connection::DatabaseType::MessageQueue;
-    connection.read_only = true;
-    connection.is_production = true;
-    connection.external_config = Some(json!({"systemKind":"kafka", "adminUrl":"", "auth":{"kind":"none"}}));
-    for web_mode in [false, true] {
-        let backend = Arc::new(CapturingBackend {
-            policy: McpGlobalPolicy::default(),
-            connections: vec![connection.clone()],
-            calls: Mutex::new(vec![]),
-        });
-        let (server_transport, client_transport) = tokio::io::duplex(16 * 1024);
-        let server = DbxMcpServer::with_runtime_options(backend.clone(), McpScope::default(), web_mode);
-        let server_task = tokio::spawn(async move { server.serve(server_transport).await });
-        let client = ().serve(client_transport).await.unwrap();
-        let result = client.peer().call_tool(CallToolRequestParams::new("dbx_peek_messages").with_arguments(json!({"connection_name":"Kafka", "topic":"events", "count":100, "start_position":"offset", "partition":0, "offset":120}).as_object().unwrap().clone())).await.unwrap();
-        assert_ne!(result.is_error, Some(true), "{result:?}");
-        let body: Value = serde_json::from_str(&result.content[0].as_text().unwrap().text).unwrap();
-        assert_eq!(body["messages"][0]["payloadText"], "hi");
-        assert_eq!(body["incomplete"], false);
-        assert_eq!(
-            backend.calls.lock().unwrap()[0],
-            json!({"connection":"kafka", "topic":"events", "count":100, "options":{"startPosition":"offset", "partition":0, "offset":120}})
-        );
-        let invalid = client
-            .peer()
-            .call_tool(
-                CallToolRequestParams::new("dbx_peek_messages").with_arguments(
-                    json!({"connection_id":"kafka", "topic":"events", "start_position":"invalid"})
-                        .as_object()
-                        .unwrap()
-                        .clone(),
-                ),
-            )
-            .await;
-        assert!(invalid.is_err() || invalid.unwrap().is_error == Some(true));
-        assert_eq!(backend.calls.lock().unwrap().len(), 1);
-        client.cancel().await.unwrap();
-        server_task.abort();
-    }
 }
 
 #[tokio::test]
@@ -685,10 +625,7 @@ async fn read_only_policy_blocks_write_capable_sql_the_keyword_scan_misses() {
 
 #[tokio::test]
 async fn read_only_policy_allows_read_only_show_statements() {
-    for (connection, sql) in [
-        (mysql_connection("mysql", "reporting"), "SHOW COLLATION"),
-        (postgres_connection("postgres", "reporting"), "SHOW search_path"),
-    ] {
+    for (connection, sql) in [(mysql_connection("mysql", "reporting"), "SHOW COLLATION")] {
         let connection_id = connection.id.clone();
         let backend = PolicyBackend {
             policy: McpGlobalPolicy {

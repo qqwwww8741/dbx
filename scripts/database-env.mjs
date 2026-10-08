@@ -10,37 +10,8 @@ export const DEFAULT_RECIPES_ROOT = join(REPO_ROOT, 'deploy', 'database');
 const DEFAULT_MAKEFILE_PATH = join(REPO_ROOT, 'Makefile');
 const DEFAULT_PASSWORD = '123456';
 const DEFAULT_DATABASE = 'dbx';
-const DEFAULT_HOST_PORT_RANGES = {
-  mysql: [10100, 10199],
-  mariadb: [10200, 10299],
-  postgresql: [10300, 10399],
-  mongodb: [10400, 10499],
-  redis: [10500, 10599],
-  clickhouse: [10600, 10699],
-  etcd: [10700, 10799],
-  zookeeper: [10800, 10899],
-  consul: [10900, 10999],
-  nacos: [11000, 11099],
-  rnacos: [11100, 11199],
-  qdrant: [11200, 11299],
-  kafka: [11300, 11399],
-  pulsar: [11400, 11499],
-  elasticsearch: [11500, 11599],
-};
-const DBX_DEEP_LINK_TYPES = {
-  clickhouse: 'clickhouse',
-  consul: 'consul',
-  elasticsearch: 'elasticsearch',
-  etcd: 'etcd',
-  mariadb: 'mariadb',
-  mongodb: 'mongodb',
-  mysql: 'mysql',
-  postgresql: 'postgres',
-  qdrant: 'qdrant',
-  redis: 'redis',
-  rnacos: 'r-nacos',
-  zookeeper: 'zookeeper',
-};
+const DEFAULT_HOST_PORT_RANGES = { mysql: [10100, 10199] };
+const DBX_DEEP_LINK_TYPES = { mysql: 'mysql' };
 
 export function discoverRecipes(root = DEFAULT_RECIPES_ROOT) {
   if (!existsSync(root)) return [];
@@ -258,8 +229,8 @@ export function validateRecipe(recipe) {
   if (recipe.connection?.authentication === 'none') {
     if (recipe.connection.password !== undefined) errors.push('unauthenticated recipes must not declare connection.password');
   } else if (recipe.connection?.password !== DEFAULT_PASSWORD) errors.push(`connection.password must be ${DEFAULT_PASSWORD}`);
-  if (recipe.database === 'redis' ? recipe.connection?.database !== 0 : recipe.connection?.database !== DEFAULT_DATABASE) {
-    errors.push(`connection.database must be ${recipe.database === 'redis' ? '0 for Redis' : DEFAULT_DATABASE}`);
+  if (recipe.connection?.database !== DEFAULT_DATABASE) {
+    errors.push(`connection.database must be ${DEFAULT_DATABASE}`);
   }
   if (!Array.isArray(recipe.platforms) || recipe.platforms.length === 0) errors.push('platforms must not be empty');
   else if (recipe.platforms.some((platform) => !['linux/amd64', 'linux/arm64'].includes(platform))) {

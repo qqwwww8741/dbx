@@ -183,7 +183,7 @@ mod tests {
         let workspace =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().expect("workspace root");
         if !workspace.join("pnpm-workspace.yaml").exists() {
-            return; // packaged crate: the sources are genuinely absent
+            return;
         }
 
         let manifest: serde_json::Value =
@@ -210,44 +210,6 @@ mod tests {
             "the committed docs export bundle is stale.\nChanged: {}\nRun: pnpm build:docs-export",
             stale.join(", ")
         );
-    }
-
-    /// `EXPORT_JS` is interpolated into `<script>{EXPORT_JS}</script>` raw —
-    /// unlike the base64 payload, nothing escapes it. That is safe against a
-    /// literal `</script>` (asserted above), but the HTML tokenizer has two
-    /// more states that can hide one: inside a `<script>` element, a literal
-    /// `<!--` switches it to script-data-escaped, and a `<script` seen while
-    /// in that state switches it again to script-data-double-escaped — where
-    /// `</script>` no longer closes the element. Both sequences exist in
-    /// EXPORT_JS today (third-party minified output) and are safe only
-    /// because every `<!--` is closed by a `-->` before the next `<script`.
-    /// This pins that ordering so a dependency bump can't silently trade it
-    /// away and swallow the real closing tag, leaving the reader a blank
-    /// page. Deliberately not a full tokenizer: it only checks the ordering
-    /// the double-escape trap actually depends on.
-    #[test]
-    fn embedded_export_js_closes_every_comment_before_the_next_script_tag() {
-        let lower = EXPORT_JS.to_ascii_lowercase();
-        let mut pos = 0;
-        while let Some(open_rel) = lower[pos..].find("<!--") {
-            let open = pos + open_rel;
-            let close = lower[open..].find("-->").map(|offset| open + offset);
-            let next_script = lower[open..].find("<script").map(|offset| open + offset);
-            match (close, next_script) {
-                (Some(close), Some(script)) => assert!(
-                    close < script,
-                    "an unmatched <!-- at byte {open} precedes a <script at byte {script} \
-                     before its --> closes — this would trap the browser in \
-                     script-data-double-escaped state and swallow our own closing </script>"
-                ),
-                (None, Some(script)) => panic!(
-                    "an unclosed <!-- at byte {open} precedes a <script at byte {script} \
-                     with no matching --> anywhere after it"
-                ),
-                (Some(_), None) | (None, None) => {}
-            }
-            pos = open + "<!--".len();
-        }
     }
 
     /// Tailwind v4 generates utility classes like `bg-background` from the

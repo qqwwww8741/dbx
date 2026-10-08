@@ -572,81 +572,16 @@ function buildObjectTreeEntries({ nodeId, connectionId, database, schema, object
   return buildPartitionTree(entries, connectionId, database);
 }
 
-type XuguPackageObjectInfo = ObjectInfo & {
-  xugu_package_body_available?: boolean | null;
-  xugu_package_body_valid?: boolean | null;
-};
-
-function packageObjectIdentity(schema: string | undefined, name: string): string {
-  return `${schema || ""}\0${name}`;
-}
-
 /**
  * Xugu exposes a package specification and body as two rows in ALL_PACKAGES,
  * while they are one logical package in the schema tree. Keep the two source
  * kinds available through metadata on the specification node, but coalesce
  * their visible tree entry only for Xugu connections.
  */
-function coalesceXuguPackageObjects(objects: readonly ObjectInfo[], databaseType?: DatabaseType): ObjectInfo[] {
-  if (databaseType !== "xugu") return [...objects];
-
-  const packageBodies = new Map<string, ObjectInfo>();
-  for (const object of objects) {
-    if (normalizeObjectType(object.object_type) !== "PACKAGE_BODY") continue;
-    const schema = object.schema ? normalizeDatabaseObjectName(object.schema) : undefined;
-    const name = normalizeDatabaseObjectName(object.name);
-    if (name) packageBodies.set(packageObjectIdentity(schema, name), object);
+function coalesceXuguPackageObjects(objects: readonly ObjectInfo[], _databaseType?: DatabaseType): ObjectInfo[] {
+  {
+    return [...objects];
   }
-
-  const result: ObjectInfo[] = [];
-  const emittedPackages = new Set<string>();
-  for (const object of objects) {
-    const type = normalizeObjectType(object.object_type);
-    const schema = object.schema ? normalizeDatabaseObjectName(object.schema) : undefined;
-    const name = normalizeDatabaseObjectName(object.name);
-    if (!name) continue;
-
-    if (type === "PACKAGE_BODY") {
-      const key = packageObjectIdentity(schema, name);
-      if (emittedPackages.has(key)) continue;
-      // A restricted metadata response may contain only PACKAGE_BODY. Keep it
-      // visible as a package so the body source is not silently lost.
-      if (!objects.some((candidate) => normalizeObjectType(candidate.object_type) === "PACKAGE" && packageObjectIdentity(candidate.schema ? normalizeDatabaseObjectName(candidate.schema) : undefined, normalizeDatabaseObjectName(candidate.name)) === key)) {
-        result.push({
-          ...object,
-          object_type: "PACKAGE",
-          schema,
-          name,
-          valid: object.valid,
-          xugu_package_body_available: true,
-          xugu_package_body_valid: object.valid,
-        });
-        emittedPackages.add(key);
-      }
-      continue;
-    }
-
-    if (type !== "PACKAGE") {
-      result.push({ ...object, schema, name });
-      continue;
-    }
-
-    const key = packageObjectIdentity(schema, name);
-    if (emittedPackages.has(key)) continue;
-    const body = packageBodies.get(key);
-    const bodyValid = body?.valid ?? null;
-    result.push({
-      ...object,
-      schema,
-      name,
-      valid: object.valid === false || body?.valid === false ? false : (object.valid ?? body?.valid ?? null),
-      xugu_package_body_available: !!body,
-      xugu_package_body_valid: bodyValid,
-    } satisfies XuguPackageObjectInfo);
-    emittedPackages.add(key);
-  }
-
-  return result;
 }
 
 export function buildSimpleObjectTreeNodes({ nodeId, connectionId, database, schema, objects, databaseType }: { nodeId: string; connectionId: string; database: string; schema?: string; objects: ObjectInfo[]; databaseType?: DatabaseType }): TreeNode[] {

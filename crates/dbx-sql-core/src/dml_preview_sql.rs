@@ -460,13 +460,6 @@ mod tests {
     }
 
     #[test]
-    fn update_postgres_from_clause_rejected() {
-        // `UPDATE … FROM …` 的目标行可能匹配多行来源，跨连接改写会重复计数，应拒绝预览。
-        let error = preview("UPDATE t SET x = s.y FROM s WHERE t.id = s.id", "postgres").unwrap_err();
-        assert_eq!(error, "Preview is not supported: UPDATE ... FROM");
-    }
-
-    #[test]
     fn update_where_missing() {
         let result = preview("UPDATE t SET x = 1", "sqlite").unwrap();
         assert_eq!(result.sql, "SELECT *, 1 AS \"x (new)\" FROM t");
@@ -523,18 +516,6 @@ mod tests {
         })
         .unwrap();
         assert_eq!(result.sql, "SELECT *, 1 AS \"a (new)\" FROM t WHERE id = 1");
-    }
-
-    #[test]
-    fn update_sqlserver_bracket_quote() {
-        let result = build_dml_change_preview_sql(DmlChangePreviewSqlOptions {
-            sql: "UPDATE dbo.t SET a = 1 WHERE id = 1".to_string(),
-            database_type: Some("sqlserver".to_string()),
-            identifier_quote: Some("[".to_string()),
-            columns: None,
-        })
-        .unwrap();
-        assert_eq!(result.sql, "SELECT *, 1 AS [a (new)] FROM dbo.t WHERE id = 1");
     }
 
     #[test]

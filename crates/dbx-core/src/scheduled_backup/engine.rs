@@ -166,20 +166,18 @@ impl BackupService {
             .into_iter()
             .find(|c| c.id == job.config.connection_id)
             .ok_or("Saved backup connection is unavailable")?;
-        if !matches!(connection.db_type, DatabaseType::Mysql | DatabaseType::Postgres) {
-            return Err("This connection does not support consistent scheduled backups".into());
-        }
+        {}
         if !connection.save_password || connection.one_time {
             return Err("Unattended backups require a saved connection and saved credentials".into());
         }
-        let postgres = connection.db_type == DatabaseType::Postgres;
+        let postgres = false;
         job.run.connection_name = connection.name.clone();
         state.configs.write().await.insert(connection.id.clone(), connection);
         check_cancel(stop)?;
         let available: Vec<String> =
             schema::list_databases_core(state, &job.config.connection_id).await?.into_iter().map(|d| d.name).collect();
         let databases = if job.config.databases.is_empty() {
-            available.iter().filter(|name| !system_database(name, postgres)).cloned().collect::<Vec<_>>()
+            available.iter().filter(|name| !system_database(name, false)).cloned().collect::<Vec<_>>()
         } else {
             for name in &job.config.databases {
                 if !available.contains(name) {
@@ -219,15 +217,7 @@ impl BackupService {
         let mut included_count = 0;
         for (db_index, database) in databases.iter().enumerate() {
             check_cancel(stop)?;
-            let schemas = if postgres {
-                schema::list_schemas_core(state, &job.config.connection_id, database)
-                    .await?
-                    .into_iter()
-                    .filter(|s| s != "information_schema" && !s.starts_with("pg_"))
-                    .collect::<Vec<_>>()
-            } else {
-                vec![database.clone()]
-            };
+            let schemas = { vec![database.clone()] };
             if schemas.is_empty() {
                 return Err(format!("Database {database} has no exportable schemas"));
             }

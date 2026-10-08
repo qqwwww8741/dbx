@@ -1,5 +1,4 @@
-import type { ConnectionConfig, DatabaseType, TransportLayerConfig, TunnelProfile } from "@/types/database";
-import { mongoConnectionUsesOidc } from "@/lib/mongo/mongoConnectionOptions";
+import type { ConnectionConfig, TransportLayerConfig, TunnelProfile } from "@/types/database";
 
 export const CONNECTION_ATTEMPT_TIMEOUT_BUFFER_MS = 2_000;
 export const MONGO_LEGACY_FALLBACK_TIMEOUT_BUFFER_MS = 30_000;
@@ -7,55 +6,6 @@ export const MONGO_OIDC_BROWSER_AUTH_TIMEOUT_MS = 5 * 60_000;
 export const AGENT_DRIVER_MIN_CONNECT_TIMEOUT_SECS = 30;
 export const ACCESS_AGENT_MIN_CONNECT_TIMEOUT_SECS = 30;
 const DEFAULT_CONNECT_TIMEOUT_SECS = 10;
-
-const DRIVER_STARTUP_FLOOR_TYPES = new Set<DatabaseType>([
-  "dameng",
-  "kingbase",
-  "highgo",
-  "uxdb",
-  "vastbase",
-  "goldendb",
-  "yashandb",
-  "databricks",
-  "saphana",
-  "teradata",
-  "vertica",
-  "firebird",
-  "exasol",
-  "oceanbase-oracle",
-  "gbase",
-  "access",
-  "oracle",
-  "h2",
-  "snowflake",
-  "trino",
-  "prestosql",
-  "jdbc",
-  "hive",
-  "kyuubi",
-  "impala",
-  "argo",
-  "transwarp",
-  "spark",
-  "db2",
-  "informix",
-  "neo4j",
-  "nebula",
-  "cassandra",
-  "bigquery",
-  "spanner",
-  "kylin",
-  "ignite",
-  "ignite3",
-  "sundb",
-  "oscar",
-  "tdengine",
-  "xugu",
-  "iotdb",
-  "etcd",
-  "zookeeper",
-  "iris",
-]);
 
 function positiveSeconds(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
@@ -74,8 +24,8 @@ function resolvedTimeoutLayer(layer: TransportLayerConfig, resolveTunnelProfile?
 
 export function connectionAttemptTimeoutMs(config: Pick<ConnectionConfig, "connect_timeout_secs" | "transport_layers"> & Partial<Pick<ConnectionConfig, "db_type" | "url_params" | "connection_string">>, resolveTunnelProfile?: TunnelProfileResolver): number {
   const baseTimeoutSecs = positiveSeconds(config.connect_timeout_secs, DEFAULT_CONNECT_TIMEOUT_SECS);
-  const agentMinTimeoutSecs = config.db_type === "access" ? ACCESS_AGENT_MIN_CONNECT_TIMEOUT_SECS : AGENT_DRIVER_MIN_CONNECT_TIMEOUT_SECS;
-  let timeoutSecs = DRIVER_STARTUP_FLOOR_TYPES.has(config.db_type as DatabaseType) ? Math.max(baseTimeoutSecs, agentMinTimeoutSecs) : baseTimeoutSecs;
+
+  let timeoutSecs = baseTimeoutSecs;
   let hasEnabledTransportLayer = false;
   for (const unresolvedLayer of config.transport_layers ?? []) {
     const layer = resolvedTimeoutLayer(unresolvedLayer, resolveTunnelProfile);
@@ -89,9 +39,9 @@ export function connectionAttemptTimeoutMs(config: Pick<ConnectionConfig, "conne
   // happen sequentially in the backend. Keep the UI guard outside their total
   // budget so it cannot cancel a connection attempt that is still progressing.
   if (hasEnabledTransportLayer) timeoutSecs += baseTimeoutSecs;
-  const usesMongoOidc = config.db_type === "mongodb" && mongoConnectionUsesOidc(config.url_params, config.connection_string);
-  const fallbackBuffer = config.db_type === "mongodb" && !usesMongoOidc ? MONGO_LEGACY_FALLBACK_TIMEOUT_BUFFER_MS : 0;
-  const browserAuthBuffer = usesMongoOidc ? MONGO_OIDC_BROWSER_AUTH_TIMEOUT_MS : 0;
+
+  const fallbackBuffer = 0;
+  const browserAuthBuffer = 0;
   return Math.ceil(timeoutSecs * 1000 + CONNECTION_ATTEMPT_TIMEOUT_BUFFER_MS + fallbackBuffer + browserAuthBuffer);
 }
 

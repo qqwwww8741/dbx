@@ -55,7 +55,7 @@ async function loadTables() {
   loading.value = !!connectionId && databases.length > 0;
   if (!connectionId || databases.length === 0) return;
   try {
-    if (databaseType !== "mysql" && databaseType !== "postgres") throw new Error("Unsupported backup connection");
+    if (databaseType !== "mysql") throw new Error("Unsupported backup connection");
     const result = await Promise.all(
       databases.map(async (database) => {
         const schemas = databaseType === "mysql" ? [database] : (await api.listSchemas(connectionId, database)).filter((schema) => schema !== "information_schema" && !schema.startsWith("pg_"));

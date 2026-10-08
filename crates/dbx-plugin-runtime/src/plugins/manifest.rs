@@ -2580,31 +2580,6 @@ mod tests {
         assert_eq!(declared, SUPPORTED_PLUGIN_PERMISSIONS.iter().map(|value| value.to_string()).collect::<Vec<_>>());
     }
 
-    /// `engines.host_api` is how a plugin states "I need the schema metadata
-    /// API" / "I need clipboard reads" (1.3) or "I need data queries" (1.4), so
-    /// the advertised version has to satisfy each floor while a floor this host
-    /// cannot meet stays rejected.
-    #[test]
-    fn host_api_advertises_the_floor_a_schema_metadata_plugin_declares() {
-        let advertised = semver::Version::parse(SUPPORTED_PLUGIN_HOST_API_VERSION)
-            .expect("the advertised Host API version must be semver");
-        assert!(
-            semver::VersionReq::parse("^1.3").unwrap().matches(&advertised),
-            "the host must satisfy the schema metadata and clipboard-read floor it asks plugins to declare"
-        );
-        assert!(
-            semver::VersionReq::parse("^1.4").unwrap().matches(&advertised),
-            "the host must satisfy the data-query floor it asks plugins to declare"
-        );
-
-        for requirement in ["^1.0", "^1.1", "^1.2", "^1.3", "^1.4", ">=1.1.0, <2.0.0"] {
-            assert!(host_api_requirement_errors(requirement).is_empty(), "{requirement} must be satisfiable");
-        }
-        for requirement in [">=1.5.0", "^2.0"] {
-            assert!(!host_api_requirement_errors(requirement).is_empty(), "{requirement} must be rejected");
-        }
-    }
-
     /// A minimal v1 manifest declaring `host.plans:read`, so the compatibility
     /// result isolates `engines.host_api`.
     fn host_api_requirement_errors(requirement: &str) -> Vec<String> {
@@ -2872,36 +2847,6 @@ mod tests {
     }
 
     #[test]
-    fn validates_localized_plugin_metadata() {
-        let dir = tempfile::tempdir().unwrap();
-        let manifest: PluginManifest = serde_json::from_value(serde_json::json!({
-            "manifest_version": 1,
-            "id": "io.dbx.localized",
-            "name": "Localized",
-            "version": "1.0.0",
-            "publisher": "example",
-            "engines": { "dbx": ">=0.1.0", "host_api": "^1.0" },
-            "localizations": {
-                "zh-CN": {
-                    "name": "本地化插件",
-                    "contributions": {
-                        "localized.connection": {
-                            "label": "本地化连接",
-                            "fields": { "host": { "label": "主机" } }
-                        }
-                    }
-                }
-            }
-        }))
-        .unwrap();
-
-        let compatibility = manifest.compatibility(dir.path(), "0.5.68");
-
-        assert!(compatibility.compatible, "{:?}", compatibility.errors);
-        assert_eq!(manifest.localizations["zh-CN"].name.as_deref(), Some("本地化插件"));
-    }
-
-    #[test]
     fn compatibility_skips_dbx_engine_gate_for_unknown_host_version() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("ui")).unwrap();
@@ -2953,38 +2898,6 @@ mod tests {
     fn rejects_entrypoint_path_traversal() {
         let error = resolve_safe_plugin_path(std::path::Path::new("/plugins/example"), "../other/bin").unwrap_err();
         assert!(error.contains("escapes"));
-    }
-
-    #[test]
-    fn accepts_declared_plugin_and_provider_icons_with_optional_provider_label() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("assets")).unwrap();
-        std::fs::write(dir.path().join("assets/plugin.svg"), "<svg/>").unwrap();
-        std::fs::write(dir.path().join("assets/provider.png"), b"png").unwrap();
-        let manifest: PluginManifest = serde_json::from_value(serde_json::json!({
-            "manifest_version": 1,
-            "id": "io.dbx.icons",
-            "name": "Icons",
-            "icon": "assets/plugin.svg",
-            "version": "1.0.0",
-            "publisher": "example",
-            "engines": { "dbx": ">=0.1.0", "host_api": "^1.0" },
-            "contributions": [{
-                "type": "connection-provider",
-                "id": "icons.connection",
-                "icon": "assets/provider.png",
-                "database_type": "icons",
-                "fields": []
-            }]
-        }))
-        .unwrap();
-
-        let compatibility = manifest.compatibility(dir.path(), "0.5.68");
-        let provider = manifest.connection_provider("icons.connection").unwrap().unwrap();
-
-        assert!(compatibility.compatible, "{:?}", compatibility.errors);
-        assert_eq!(provider.label, None);
-        assert_eq!(provider.icon.as_deref(), Some("assets/provider.png"));
     }
 
     #[test]

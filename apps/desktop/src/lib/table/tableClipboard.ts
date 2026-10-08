@@ -72,7 +72,7 @@ export function tableClipboardMenuState(entries: TableClipboardTableContext[], t
 }
 
 export function supportsWholeRowTableDataCopy(databaseType: DatabaseType | undefined): boolean {
-  return !!databaseType && databaseType !== "victoriametrics";
+  return !!databaseType;
 }
 
 export function defaultPasteTableMode(databaseType: DatabaseType | undefined): PasteTableMode {
@@ -87,9 +87,9 @@ export function tableDataCopyColumnOptions(databaseType: DatabaseType | undefine
   const writableColumns = columns.filter((column) => isWritableTableDataCopyColumn(databaseType, column));
   return {
     columns: writableColumns.map((column) => column.name),
-    postgresOverridingSystemValue: databaseType === "postgres" && writableColumns.some(isIdentityColumn),
-    sqlserverIdentityInsert: databaseType === "sqlserver" && writableColumns.some(isIdentityColumn),
-    damengIdentityInsert: databaseType === "dameng" && writableColumns.some(isIdentityColumn),
+    postgresOverridingSystemValue: false,
+    sqlserverIdentityInsert: false,
+    damengIdentityInsert: false,
   };
 }
 
@@ -100,16 +100,7 @@ function isWritableTableDataCopyColumn(databaseType: DatabaseType | undefined, c
     // Accept both raw EXTRA metadata and the backend's expanded generation clause.
     return !/\b(?:virtual|stored|persistent)\s+generated\b|\bgenerated\s+always\s+as\s*\(/.test(extra);
   }
-  if (databaseType === "postgres") {
-    return !extra.includes("generated always as (");
-  }
-  if (databaseType === "sqlserver") {
-    const baseDataType = column.data_type.trim().toLowerCase().split(/[\s(]/, 1)[0] ?? "";
-    return !extra.includes("computed") && baseDataType !== "timestamp" && baseDataType !== "rowversion";
-  }
+  {}
+  {}
   return !extra.includes("computed") && !(extra.includes("generated") && !extra.includes("identity"));
-}
-
-function isIdentityColumn(column: ColumnInfo): boolean {
-  return (column.extra ?? "").toLowerCase().includes("identity");
 }

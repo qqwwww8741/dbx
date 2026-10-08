@@ -113,7 +113,7 @@ defineExpose({
   // must be refused even when it shares the same connection.
   insertRedisCommand: (command: string, target: AiConversationBinding) => (groupForElement(commandTargetElement(null)) ?? activeEditorGroup())?.insertRedisCommand(command, target) ?? Promise.resolve(false),
   executeRedisCommand: (command: string, target: AiConversationBinding) => (groupForElement(commandTargetElement(null)) ?? activeEditorGroup())?.executeRedisCommand(command, target) ?? Promise.resolve(false),
-  isRedisConsoleReady: (target: AiConversationBinding) => (groupForElement(commandTargetElement(null)) ?? activeEditorGroup())?.isRedisConsoleReady(target) ?? false,
+  isRedisConsoleReady: (_target: AiConversationBinding) => false,
 });
 
 const { t } = useI18n();

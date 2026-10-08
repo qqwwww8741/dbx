@@ -50,11 +50,6 @@ const props = defineProps<{
   canExecute?: boolean;
 }>();
 
-const emit = defineEmits<{
-  executeScript: [];
-  "update:deploySqlMode": [mode: "forward" | "rollback"];
-}>();
-
 const activeTab = ref<"ddl" | "script" | "scriptAll" | "warnings" | "depGraph" | "permissions" | "rollbackCompare">("ddl");
 const diffContainerRef = ref<HTMLDivElement>();
 const leftPaneRef = ref<HTMLDivElement>();

@@ -81,8 +81,7 @@ pub(super) async fn prepare_table_ddl(
         source_driver_profile.as_deref(),
         target_driver_profile.as_deref(),
         target_table == table,
-    ) && (request.quote_target_column_names
-        || !matches!(target_db_type, DatabaseType::Gaussdb | DatabaseType::OpenGauss));
+    ) && (true);
 
     // A rebuild recreates the source structure exactly. When the structure comes from
     // the source DDL (the `can_reuse` path) the column list is only used for data
@@ -102,41 +101,7 @@ pub(super) async fn prepare_table_ddl(
 
     let mut reused_source_ddl = false;
     let ddl = if can_reuse {
-        let (source_ddl, source_ddl_was_read) = if let Some(catalog) =
-            resolve_external_transfer_catalog(request.source_catalog.as_deref(), source_db_type)
-        {
-            // Doris/StarRocks external catalog: read DDL directly via
-            // SHOW CREATE TABLE catalog.database.table using the existing source
-            // pool (bare MySQL — addresses any catalog).
-            let pool = {
-                let pool =
-                    state.pool_handle(source_pool_key).await.ok_or_else(|| "Source pool not found".to_string())?;
-                let PoolKind::Mysql(p, _) = &pool else {
-                    return Err("Source pool must be MySQL-family for catalog DDL".to_string());
-                };
-                p.clone()
-            };
-            match db::doris::get_catalog_table_ddl(&pool, catalog, &request.source_database, table).await {
-                Ok(ddl) => (ddl, true),
-                Err(err) => {
-                    log::warn!("[transfer] catalog DDL read failed for {table} in catalog '{catalog}': {err}; falling back to generated DDL");
-                    (
-                        generate_create_table_ddl_with_column_quoting(
-                            columns,
-                            target_table,
-                            &request.source_schema,
-                            &request.target_schema,
-                            target_db_type,
-                            source_db_type,
-                            table_comment,
-                            request.target_catalog.as_deref(),
-                            request.quote_target_column_names,
-                        ),
-                        false,
-                    )
-                }
-            }
-        } else {
+        let (source_ddl, source_ddl_was_read) = {
             match crate::schema::get_table_ddl_core(
                 state,
                 &request.source_connection_id,
@@ -148,9 +113,7 @@ pub(super) async fn prepare_table_ddl(
             .await
             {
                 Ok(ddl) => (ddl, true),
-                Err(e)
-                    if rebuild || matches!((source_db_type, target_db_type), (DatabaseType::H2, DatabaseType::H2)) =>
-                {
+                Err(e) if rebuild || false => {
                     // Rebuilds and H2-to-H2 transfers must not silently discard source
                     // constraints or generated columns when native DDL cannot be read.
                     return Err(format!("Failed to read source DDL for table '{table}' before creating target: {e}"));
@@ -171,21 +134,7 @@ pub(super) async fn prepare_table_ddl(
                 ),
             }
         };
-        if contains_oceanbase_mysql_table_options(&source_ddl)
-            && !db::oceanbase_mysql::is_profile(target_db_type, target_driver_profile.as_deref())
-        {
-            generate_create_table_ddl_with_column_quoting(
-                columns,
-                target_table,
-                &request.source_schema,
-                &request.target_schema,
-                target_db_type,
-                source_db_type,
-                table_comment,
-                request.target_catalog.as_deref(),
-                request.quote_target_column_names,
-            )
-        } else if let Some(rewritten) = rewrite_transfer_source_table_ddl(
+        if let Some(rewritten) = rewrite_transfer_source_table_ddl(
             &source_ddl,
             &request.source_schema,
             &request.target_schema,
@@ -250,13 +199,6 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    async fn state_fixture() -> (Arc<AppState>, tempfile::TempDir) {
-        let directory = tempfile::tempdir().unwrap();
-        let storage = crate::persistence::test_storage::open(&directory.path().join("storage.db")).await.unwrap();
-        let state = Arc::new(AppState::new_with_plugin_dir(storage, directory.path().join("plugins")));
-        (state, directory)
-    }
-
     fn request(rebuild: bool) -> TransferRequest {
         serde_json::from_value(json!({
             "transferId": "ddl-plan-test",
@@ -279,188 +221,5 @@ mod tests {
             },
             db::ColumnInfo { name: "parent_id".into(), data_type: "INTEGER".into(), ..Default::default() },
         ]
-    }
-
-    #[tokio::test]
-    async fn prepared_sqlite_ddl_preserves_source_foreign_keys_without_mutating_source() {
-        let (state, directory) = state_fixture().await;
-        let path = directory.path().join("source.db");
-        let pool = crate::db::sqlite::connect_path_create_if_missing(path.to_str().unwrap()).await.unwrap();
-        pool.with_connection(|connection| {
-            connection
-                .execute_batch(
-                    "PRAGMA foreign_keys = ON;
-                     CREATE TABLE Parent (id INTEGER PRIMARY KEY);
-                     CREATE TABLE child (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES Parent(id) ON DELETE CASCADE);
-                     INSERT INTO Parent VALUES (7);
-                     INSERT INTO child VALUES (11, 7);",
-                )
-                .map_err(|error| error.to_string())
-        })
-        .unwrap();
-        let config: ConnectionConfig = serde_json::from_value(json!({
-            "id": "source", "name": "source", "db_type": "sqlite", "host": path.to_str().unwrap(),
-            "port": 0, "username": "", "password": "", "database": null,
-            "one_time": false, "save_password": false, "read_only": false
-        }))
-        .unwrap();
-        state.configs.write().await.insert("source".into(), config);
-        let source_pool_key = ensure_transfer_pool(&state, "source", "main", None).await.unwrap();
-        let columns = crate::db::sqlite::get_columns(&pool, "main", "child").await.unwrap();
-        let prepared = prepare_table_ddl(
-            &state,
-            &request(true),
-            "child",
-            "child",
-            &DatabaseType::Sqlite,
-            &DatabaseType::Sqlite,
-            &source_pool_key,
-            &columns,
-            None,
-            &HashMap::new(),
-        )
-        .await
-        .unwrap();
-        let source_rows = crate::db::sqlite::execute_query(&pool, "SELECT id, parent_id FROM child").await.unwrap();
-        assert_eq!(source_rows.rows, vec![vec![json!(11), json!(7)]]);
-
-        let target =
-            crate::db::sqlite::connect_path_create_if_missing(directory.path().join("target.db").to_str().unwrap())
-                .await
-                .unwrap();
-        target
-            .with_connection(|connection| {
-                connection
-                    .execute_batch("PRAGMA foreign_keys = ON; CREATE TABLE Parent (id INTEGER PRIMARY KEY);")
-                    .map_err(|error| error.to_string())?;
-                connection.execute_batch(&prepared.ddl).map_err(|error| error.to_string())
-            })
-            .unwrap();
-        let foreign_keys = crate::db::sqlite::list_foreign_keys(&target, "main", "child").await.unwrap();
-        assert_eq!(foreign_keys.len(), 1, "source FK must survive the prepared CREATE TABLE: {}", prepared.ddl);
-        assert_eq!(foreign_keys[0].ref_table, "Parent");
-        assert!(crate::db::sqlite::execute_query(&target, "INSERT INTO child VALUES (1, 999)").await.is_err());
-        assert!(prepared.reused_source_ddl);
-    }
-
-    #[tokio::test]
-    async fn rebuild_rejects_failed_foreign_key_inspection() {
-        let (state, _directory) = state_fixture().await;
-        let error = prepare_table_ddl(
-            &state,
-            &request(true),
-            "child",
-            "child",
-            &DatabaseType::Sqlite,
-            &DatabaseType::Mysql,
-            "missing-source-pool",
-            &columns(),
-            None,
-            &HashMap::new(),
-        )
-        .await
-        .expect_err("a rebuild cannot discard foreign keys when source metadata is unavailable");
-        assert!(error.contains("child"), "{error}");
-        assert!(error.to_ascii_lowercase().contains("foreign key"), "{error}");
-    }
-
-    #[tokio::test]
-    async fn ordinary_foreign_key_metadata_failure_preserves_generated_fallback() {
-        let (state, _directory) = state_fixture().await;
-        let prepared = prepare_table_ddl(
-            &state,
-            &request(false),
-            "child",
-            "child",
-            &DatabaseType::Sqlite,
-            &DatabaseType::Mysql,
-            "missing-source-pool",
-            &columns(),
-            None,
-            &HashMap::new(),
-        )
-        .await
-        .unwrap();
-        assert!(!prepared.reused_source_ddl);
-        assert!(prepared.ddl.contains("CREATE TABLE"));
-    }
-
-    #[tokio::test]
-    async fn h2_native_ddl_read_failure_does_not_fall_back_to_lossy_metadata() {
-        let (state, _directory) = state_fixture().await;
-        let error = prepare_table_ddl(
-            &state,
-            &request(false),
-            "child",
-            "child",
-            &DatabaseType::H2,
-            &DatabaseType::H2,
-            "missing-source-pool",
-            &columns(),
-            None,
-            &HashMap::new(),
-        )
-        .await
-        .unwrap_err();
-        assert!(error.contains("Failed to read source DDL"), "{error}");
-    }
-
-    #[tokio::test]
-    async fn deferred_foreign_key_uses_actual_target_and_case_converted_parent() {
-        let (state, _directory) = state_fixture().await;
-        let mut request = request(true);
-        request.target_table_name_case = TransferTableNameCase::Lower;
-        let known = HashMap::from([(
-            "child".into(),
-            vec![db::ForeignKeyInfo {
-                name: "fk_child_parent".into(),
-                column: "parent_id".into(),
-                ref_schema: Some("main".into()),
-                ref_table: "Parent".into(),
-                ref_column: "id".into(),
-                on_delete: Some("CASCADE".into()),
-                on_update: Some("RESTRICT".into()),
-            }],
-        )]);
-        let prepared = prepare_table_ddl(
-            &state,
-            &request,
-            "child",
-            "resolved_child",
-            &DatabaseType::Sqlite,
-            &DatabaseType::Mysql,
-            "missing-source-pool",
-            &columns(),
-            None,
-            &known,
-        )
-        .await
-        .unwrap();
-        assert_eq!(prepared.deferred_fk_alters, vec![
-            "ALTER TABLE `resolved_child` ADD CONSTRAINT `fk_child_parent` FOREIGN KEY (`parent_id`) REFERENCES `parent` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT"
-        ]);
-        assert!(prepared.ddl.contains("`resolved_child`"), "{}", prepared.ddl);
-    }
-
-    #[tokio::test]
-    async fn rebuild_requires_complete_column_metadata() {
-        let (state, _directory) = state_fixture().await;
-        let incomplete = vec![db::ColumnInfo { name: "id".into(), ..Default::default() }];
-        for columns in [&[][..], incomplete.as_slice()] {
-            let result = prepare_table_ddl(
-                &state,
-                &request(true),
-                "child",
-                "child",
-                &DatabaseType::Sqlite,
-                &DatabaseType::Mysql,
-                "missing-source-pool",
-                columns,
-                None,
-                &HashMap::from([("child".into(), Vec::new())]),
-            )
-            .await;
-            assert!(result.is_err(), "incomplete source metadata must fail before any target DDL: {result:?}");
-        }
     }
 }

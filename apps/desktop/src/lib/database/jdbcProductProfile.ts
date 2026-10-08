@@ -203,7 +203,7 @@ export async function ensureJdbcProductRuntimeDrivers(profile: JdbcProductProfil
   const managedCoordinates = jdbcProductManagedCoordinates(profile);
   const managedBundles = bundles.filter((bundle) => managedCoordinates.includes(bundle.coordinate));
   const managedPaths = new Set(managedBundles.flatMap((bundle) => bundle.artifacts.map((artifact) => artifact.path).filter(Boolean)));
-  const hasCustomRuntime = configuredPaths.some((path) => profile.isCompatibleRuntimePath(path, modeId) && !managedPaths.has(path) && !isJdbcProductManagedMavenPath(profile, path));
+  const hasCustomRuntime = configuredPaths.some((path) => profile.isCompatibleRuntimePath(path, modeId) && !managedPaths.has(path));
   if (hasCustomRuntime) {
     config.jdbc_driver_paths = configuredPaths;
     return { profile, mode, bundles, paths: configuredPaths };
@@ -214,7 +214,7 @@ export async function ensureJdbcProductRuntimeDrivers(profile: JdbcProductProfil
     throw new JdbcProductRuntimeError("driver-missing", profile);
   }
 
-  const customPaths = configuredPaths.filter((path) => !managedPaths.has(path) && !isJdbcProductManagedMavenPath(profile, path));
+  const customPaths = configuredPaths.filter((path) => !managedPaths.has(path));
   const runtimePaths = jdbcProductManagedRuntimePaths(profile, bundles, modeId);
   if (runtimePaths.length === 0) {
     throw new JdbcProductRuntimeError("driver-missing", profile);

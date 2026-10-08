@@ -1,7 +1,5 @@
 use dbx_core::models::connection::DatabaseType;
-use dbx_core::schema_diff::{
-    generate_schema_sync_sql, prepare_schema_diff, SchemaDiffPreparationOptions, TableSchemaDetail,
-};
+use dbx_core::schema_diff::{prepare_schema_diff, SchemaDiffPreparationOptions, TableSchemaDetail};
 use dbx_core::types::{ColumnInfo, TableInfo};
 use mysql_async::prelude::Queryable;
 
@@ -80,9 +78,4 @@ async fn mysql_schema_diff_add_columns_keep_source_order() {
         .await
         .expect("read resulting column order");
     assert_eq!(names, vec!["first", "a", "middle", "next", "last", "new_tail"]);
-
-    let postgres_sql =
-        generate_schema_sync_sql(&prepared.diffs, &[], &[], &[], &[], DatabaseType::Postgres, None, false, None, &[]);
-    assert!(!postgres_sql.contains(" FIRST"), "PostgreSQL output must not contain MySQL FIRST: {postgres_sql}");
-    assert!(!postgres_sql.contains(" AFTER "), "PostgreSQL output must not contain MySQL AFTER: {postgres_sql}");
 }

@@ -36,7 +36,7 @@ describe("MCP config templates", () => {
     expect(config).toEqual({
       mcpServers: {
         dbx: {
-          command: "dbx-mcp-server",
+          command: "dbx-mcp",
         },
       },
     });
@@ -58,7 +58,7 @@ describe("MCP config templates", () => {
     expect(JSON.parse(buildMcpPiConfig())).toEqual({
       mcpServers: {
         dbx: {
-          command: "dbx-mcp-server",
+          command: "dbx-mcp",
         },
       },
     });
@@ -66,7 +66,7 @@ describe("MCP config templates", () => {
   });
 
   it("builds the standard mcpServers JSON used by WorkBuddy", () => {
-    const launch = { command: "dbx-mcp-server", env: { DBX_DATA_DIR: "D:\\DBX Data" } };
+    const launch = { command: "dbx-mcp", env: { DBX_DATA_DIR: "D:\\DBX Data" } };
 
     expect(JSON.parse(buildMcpWorkBuddyConfig(launch))).toEqual({
       mcpServers: {
@@ -91,7 +91,7 @@ describe("MCP config templates", () => {
   it("uses the native binary for TRAE when Windows Node lives under Program Files", () => {
     const nodeLaunch = {
       command: "C:\\Program Files\\nodejs\\node.exe",
-      args: ["C:\\Users\\supervisor\\AppData\\Roaming\\npm\\node_modules\\@dbx-app\\mcp-server\\bin\\dbx-mcp-server.js"],
+      args: ["C:\\Users\\supervisor\\AppData\\Roaming\\npm\\node_modules\\@dbx-app\\mcp-server\\bin\\dbx-mcp.js"],
       env: { DBX_DATA_DIR: "D:\\GreenSoft\\DBX\\data" },
     };
     const nativeBinPath = "C:\\Users\\supervisor\\AppData\\Roaming\\npm\\node_modules\\@dbx-app\\mcp-win32-x64\\bin\\dbx-mcp.exe";
@@ -119,7 +119,7 @@ describe("MCP config templates", () => {
 
   it("includes Web runtime settings without restoring permission environment variables", () => {
     const launch = {
-      command: "dbx-mcp-server",
+      command: "dbx-mcp",
       env: {
         DBX_WEB_URL: "https://dbx.example.com/tools/dbx",
         DBX_WEB_PASSWORD: "your-web-login-password",
@@ -127,7 +127,7 @@ describe("MCP config templates", () => {
     };
 
     expect(JSON.parse(buildMcpJsonConfig(launch))).toEqual({
-      mcpServers: { dbx: { command: "dbx-mcp-server", env: launch.env } },
+      mcpServers: { dbx: { command: "dbx-mcp", env: launch.env } },
     });
     expect(buildMcpCodexConfig(launch)).toContain('[mcp_servers.dbx.env]\nDBX_WEB_URL = "https://dbx.example.com/tools/dbx"');
     expect(JSON.parse(buildMcpOpenCodeConfig(launch)).mcp.dbx.environment).toEqual(launch.env);
@@ -136,7 +136,7 @@ describe("MCP config templates", () => {
 
   it("includes the portable DBX data directory in JSON and Codex configs", () => {
     const launch = {
-      command: "dbx-mcp-server",
+      command: "dbx-mcp",
       env: { DBX_DATA_DIR: "D:\\GreenSoft\\DBX\\data" },
     };
 
@@ -155,7 +155,7 @@ describe("MCP config templates", () => {
       servers: {
         dbx: {
           type: "stdio",
-          command: "dbx-mcp-server",
+          command: "dbx-mcp",
         },
       },
     });
@@ -201,7 +201,7 @@ describe("MCP config templates", () => {
   });
 
   it("builds Codex TOML config without policy environment", () => {
-    expect(buildMcpCodexConfig()).toBe(["[mcp_servers.dbx]", 'command = "dbx-mcp-server"'].join("\n"));
+    expect(buildMcpCodexConfig()).toBe(["[mcp_servers.dbx]", 'command = "dbx-mcp"'].join("\n"));
   });
 
   it("builds Codex TOML config with a direct node launch command", () => {
@@ -209,7 +209,7 @@ describe("MCP config templates", () => {
   });
 
   it("builds the DeepSeek Harness Cordis insert patch", () => {
-    expect(buildMcpDeepSeekHarnessConfig()).toBe(["- insert:", "    - id: mcp-dbx", "      name: '@deepseek-ai/dsh-mcp-client'", "      config:", "        serverName: dbx", "        transport: stdio", '        command: "dbx-mcp-server"'].join("\n"));
+    expect(buildMcpDeepSeekHarnessConfig()).toBe(["- insert:", "    - id: mcp-dbx", "      name: '@deepseek-ai/dsh-mcp-client'", "      config:", "        serverName: dbx", "        transport: stdio", '        command: "dbx-mcp"'].join("\n"));
   });
 
   it("includes launch arguments and explicit environment in the DeepSeek Harness patch", () => {
@@ -229,7 +229,7 @@ describe("MCP config templates", () => {
       mcp: {
         dbx: {
           type: "local",
-          command: ["dbx-mcp-server"],
+          command: ["dbx-mcp"],
         },
       },
     });

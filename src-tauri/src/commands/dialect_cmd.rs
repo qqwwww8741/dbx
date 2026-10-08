@@ -9,16 +9,7 @@ use dbx_core::sql_dialect::{
 pub fn dialect_check_command(kind: String) -> Result<DialectInfo, String> {
     let db_type = match kind.to_ascii_lowercase().as_str() {
         "mysql" => DialectKind::Mysql,
-        "postgres" | "postgresql" => DialectKind::Postgres,
-        "sqlite" => DialectKind::Sqlite,
-        "duckdb" => DialectKind::DuckDb,
-        "sqlserver" | "mssql" => DialectKind::SqlServer,
-        "oracle" => DialectKind::Oracle,
-        "h2" => DialectKind::H2,
-        "clickhouse" => DialectKind::ClickHouse,
-        "manticore" | "manticoresearch" => DialectKind::ManticoreSearch,
-        "informix" => DialectKind::Informix,
-        "questdb" => DialectKind::Questdb,
+
         _ => return Err(format!("Unknown dialect: {kind}")),
     };
     Ok(dialect_check(db_type))
@@ -52,19 +43,7 @@ pub fn dialect_export_command(target_dir: Option<String>) -> DialectExportResult
         };
     }
 
-    let kinds = [
-        DialectKind::Mysql,
-        DialectKind::Postgres,
-        DialectKind::Sqlite,
-        DialectKind::DuckDb,
-        DialectKind::SqlServer,
-        DialectKind::Oracle,
-        DialectKind::H2,
-        DialectKind::ClickHouse,
-        DialectKind::ManticoreSearch,
-        DialectKind::Informix,
-        DialectKind::Questdb,
-    ];
+    let kinds = [DialectKind::Mysql];
 
     let mut files_written = Vec::new();
     let mut errors = Vec::new();

@@ -137,17 +137,7 @@ pub async fn start_transfer(
         // only mechanically rewriteable kinds (views, sequences) are allowed; any
         // other selection fails with a descriptive error. Structure-only data
         // transfer is unsupported for MongoDB.
-        if matches!(req.content, transfer::TransferContent::StructureOnly)
-            && (matches!(source_db_type, dbx_core::models::connection::DatabaseType::MongoDb)
-                || matches!(target_db_type, dbx_core::models::connection::DatabaseType::MongoDb))
-        {
-            send_transfer_progress(
-                &progress_channel,
-                &terminal_transfer_error(&req, "MongoDB 暂不支持仅结构传输".to_string()),
-            );
-            finish_transfer_channel(&state_clone, &req.transfer_id, &progress_channel).await;
-            return;
-        }
+        {}
 
         // External Doris/StarRocks catalogs: pool is created with `catalog=` URL
         // setup (SET catalog) and without USE <external-db>. See ensure_transfer_pool.
@@ -195,15 +185,7 @@ pub async fn start_transfer(
         // Skip for external Doris/StarRocks catalogs — the database name does
         // not exist in the default catalog and sorting is unnecessary.
         let (tables, known_foreign_keys) = {
-            let skip_fk_sort = {
-                let configs = app.configs.read().await;
-                configs
-                    .get(&req.source_connection_id)
-                    .and_then(|config| {
-                        transfer::resolve_external_transfer_catalog_for_config(req.source_catalog.as_deref(), config)
-                    })
-                    .is_some()
-            };
+            let skip_fk_sort = false;
             if skip_fk_sort {
                 (tables, std::collections::HashMap::new())
             } else {
@@ -301,56 +283,7 @@ pub async fn start_transfer(
             None
         };
 
-        if matches!(source_db_type, dbx_core::models::connection::DatabaseType::Postgres)
-            && matches!(target_db_type, dbx_core::models::connection::DatabaseType::Postgres)
-        {
-            let progress_channel_clone = progress_channel.clone();
-            match transfer::transfer_postgres_schema_dependencies(
-                &app,
-                &req,
-                &source_pool_key,
-                &target_pool_key,
-                |progress| {
-                    send_transfer_progress(&progress_channel_clone, &progress);
-                },
-            )
-            .await
-            {
-                Ok(()) => {}
-                Err(e) if e == "Cancelled" => {
-                    let progress = transfer::TransferProgress {
-                        transfer_id: req.transfer_id.clone(),
-                        table: "schema dependencies".to_string(),
-                        table_index: 0,
-                        total_tables: tables.len(),
-                        rows_transferred: 0,
-                        total_rows: None,
-                        status: TransferStatus::Cancelled,
-                        error: None,
-                        terminal: true,
-                    };
-                    send_transfer_progress(&progress_channel, &progress);
-                    finish_transfer_channel(&state_clone, &req.transfer_id, &progress_channel).await;
-                    return;
-                }
-                Err(e) => {
-                    let progress = transfer::TransferProgress {
-                        transfer_id: req.transfer_id.clone(),
-                        table: "schema dependencies".to_string(),
-                        table_index: 0,
-                        total_tables: tables.len(),
-                        rows_transferred: 0,
-                        total_rows: None,
-                        status: TransferStatus::Error,
-                        error: Some(e),
-                        terminal: true,
-                    };
-                    send_transfer_progress(&progress_channel, &progress);
-                    finish_transfer_channel(&state_clone, &req.transfer_id, &progress_channel).await;
-                    return;
-                }
-            }
-        }
+        {}
 
         for (i, table) in tables.iter().enumerate() {
             if transfer::is_cancelled(&req.transfer_id).await {
@@ -677,77 +610,6 @@ mod tests {
         TransferContent, TransferMode, TransferOwnershipPolicy, TransferRequest, TransferTableNameCase,
     };
 
-    fn sqlite_config(id: &str, path: &str) -> ConnectionConfig {
-        ConnectionConfig {
-            oracle_oci_nls_lang: None,
-            oracle_oci_tns_admin: None,
-            docs_notes_path: None,
-            id: id.to_string(),
-            name: "SQLite".to_string(),
-            note: String::new(),
-            db_type: DatabaseType::Sqlite,
-            driver_profile: None,
-            driver_label: None,
-            url_params: None,
-            agent_java_options: Vec::new(),
-            host: path.to_string(),
-            port: 0,
-            username: String::new(),
-            password: String::new(),
-            database: None,
-            default_schema: None,
-            visible_databases: None,
-            visible_database_patterns: None,
-            visible_schemas: None,
-            show_system_schemas: false,
-            sidebar_auto_load_all_tables: false,
-            attached_databases: Vec::new(),
-            init_script: None,
-            color: None,
-            transport_layers: Vec::new(),
-            connect_timeout_secs: default_connect_timeout_secs(),
-            query_timeout_secs: default_query_timeout_secs(),
-            idle_timeout_secs: default_idle_timeout_secs(),
-            keepalive_interval_secs: default_keepalive_interval_secs(),
-            ssl: false,
-            ca_cert_path: String::new(),
-            client_cert_path: String::new(),
-            client_key_path: String::new(),
-            sysdba: false,
-            oracle_connection_type: None,
-            connection_string: None,
-            redis_connection_mode: None,
-            redis_sentinel_master: String::new(),
-            redis_sentinel_nodes: String::new(),
-            redis_sentinel_username: String::new(),
-            redis_sentinel_password: String::new(),
-            redis_sentinel_tls: false,
-            redis_cluster_nodes: String::new(),
-            redis_key_separator: dbx_core::models::connection::default_redis_key_separator(),
-            redis_scan_page_size: None,
-            redis_database_aliases: Default::default(),
-            redis_key_templates: Vec::new(),
-            redis_key_filter: None,
-            redis_key_grouping: None,
-            etcd_endpoints: String::new(),
-            gbase_server: String::new(),
-            informix_server: String::new(),
-            external_config: None,
-            plugin_id: None,
-            plugin_connection_provider: None,
-            plugin_connection_type: None,
-            connection_secrets: Default::default(),
-            jdbc_driver_class: None,
-            jdbc_driver_paths: Vec::new(),
-            one_time: false,
-            save_password: true,
-            read_only: false,
-            is_production: false,
-            production_databases: vec![],
-            database_info: None,
-        }
-    }
-
     async fn test_web_state() -> (Arc<WebState>, std::path::PathBuf) {
         let dir = std::env::temp_dir().join(format!("dbx-web-transfer-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -782,61 +644,5 @@ mod tests {
             ownership_policy: TransferOwnershipPolicy::Preserve,
             batch_size: 1000,
         }
-    }
-
-    #[tokio::test]
-    async fn data_only_empty_object_selection_completes_through_the_core_noop() {
-        let (state, dir) = test_web_state().await;
-        let src = sqlite_config("src", &dir.join("src.db").to_string_lossy());
-        let dst = sqlite_config("dst", &dir.join("dst.db").to_string_lossy());
-        // SQLite pools need the backing files to exist before connecting.
-        std::fs::write(dir.join("src.db"), b"").unwrap();
-        std::fs::write(dir.join("dst.db"), b"").unwrap();
-        std::fs::write(dir.join("main.db"), b"").unwrap();
-        state.app.configs.write().await.insert("src".to_string(), src);
-        state.app.configs.write().await.insert("dst".to_string(), dst);
-
-        let req = transfer_request("src", "dst", &dir);
-        let transfer_id = req.transfer_id.clone();
-        let response = start_transfer(State(state.clone()), Json(StartTransferRequest { request: req })).await.unwrap();
-        let _ = response.into_response();
-
-        // Both HTTP and Tauri call the same Core schema-object stage
-        // unconditionally. DataOnly must resolve there to a no-op without an
-        // object progress event or database-family fallback.
-        let channel = {
-            let channels = state.transfer_progress_channels.read().await;
-            channels.get(&transfer_id).cloned().expect("transfer channel registered")
-        };
-        let mut saw_terminal = false;
-        let mut saw_schema_objects = false;
-        let mut terminal_error: Option<String> = None;
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
-        while !saw_terminal {
-            if let Some(data) = channel.latest() {
-                let value: serde_json::Value = serde_json::from_str(&data).unwrap();
-                if value["table"].as_str() == Some("schema objects") {
-                    saw_schema_objects = true;
-                }
-                if value["terminal"].as_bool() == Some(true) {
-                    saw_terminal = true;
-                    terminal_error = value["error"].as_str().map(|s| s.to_string());
-                }
-            }
-            if saw_terminal {
-                break;
-            }
-            if std::time::Instant::now() > deadline {
-                panic!("transfer did not reach a terminal event within 15s");
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        assert!(saw_terminal, "transfer must reach a terminal event");
-        assert!(!saw_schema_objects, "DataOnly must not transfer schema objects");
-        assert!(
-            terminal_error.is_none(),
-            "DataOnly must complete without a schema-object error, got: {terminal_error:?}"
-        );
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

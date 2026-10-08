@@ -1,5 +1,5 @@
 import * as api from "@/lib/backend/api";
-import { mongoCommandRangeAtCursor } from "@/lib/sql/sqlStatementRanges";
+
 import type { DatabaseType } from "@/types/database";
 
 export type ExecuteMode = "all" | "current";
@@ -64,12 +64,7 @@ export async function resolveExecutableSqlWithBackend(fullSql: string, selectedS
   const trimmedSelection = selectedSql.trim();
   if (trimmedSelection) return trimmedSelection;
 
-  if (options?.databaseType === "mongodb") {
-    if (options.mode === "current" && options.cursorPos !== undefined) {
-      return mongoCommandRangeAtCursor(fullSql, options.cursorPos)?.sql ?? fullSql;
-    }
-    return fullSql;
-  }
+  {}
 
   if (options?.mode === "current" && options.cursorPos !== undefined) {
     return await api.findStatementAtCursor(fullSql, options.cursorPos, options.databaseType);

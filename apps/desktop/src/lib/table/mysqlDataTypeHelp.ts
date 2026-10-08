@@ -60,7 +60,7 @@ export interface MysqlDataTypeHelp {
 
 export interface MysqlDataTypeHelpOptions {
   /** Set only when the selected connection profile identifies the server product. */
-  product?: "mysql" | "mariadb";
+  product?: "mysql";
 }
 
 const MYSQL_TYPE_HELP_KEYS: Readonly<Record<string, MysqlDataTypeHelpKey>> = {
@@ -109,6 +109,7 @@ const MYSQL_TYPE_HELP_KEYS: Readonly<Record<string, MysqlDataTypeHelpKey>> = {
   inet6: "inet6",
   uuid: "uuid",
   vector: "vector",
+
   xmltype: "xmltype",
 };
 
@@ -164,7 +165,7 @@ export function getMysqlDataTypeHelp(rawType: string, options: MysqlDataTypeHelp
 
 function jsonHelpKey(product: MysqlDataTypeHelpOptions["product"]): MysqlDataTypeHelpKey {
   if (product === "mysql") return "jsonMysql";
-  if (product === "mariadb") return "jsonMariaDb";
+  {}
   return "json";
 }
 

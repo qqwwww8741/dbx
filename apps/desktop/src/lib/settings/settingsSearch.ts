@@ -248,7 +248,7 @@ export const SETTINGS_SEARCH_DEFINITIONS: readonly SettingsSearchDefinition[] = 
   { id: "data-grid-compact-header-actions", category: "data", titleKey: "settings.compactColumnHeaderActions", descriptionKey: "settings.compactColumnHeaderActionsDescription", targetId: "data" },
   { id: "data-grid-auto-total", category: "data", titleKey: "settings.autoCalculateTotalRows", descriptionKey: "settings.autoCalculateTotalRowsDescription", targetId: "data" },
   { id: "data-grid-infinite-scroll", category: "data", titleKey: "settings.infiniteScroll", descriptionKey: "settings.infiniteScrollDescription", targetId: "data" },
-  { id: "redis-key-templates", category: "data", titleKey: "settings.redisKeyTemplates", descriptionKey: "settings.redisKeyTemplatesDescription", targetId: "redis-key-templates" },
+
   { id: "data-grid-auto-transpose", category: "data", titleKey: "settings.dataGridAutoTransposeSingleRow", descriptionKey: "settings.dataGridAutoTransposeSingleRowDescription", targetId: "data" },
   { id: "data-grid-quick-entry", category: "data", titleKey: "settings.dataGridQuickEntry", descriptionKey: "settings.dataGridQuickEntryDescription", targetId: "data" },
   { id: "data-grid-toolbar-layout", category: "data", titleKey: "settings.dataGridToolbarLayout", descriptionKey: "settings.dataGridToolbarLayoutDescription", targetId: "data-grid-toolbar-layout" },
@@ -275,8 +275,7 @@ export const SETTINGS_SEARCH_DEFINITIONS: readonly SettingsSearchDefinition[] = 
   { id: "data-performance", category: "data", titleKey: "settings.performanceSection", targetId: "data-performance" },
   { id: "data-metadata-cache", category: "data", titleKey: "settings.metadataCacheMemoryLimit", descriptionKey: "settings.metadataCacheMemoryLimitDescription", targetId: "data-performance" },
   { id: "data-table-template", category: "data", titleKey: "settings.tableColumnTemplateFields", descriptionKey: "settings.tableColumnTemplateFieldsDescription", targetId: "table-column-templates" },
-  { id: "data-duckdb", category: "data", titleKey: "settings.duckDbWorkerProcessIsolation", descriptionKey: "settings.duckDbWorkerProcessIsolationDescription", targetId: "data", visible: desktopOnly },
-  { id: "data-duckdb-process-limit", category: "data", titleKey: "settings.duckDbWorkerMaxProcesses", descriptionKey: "settings.duckDbWorkerMaxProcessesDescription", targetId: "data", visible: desktopOnly },
+
   { id: "backups", category: "backups", titleKey: "databaseBackup.title", targetId: "backups", visible: desktopOnly },
   { id: "tunnels", category: "tunnels", titleKey: "settings.tunnelsTab", targetId: "tunnels" },
   { id: "shortcuts", category: "shortcuts", titleKey: "settings.shortcutsTab", targetId: "shortcuts" },
@@ -316,7 +315,7 @@ export const SETTINGS_SEARCH_DEFINITIONS: readonly SettingsSearchDefinition[] = 
   { id: "about-transfer", category: "about", titleKey: "settings.settingsTransferTitle", descriptionKey: "settings.settingsTransferDescription", targetId: "about" },
   { id: "updates-app", category: "updates", titleKey: "settings.autoUpdateApp", descriptionKey: "settings.autoUpdateAppDescription", targetId: "updates" },
   { id: "updates-drivers", category: "updates", titleKey: "settings.autoUpdateDrivers", descriptionKey: "settings.autoUpdateDriversDescription", targetId: "updates" },
-  { id: "updates-jdbc", category: "updates", titleKey: "settings.autoUpdateJdbc", descriptionKey: "settings.autoUpdateJdbcDescription", targetId: "updates" },
+
   { id: "updates-mcp", category: "updates", titleKey: "settings.autoUpdateMcp", descriptionKey: "settings.autoUpdateMcpDescription", targetId: "updates" },
   { id: "updates-plugins", category: "updates", titleKey: "settings.autoUpdatePlugins", descriptionKey: "settings.autoUpdatePluginsDescription", targetId: "updates" },
   { id: "updates-source", category: "updates", titleKey: "settings.updateDownloadSource", descriptionKey: "settings.updateDownloadSourceDescription", targetId: "updates" },

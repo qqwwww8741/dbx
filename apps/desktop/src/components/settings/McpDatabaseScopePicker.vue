@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { listDatabases, mongoListDatabases, redisListDatabases } from "@/lib/backend/api";
+import { listDatabases } from "@/lib/backend/api";
 import { useConnectionStore } from "@/stores/connectionStore";
 import type { McpConnectionPolicy } from "@/stores/settingsStore";
 import type { ConnectionConfig } from "@/types/database";
@@ -178,7 +178,7 @@ async function loadConnectionDatabases() {
     // SQL 连接的 list_databases 只读后端现有连接池，从未在侧边栏连接过的连接
     // 会报 "Connection not found"；与侧边栏流程一致，先确保连接建立。
     await connectionStore.ensureConnected(connection.id, { activate: false });
-    const databases = connection.db_type === "mongodb" ? await mongoListDatabases(connection.id) : connection.db_type === "redis" ? (await redisListDatabases(connection.id)).map((database) => String(database.db)) : (await listDatabases(connection.id)).map((database) => database.name);
+    const databases = (await listDatabases(connection.id)).map((database) => database.name);
     databasesByConnection.value = {
       ...databasesByConnection.value,
       [connection.id]: [...new Set(databases.map((database) => database.trim()).filter(Boolean))].sort((left, right) => left.localeCompare(right)),

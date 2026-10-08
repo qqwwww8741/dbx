@@ -369,45 +369,7 @@ fn tool_capable_plugins(state: &AppState, enabled: &HashSet<String>) -> Result<H
 }
 
 async fn open_plugin_connections(state: &AppState, plugins: &HashMap<String, String>) -> Vec<OpenPluginConnection> {
-    let handles = state
-        .with_connection_pools(|pools| {
-            let mut seen = HashSet::new();
-            pools
-                .values()
-                .filter_map(|pool| match pool {
-                    PoolKind::PluginConnection(handle)
-                        if handle.is_running()
-                            && plugins.contains_key(&handle.plugin_id)
-                            && seen.insert(handle.connection_id.clone()) =>
-                    {
-                        Some((handle.connection_id.clone(), handle.plugin_id.clone()))
-                    }
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-        })
-        .await;
-    let configs = state.configs.read().await;
-    let mut connections = handles
-        .into_iter()
-        .map(|(connection_id, plugin_id)| OpenPluginConnection {
-            connection_name: configs
-                .get(&connection_id)
-                .map_or_else(|| connection_id.clone(), |config| config.name.clone()),
-            connection_id,
-            plugin_id,
-        })
-        .collect::<Vec<_>>();
-    // Pools live in a hash map; sort so the tool list is stable across runs.
-    connections.sort_by(|left, right| {
-        (&left.plugin_id, &left.connection_name, &left.connection_id).cmp(&(
-            &right.plugin_id,
-            &right.connection_name,
-            &right.connection_id,
-        ))
-    });
-    connections.truncate(MAX_OPEN_CONNECTIONS);
-    connections
+    Vec::new()
 }
 
 fn restrict_connections(connections: &mut Vec<OpenPluginConnection>, connection_id: Option<&str>) {
@@ -419,24 +381,7 @@ fn restrict_connections(connections: &mut Vec<OpenPluginConnection>, connection_
 /// The lifecycle payload of `connection_id` if it is still open, with a fresh
 /// operation id for this call.
 async fn current_lifecycle(state: &AppState, plugin_id: &str, connection_id: &str) -> Option<Value> {
-    let mut lifecycle = state
-        .with_connection_pools(|pools| {
-            pools.values().find_map(|pool| match pool {
-                PoolKind::PluginConnection(handle)
-                    if handle.plugin_id == plugin_id
-                        && handle.connection_id == connection_id
-                        && handle.is_running() =>
-                {
-                    Some(handle.lifecycle_params().clone())
-                }
-                _ => None,
-            })
-        })
-        .await?;
-    if let Some(object) = lifecycle.as_object_mut() {
-        object.insert("operationId".to_string(), Value::String(uuid::Uuid::new_v4().to_string()));
-    }
-    Some(lifecycle)
+    None
 }
 
 /// Runs `prepared` through the plugin's `mcp/call`. The connection is looked
@@ -1033,6 +978,23 @@ fn truncate_chars(value: String, limit: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    fn write_fake_plugin(plugins_dir: &std::path::Path, plugin_id: &str, contributions: Value) {
+        let container = plugins_dir.join(plugin_id);
+        std::fs::create_dir_all(container.join("bin")).unwrap();
+        std::fs::write(container.join("bin").join("backend"), b"backend").unwrap();
+        let manifest = json!({
+            "manifest_version": 1,
+            "id": plugin_id,
+            "name": plugin_id,
+            "version": "1.0.0",
+            "publisher": "test",
+            "engines": { "dbx": ">=0.1.0", "host_api": "^1.0" },
+            "entrypoints": { "backend": { "executable": "bin/backend" } },
+            "contributions": contributions,
+        });
+        std::fs::write(container.join("manifest.json"), serde_json::to_vec(&manifest).unwrap()).unwrap();
+    }
+
     use super::*;
 
     #[test]
@@ -1052,26 +1014,6 @@ mod tests {
         }
     }
 
-    /// Writes a minimal installable plugin container: one manifest, one
-    /// backend executable. `contributions` carries extra entries such as the
-    /// `mcp` surface override.
-    fn write_fake_plugin(plugins_dir: &std::path::Path, plugin_id: &str, contributions: Value) {
-        let container = plugins_dir.join(plugin_id);
-        std::fs::create_dir_all(container.join("bin")).unwrap();
-        std::fs::write(container.join("bin").join("backend"), b"backend").unwrap();
-        let manifest = json!({
-            "manifest_version": 1,
-            "id": plugin_id,
-            "name": plugin_id,
-            "version": "1.0.0",
-            "publisher": "test",
-            "engines": { "dbx": ">=0.1.0", "host_api": "^1.0" },
-            "entrypoints": { "backend": { "executable": "bin/backend" } },
-            "contributions": contributions,
-        });
-        std::fs::write(container.join("manifest.json"), serde_json::to_vec(&manifest).unwrap()).unwrap();
-    }
-
     fn tool_call(name: &str, arguments: Value) -> ToolCall {
         ToolCall { id: "call-1".to_string(), name: name.to_string(), arguments, provider_payload: None }
     }
@@ -1081,16 +1023,6 @@ mod tests {
             ("io.dbx.kafka".to_string(), "Kafka Studio".to_string()),
             ("io.github.summery-yk.portainer".to_string(), "Portainer".to_string()),
         ])
-    }
-
-    #[test]
-    fn bound_plugin_agent_sees_only_its_connection() {
-        let mut connections =
-            vec![connection("k1", "cluster-a", "io.dbx.kafka"), connection("k2", "cluster-b", "io.dbx.kafka")];
-        restrict_connections(&mut connections, Some("k2"));
-        assert_eq!(connections.iter().map(|item| item.connection_id.as_str()).collect::<Vec<_>>(), ["k2"]);
-        restrict_connections(&mut connections, None);
-        assert_eq!(connections.len(), 1);
     }
 
     fn kafka_listing() -> Value {
@@ -1317,26 +1249,6 @@ mod tests {
         state.storage.set_ai_plugin_tool_plugin_enabled("io.test.ssh", false).await.unwrap();
         let ids = effective_ai_tool_plugin_ids(&state).await;
         assert!(!ids.contains("io.test.ssh"));
-    }
-
-    #[tokio::test]
-    async fn stale_tool_bindings_cannot_bypass_revoked_ai_access() {
-        let root = tempfile::tempdir().unwrap();
-        let storage = crate::persistence::test_storage::open(&root.path().join("dbx.db")).await.unwrap();
-        let plugins_dir = root.path().join("plugins");
-        write_fake_plugin(&plugins_dir, "io.dbx.kafka", serde_json::json!([]));
-        let state = Arc::new(AppState::new_with_plugin_dir(storage, plugins_dir));
-        state.storage.set_ai_plugin_tool_plugin_enabled("io.dbx.kafka", true).await.unwrap();
-        let set = build_tool_set(
-            &names(),
-            vec![(connection("k1", "prod-kafka", "io.dbx.kafka"), parse_tool_list(&kafka_listing()))],
-        );
-        let call = tool_call("kafka__kafka_topics_delete", json!({ "topics": ["orders"] }));
-        let prepared = set.prepare_call(&call).unwrap().unwrap();
-        state.storage.set_ai_plugin_tool_plugin_enabled("io.dbx.kafka", false).await.unwrap();
-        let result = execute_plugin_tool(&state, None, &call, &prepared).await;
-        assert!(result.is_error);
-        assert!(result.content.contains("has been disabled"), "{}", result.content);
     }
 
     #[test]

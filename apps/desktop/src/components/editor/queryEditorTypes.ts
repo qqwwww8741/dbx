@@ -15,7 +15,7 @@ export interface QueryEditorProps {
   clientSessionId?: string;
   completionContextVersion?: number;
   databaseType?: DatabaseType;
-  dialect?: "mysql" | "postgres" | "sqlserver";
+  dialect?: "mysql";
   syntaxDialect?: CodeMirrorSqlDialectName;
   formatDialect?: SqlFormatDialect;
   formatRequestId?: number;

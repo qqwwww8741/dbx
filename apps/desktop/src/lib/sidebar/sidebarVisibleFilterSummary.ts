@@ -1,6 +1,5 @@
 import type { ConnectionConfig } from "@/types/database";
 import { connectionUsesVisibleSchemaFilter, databaseNameMatchesVisiblePatterns, filterDatabaseNamesForVisiblePicker, filterSchemaNamesForVisiblePicker, normalizeVisibleDatabaseSelection, visibleDatabasePatternsAreEnabled } from "@/lib/database/visibleDatabases";
-import { nacosNamespaceIdentity } from "@/lib/nacos/nacosNamespaceVisibility";
 
 type SidebarVisibleFilterConnection = Pick<ConnectionConfig, "database" | "db_type" | "driver_profile" | "show_system_schemas" | "username" | "visible_databases" | "visible_database_patterns" | "visible_schemas">;
 
@@ -15,7 +14,7 @@ export function connectionHasConfiguredSidebarVisibleFilter(connection: SidebarV
   if (connectionUsesVisibleSchemaFilter(connection)) {
     return Array.isArray(connection.visible_schemas?.[connection.database || ""]);
   }
-  return Array.isArray(connection.visible_databases) || (connection.db_type !== "nacos" && visibleDatabasePatternsAreEnabled(connection.visible_database_patterns));
+  return Array.isArray(connection.visible_databases) || visibleDatabasePatternsAreEnabled(connection.visible_database_patterns);
 }
 
 export function sidebarVisibleFilterSummary(connection: SidebarVisibleFilterConnection, objectNames?: readonly string[]): SidebarVisibleFilterSummary {
@@ -48,18 +47,4 @@ export function sidebarVisibleFilterSummary(connection: SidebarVisibleFilterConn
     selected: selectedNames.length,
     total,
   };
-}
-
-export function nacosVisibleNamespaceSummary(connection: Pick<ConnectionConfig, "visible_databases">, namespaceIds?: readonly string[]): SidebarVisibleFilterSummary {
-  if (!namespaceIds) return { mode: "namespace", isActive: false, selected: null, total: null };
-
-  const identities = [...new Set(namespaceIds.map(nacosNamespaceIdentity))];
-  const total = identities.length;
-  if (!Array.isArray(connection.visible_databases)) {
-    return { mode: "namespace", isActive: false, selected: total, total };
-  }
-
-  const selected = new Set(connection.visible_databases.map(nacosNamespaceIdentity));
-  const selectedCount = identities.filter((identity) => selected.has(identity)).length;
-  return { mode: "namespace", isActive: selectedCount < total, selected: selectedCount, total };
 }

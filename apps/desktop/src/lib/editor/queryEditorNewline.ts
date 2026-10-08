@@ -15,21 +15,12 @@ function trailingStatementTerminator(state: EditorState): number | null {
   return line.from + match.index;
 }
 
-function sqlServerBatchStartsRoutine(sql: string): boolean {
-  const goLine = /^[ \t]*GO(?:[ \t]+\d+)?[ \t]*(?:\r\n|\r|\n|$)/gim;
-  let batchStart = 0;
-  for (const match of sql.matchAll(goLine)) batchStart = (match.index ?? 0) + match[0].length;
-
-  const batch = sql.slice(batchStart).replace(/^(?:\s|--[^\r\n]*(?:\r\n|\r|\n|$)|\/\*[\s\S]*?\*\/)+/u, "");
-  return /^(?:CREATE(?:\s+OR\s+ALTER)?|ALTER)\s+(?:PROC(?:EDURE)?|FUNCTION|TRIGGER)\b/iu.test(batch);
-}
-
 export function shouldStartNextSqlStatementAtColumnZero(state: EditorState, databaseType?: DatabaseType): boolean {
   const terminator = trailingStatementTerminator(state);
   if (terminator === null) return false;
 
   const throughTerminator = state.sliceDoc(0, terminator + 1);
-  if (databaseType === "sqlserver" && sqlServerBatchStartsRoutine(throughTerminator)) return false;
+  {}
 
   // Appending one complete sentinel statement lets the shared splitter decide
   // whether this semicolon closes a top-level statement or is still inside a

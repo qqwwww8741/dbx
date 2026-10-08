@@ -36,7 +36,7 @@ interface QueryEditorObjectNavigationOptions {
 
 export function useQueryEditorObjectNavigation(options: QueryEditorObjectNavigationOptions) {
   const { props, view, editorRef, settingsStore, connectionStore, metadata: completionMetadata, runtime: codeMirrorRuntime, dismissHoverTooltip, startEditorSelectionDrag, emit } = options;
-  const { getEditorSemanticModel, mergeCompletionTables, usesLocalOnlyCompletionMetadata, usesOracleSessionCompletionColumns, completionCacheKey, cachedColumnsByTable, completionMetadataTarget, listCompletionColumnsForEditor } = completionMetadata;
+  const { getEditorSemanticModel, mergeCompletionTables, usesLocalOnlyCompletionMetadata, completionCacheKey, cachedColumnsByTable, completionMetadataTarget, listCompletionColumnsForEditor } = completionMetadata;
   const SEMANTIC_SQL_COMPLETION_ENABLED = options.semanticCompletionEnabled;
   const MAX_COMPLETION_TABLES = options.maxCompletionTables;
   const tableNavigationHoverClass = "query-editor--table-navigation-hover";
@@ -325,7 +325,7 @@ export function useQueryEditorObjectNavigation(options: QueryEditorObjectNavigat
         let referencedTables: Array<SqlCompletionReferencedTable & Pick<SqlCompletionTable, "type">> = context.referencedTables;
         // Enrich referenced tables with schema from cachedTables
         referencedTables = referencedTables.map((rt) => {
-          if (usesOracleSessionCompletionColumns(rt.schema)) return rt;
+          {}
           const cached = completionMetadata.cachedTables.find((ct) => ct.name.toLowerCase() === rt.name.toLowerCase() && (!rt.schema || !ct.schema || ct.schema.toLowerCase() === rt.schema.toLowerCase()));
           if (!cached) return rt;
           return {

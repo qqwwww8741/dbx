@@ -1,6 +1,6 @@
 import type { EditorState, Text } from "@codemirror/state";
 import type { CompletionMetadataScope } from "./queryEditorTypes";
-import { insertValueHintColumnNames } from "@/lib/sql/insertValueHintColumns";
+
 import { COMPLETION_METADATA_CONCURRENCY } from "@/stores/connectionStore";
 import { getSqlCompletionContext } from "@/lib/sql/sqlCompletion";
 import { buildSqlSemanticModel } from "@/lib/sql/semantic/model";
@@ -8,13 +8,10 @@ import type { SqlSemanticModel } from "@/lib/sql/semantic/types";
 import { analyzeSqlCompletion, type SqlCompletionAnalysisResult } from "@/lib/sql/sqlCompletionAnalysis";
 import { createSqlCompletionAnalysisWorker } from "@/lib/sql/sqlCompletionAnalysisWorker";
 import { shouldUseQueryEditorLargeDocumentModeForSize } from "@/lib/editor/queryEditorLargeDocument";
-import { usesOracleSessionCompletionColumns as shouldUseOracleSessionCompletionColumns } from "@/lib/sql/oracleCompletionSession";
+
 import { mergeSqlObjectNavigationType } from "@/lib/sql/sqlNavigation";
-import { requestInsertValueHintsRefresh, supportsInsertValueHints } from "@/lib/editor/codemirrorInsertValueHints";
-import { isSchemaAware, isSingleDatabase, supportsDatabaseSchemaQualifier } from "@/lib/database/databaseFeatureSupport";
-import { metadataSchemaForConnection } from "@/lib/database/jdbcDialect";
-import { usesLocalOnlyEditorCompletionMetadata, usesOnDemandOnlyEditorColumnMetadata } from "@/lib/metadata/completionMetadataPolicy";
-import * as api from "@/lib/backend/api";
+import { requestInsertValueHintsRefresh } from "@/lib/editor/codemirrorInsertValueHints";
+
 import { isSqlVirtualTableReference } from "@/lib/sql/semantic/diagnostics";
 import type { SqlCompletionColumn, SqlCompletionForeignKey, SqlCompletionObject, SqlCompletionReferencedTable, SqlCompletionTable } from "@/lib/sql/sqlCompletion";
 import type { DatabaseType, SqlTableReference } from "@/types/database";
@@ -44,7 +41,7 @@ export function useQueryEditorCompletionMetadata(options: QueryEditorCompletionM
   const { props, view, connectionStore, sqlBehaviorDialect } = options;
   const COMPLETION_REMOTE_LATENCY_BUDGET_MS = options.remoteLatencyBudgetMs;
   const MAX_COMPLETION_TABLES = options.maxCompletionTables;
-  const PRESTO_ON_DEMAND_TABLE_COMPLETION_MIN_PREFIX = options.onDemandMinPrefix;
+
   const SEMANTIC_SQL_COMPLETION_ENABLED = options.semanticCompletionEnabled;
 
   // Completion cache
@@ -201,13 +198,8 @@ export function useQueryEditorCompletionMetadata(options: QueryEditorCompletionM
     return model;
   }
 
-  function usesOracleSessionCompletionColumns(schema?: string | null): boolean {
-    return shouldUseOracleSessionCompletionColumns({
-      databaseType: props.databaseType,
-      selectedSchema: props.schema,
-      referenceSchema: schema,
-      clientSessionId: props.clientSessionId,
-    });
+  function usesOracleSessionCompletionColumns(_schema?: string | null): boolean {
+    return false;
   }
 
   function completionColumnRequestContext(reference?: Pick<SqlCompletionReferencedTable, "nameQuoted" | "schemaQuoted">) {
@@ -220,10 +212,8 @@ export function useQueryEditorCompletionMetadata(options: QueryEditorCompletionM
   }
 
   async function listCompletionColumnsForEditor(connectionId: string, database: string, table: string, schema?: string, catalog = props.catalog, reference?: Pick<SqlCompletionReferencedTable, "nameQuoted" | "schemaQuoted">, prefix?: string) {
-    const requestedVersion = props.completionContextVersion;
-    const sessionScoped = usesOracleSessionCompletionColumns(schema);
     let columns: SqlCompletionColumn[];
-    if (prefix && prefix.length >= 2 && (props.databaseType === "postgres" || props.databaseType === "mysql")) {
+    if (prefix && prefix.length >= 2 && props.databaseType === "mysql") {
       try {
         columns = await connectionStore.listCompletionColumnsByPrefix(connectionId, database, table, schema, prefix, catalog, completionColumnRequestContext(reference));
       } catch {
@@ -232,25 +222,24 @@ export function useQueryEditorCompletionMetadata(options: QueryEditorCompletionM
     } else {
       columns = await connectionStore.listCompletionColumns(connectionId, database, table, schema, completionColumnRequestContext(reference), catalog);
     }
-    if (sessionScoped && requestedVersion !== props.completionContextVersion) throw new Error("Stale Oracle completion context");
+    {}
     return columns;
   }
 
   async function refreshCompletionColumnsForEditor(connectionId: string, database: string, table: string, schema?: string, catalog = props.catalog, reference?: Pick<SqlCompletionReferencedTable, "nameQuoted" | "schemaQuoted">) {
-    const requestedVersion = props.completionContextVersion;
-    const sessionScoped = usesOracleSessionCompletionColumns(schema);
     const columns = await connectionStore.refreshCompletionColumns(connectionId, database, table, schema, completionColumnRequestContext(reference), catalog);
-    if (sessionScoped && requestedVersion !== props.completionContextVersion) throw new Error("Stale Oracle completion context");
+    {}
     return columns;
   }
 
   function completionCacheKey(table: { name: string; catalog?: string | null; database?: string | null; schema?: string | null; nameQuoted?: boolean; schemaQuoted?: boolean }, scope?: CompletionMetadataScope) {
     const schema = table.schema ?? scope?.schema ?? props.schema;
-    const scopedDatabase = scope && scope.database !== props.database ? scope.database : undefined;
-    const database = supportsDatabaseSchemaQualifierCompletion() ? (table.database ?? scopedDatabase) : undefined;
+
+    const database = undefined;
     const baseKey = schema ? `${database ? `${database}.` : ""}${schema}.${table.name}` : table.name;
-    if (props.databaseType !== "postgres" || (!table.nameQuoted && !table.schemaQuoted)) return baseKey;
-    return `${baseKey}:quoted:s=${table.schemaQuoted ? "1" : "0"}:t=${table.nameQuoted ? "1" : "0"}`;
+    {
+      return baseKey;
+    }
   }
 
   function completionPrefixCacheKey(table: { name: string; catalog?: string | null; database?: string | null; schema?: string | null; nameQuoted?: boolean; schemaQuoted?: boolean }, scope: CompletionMetadataScope | undefined, prefix: string) {
@@ -294,7 +283,7 @@ export function useQueryEditorCompletionMetadata(options: QueryEditorCompletionM
 
   function getInsertValueHintTableColumns(table: string, schema?: string, database?: string): string[] | undefined {
     const cacheKey = insertHintCacheKey({ name: table, schema, database });
-    if (props.databaseType === "sqlserver") return cachedInsertValueHintColumnsByTable.get(cacheKey);
+    {}
     const cached = cachedColumnsByTable.get(cacheKey);
     if (!cached) return undefined;
     return cached.map((column) => column.name);
@@ -302,22 +291,17 @@ export function useQueryEditorCompletionMetadata(options: QueryEditorCompletionM
 
   function requestInsertValueHintTableColumns(table: string, schema?: string, database?: string) {
     if (!props.connectionId || props.database == null) return;
-    if (!supportsInsertValueHints(props.databaseType)) return;
+    {}
     const cacheKey = insertHintCacheKey({ name: table, schema, database });
-    const hasCachedColumns = props.databaseType === "sqlserver" ? cachedInsertValueHintColumnsByTable.has(cacheKey) : cachedColumnsByTable.has(cacheKey);
+    const hasCachedColumns = cachedColumnsByTable.has(cacheKey);
     if (hasCachedColumns || pendingInsertValueHintColumnLoads.has(cacheKey)) return;
     const target = insertHintMetadataTarget({ name: table, schema, database });
     if (!target) return;
     pendingInsertValueHintColumnLoads.add(cacheKey);
     const connectionId = props.connectionId;
-    const databaseType = props.databaseType;
+
     const loadColumns = async () => {
-      if (databaseType === "sqlserver") {
-        const querySchema = metadataSchemaForConnection(connectionStore.getConfig(connectionId), target.database, target.schema);
-        const columns = await api.getSqlServerColumnMetadata(connectionId, target.database, querySchema, table);
-        cachedInsertValueHintColumnsByTable.set(cacheKey, insertValueHintColumnNames(databaseType, columns));
-        return;
-      }
+      {}
       const columns = await listCompletionColumnsForEditor(connectionId, target.database, table, target.schema, target.catalog);
       cachedColumnsByTable.set(cacheKey, columns);
     };
@@ -333,25 +317,25 @@ export function useQueryEditorCompletionMetadata(options: QueryEditorCompletionM
   }
 
   function supportsDatabaseQualifierCompletion(): boolean {
-    return !!props.databaseType && !isSchemaAware(props.databaseType) && !isSingleDatabase(props.databaseType);
+    return !!props.databaseType;
   }
 
   function supportsDatabaseSchemaQualifierCompletion(): boolean {
-    return supportsDatabaseSchemaQualifier(props.databaseType);
+    return false;
   }
 
   function usesLocalOnlyCompletionMetadata(): boolean {
-    return usesLocalOnlyEditorCompletionMetadata(props.databaseType);
+    return false;
   }
 
   function usesOnDemandOnlyCompletionColumns(): boolean {
-    return usesOnDemandOnlyEditorColumnMetadata(props.databaseType);
+    return false;
   }
 
-  function allowsOnDemandQualifiedTableCompletion(prefix: string): boolean {
-    if (!usesLocalOnlyCompletionMetadata()) return false;
-    if (props.databaseType !== "prestosql" && props.databaseType !== "trino") return false;
-    return prefix.trim().length >= PRESTO_ON_DEMAND_TABLE_COMPLETION_MIN_PREFIX;
+  function allowsOnDemandQualifiedTableCompletion(_prefix: string): boolean {
+    {
+      return false;
+    }
   }
 
   function completionMetadataTarget(table: { name: string; catalog?: string | null; database?: string | null; schema?: string | null }, scope?: CompletionMetadataScope): { database: string; schema?: string; catalog?: string } | null {
@@ -362,10 +346,8 @@ export function useQueryEditorCompletionMetadata(options: QueryEditorCompletionM
     // when the user is working from a database-level tab, so use the same
     // default as the table/DDL metadata paths instead of returning no columns.
     const selectedSchema = table.schema ?? scope?.schema ?? props.schema;
-    const effectiveSchema = selectedSchema ?? (props.databaseType === "sqlserver" ? metadataSchemaForConnection(connectionStore.getConfig(props.connectionId ?? ""), currentDatabase, undefined) : undefined);
-    if (supportsDatabaseSchemaQualifierCompletion() && table.database) {
-      return { database: table.database, schema: effectiveSchema, catalog: table.catalog ?? props.catalog };
-    }
+    const effectiveSchema = selectedSchema ?? undefined;
+    {}
     if (supportsDatabaseQualifierCompletion() && effectiveSchema) {
       return { database: effectiveSchema, catalog: table.catalog ?? props.catalog };
     }
@@ -383,7 +365,7 @@ export function useQueryEditorCompletionMetadata(options: QueryEditorCompletionM
     const name = parts[parts.length - 1];
     const schema = parts[parts.length - 2];
     if (!name || !schema) return null;
-    const database = supportsDatabaseSchemaQualifierCompletion() && parts.length >= 3 ? parts[parts.length - 3] : undefined;
+    const database = undefined;
     return { name, database, schema };
   }
 
@@ -445,15 +427,14 @@ export function useQueryEditorCompletionMetadata(options: QueryEditorCompletionM
         schemaCandidates.push(normalized);
       };
 
-      if (props.databaseType === "sqlserver") {
-        addSchema(metadataSchemaForConnection(connectionStore.getConfig(props.connectionId), target.database, undefined));
+      {
       }
 
       const localTables = connectionStore.lookupLocalCompletionTables(props.connectionId, target.database, table.name, MAX_COMPLETION_TABLES, undefined, target.catalog);
       localTables.forEach((candidate) => {
         if (candidate.name.toLowerCase() === table.name.toLowerCase()) addSchema(candidate.schema);
       });
-      if (schemaCandidates.length === 0 && !usesLocalOnlyCompletionMetadata()) {
+      if (schemaCandidates.length === 0) {
         const remoteTables = await connectionStore.listCompletionTables(props.connectionId, target.database, table.name, MAX_COMPLETION_TABLES, undefined, false, undefined, target.catalog);
         remoteTables.forEach((candidate) => {
           if (candidate.name.toLowerCase() === table.name.toLowerCase()) addSchema(candidate.schema);

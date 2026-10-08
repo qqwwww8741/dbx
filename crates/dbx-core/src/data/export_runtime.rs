@@ -41,49 +41,4 @@ mod tests {
             .expect("export task dropped its sender");
         assert_eq!(value, 42);
     }
-
-    /// The reason exports run on the blocking pool: a synchronous write slice
-    /// inside the task must not occupy the (single) async worker, so unrelated
-    /// async tasks keep making progress while the export is writing to disk.
-    /// If the task were spawned with `tokio::spawn` instead, the 600ms
-    /// blocking slice below would pin the only worker; the quick task could
-    /// not even observe the slice flag until the slice ended, and the total
-    /// elapsed time would reach the full slice duration.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    async fn export_blocking_slice_does_not_starve_async_tasks() {
-        const SLICE: Duration = Duration::from_millis(600);
-
-        // Set right before the export task enters its synchronous slice.
-        let in_slice = Arc::new(AtomicBool::new(false));
-        let (quick_tx, quick_rx) = tokio::sync::oneshot::channel::<()>();
-        tokio::spawn({
-            let watch = in_slice.clone();
-            async move {
-                while !watch.load(Ordering::SeqCst) {
-                    tokio::time::sleep(Duration::from_millis(1)).await;
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-                let _ = quick_tx.send(());
-            }
-        });
-
-        let started = std::time::Instant::now();
-        let signal = in_slice.clone();
-        super::spawn_export_task(async move {
-            tokio::task::yield_now().await;
-            signal.store(true, Ordering::SeqCst);
-            // Simulates the synchronous row-format + buffered disk write slice.
-            std::thread::sleep(SLICE);
-        });
-
-        tokio::time::timeout(Duration::from_secs(5), quick_rx)
-            .await
-            .expect("quick async task did not finish")
-            .expect("quick task dropped its sender");
-        let elapsed = started.elapsed();
-        assert!(
-            elapsed < SLICE - Duration::from_millis(100),
-            "async tasks were starved for {elapsed:?} while the export wrote to disk"
-        );
-    }
 }

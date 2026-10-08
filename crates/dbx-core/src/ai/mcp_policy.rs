@@ -174,11 +174,7 @@ fn apply_ceiling(current: (bool, bool), ceiling: (bool, bool)) -> (bool, bool) {
 /// modes, connection read-only protection and production protection all remain
 /// upper bounds on top of this switch.
 pub fn connection_allows_salesforce_dml(policy: &McpGlobalPolicy, connection_id: &str) -> bool {
-    policy
-        .connection_policies
-        .iter()
-        .find(|rule| rule.connection_id == connection_id)
-        .is_some_and(|rule| rule.allow_salesforce_dml && !rule.read_only)
+    false
 }
 
 /// Reject qualified SQL references when database-specific execution rules are
@@ -206,62 +202,6 @@ pub fn ensure_sql_database_execution_scope(
         "DATABASE_EXECUTION_POLICY_OUT_OF_SCOPE: SQL cannot reference another database while database-specific MCP execution permissions are configured."
             .to_string(),
     )
-}
-
-/// Return databases targeted by MongoDB `$out` and `$merge` stages.
-pub fn mongo_pipeline_output_databases(pipeline_json: &str, active_database: &str) -> Result<Vec<String>, String> {
-    let stages = serde_json::from_str::<serde_json::Value>(pipeline_json)
-        .ok()
-        .and_then(|value| value.as_array().cloned())
-        .ok_or_else(|| "QUERY_ERROR: MongoDB aggregate pipeline must be a JSON array.".to_string())?;
-    let mut databases = Vec::new();
-    for stage in stages {
-        let Some(stage) = stage.as_object() else { continue };
-        for key in ["$out", "$merge"] {
-            let Some(target) = stage.get(key) else { continue };
-            let database = match target {
-                serde_json::Value::String(_) => active_database.to_string(),
-                serde_json::Value::Object(target) => target
-                    .get("db")
-                    .or_else(|| {
-                        target.get("into").and_then(serde_json::Value::as_object).and_then(|into| into.get("db"))
-                    })
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or(active_database)
-                    .to_string(),
-                _ => return Err("QUERY_ERROR: MongoDB aggregate output target must be a string or object.".to_string()),
-            };
-            databases.push(database);
-        }
-    }
-    Ok(databases)
-}
-
-/// Reject cross-database MongoDB writes while database-specific rules exist.
-pub fn ensure_mongo_database_execution_scope(
-    policy: &McpGlobalPolicy,
-    connection_id: &str,
-    active_database: &str,
-    pipeline_json: &str,
-) -> Result<(), String> {
-    let has_database_policies = policy
-        .connection_policies
-        .iter()
-        .find(|rule| rule.connection_id == connection_id)
-        .is_some_and(|rule| !rule.database_policies.is_empty());
-    if !has_database_policies {
-        return Ok(());
-    }
-    if mongo_pipeline_output_databases(pipeline_json, active_database)?
-        .into_iter()
-        .any(|database| database != active_database)
-    {
-        return Err(
-            "DATABASE_EXECUTION_POLICY_OUT_OF_SCOPE: MongoDB aggregation cannot target another database while database-specific MCP execution permissions are configured."
-                .to_string(),
-        );
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -334,27 +274,5 @@ mod tests {
     fn blank_database_uses_connection_default() {
         assert_eq!(resolve_database("  ", Some("sample")), "sample");
         assert_eq!(resolve_database("analytics", Some("sample")), "analytics");
-    }
-
-    #[test]
-    fn salesforce_dml_needs_an_explicit_connection_opt_in() {
-        // No rule for the connection at all → off, whatever the global mode says.
-        let mut open = policy(Some(MCP_EXECUTION_POLICY_VERSION));
-        open.read_only = false;
-        assert!(!connection_allows_salesforce_dml(&open, "other"));
-        assert!(!connection_allows_salesforce_dml(&open, "conn"));
-
-        open.connection_policies[0].allow_salesforce_dml = true;
-        assert!(connection_allows_salesforce_dml(&open, "conn"));
-    }
-
-    #[test]
-    fn salesforce_dml_opt_in_is_void_on_a_read_only_connection_rule() {
-        let mut policy = policy(Some(MCP_EXECUTION_POLICY_VERSION));
-        policy.connection_policies[0].allow_salesforce_dml = true;
-        policy.connection_policies[0].read_only = true;
-        // `normalized()` already clears the flag for read-only rules; this keeps a
-        // hand-built or legacy policy from sneaking a write through.
-        assert!(!connection_allows_salesforce_dml(&policy, "conn"));
     }
 }

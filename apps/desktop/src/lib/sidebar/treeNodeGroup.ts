@@ -1,7 +1,6 @@
 import type { TreeNodeType } from "@/types/database";
 
 const treeGroupNodeTypes = new Set<TreeNodeType>([
-  "oracle-db-links",
   "group-columns",
   "group-indexes",
   "group-fkeys",
@@ -24,8 +23,7 @@ const treeGroupNodeTypes = new Set<TreeNodeType>([
   "group-partitions",
   "group-extensions",
   "group-event-triggers",
-  "group-tablespaces",
-  "group-datafiles",
+
   "type-attributes",
   "type-methods",
 ]);

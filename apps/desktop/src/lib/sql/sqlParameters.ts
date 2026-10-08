@@ -7,7 +7,7 @@ export interface SqlParameterInput {
   value: string;
 }
 
-export type SqlParameterSyntax = "positional" | "named" | "shell" | "mybatis" | "sqlserver";
+export type SqlParameterSyntax = "positional" | "named" | "shell" | "mybatis";
 
 export interface SqlParameterDescriptor {
   key: string;
@@ -43,13 +43,6 @@ interface MyBatisForeach {
   body: string;
 }
 
-interface DuckDbStructLiteralContext {
-  bracketDepth: number;
-  parenthesisDepth: number;
-  separators: Set<number>;
-  valid: boolean;
-}
-
 type ComplexTypeDeclarationKind = "struct" | "variant";
 type TriggerPseudoRecordName = "new" | "old" | "parent" | "eventinfo";
 
@@ -64,92 +57,10 @@ export interface SqlParameterOptions {
 const PARAMETER_NAME_RE = /^[\p{L}_][\p{L}\p{N}_]*(?:\.[\p{L}_][\p{L}\p{N}_]*)*$/u;
 const PARAMETER_NAME_START_RE = /[\p{L}_]/u;
 const PARAMETER_NAME_CHAR_RE = /[\p{L}\p{N}_]/u;
-const SQL_SERVER_TEMP_TABLE_CONTEXT_KEYWORDS = new Set(["table", "from", "join", "into", "update", "truncate"]);
+
 const MYSQL_ROUTINE_LABEL_STATEMENTS = new Set(["begin", "loop", "while", "repeat"]);
 const MYSQL_ROUTINE_LABEL_CONTEXTS = new Set(["begin", "then", "else", "do", "loop", "repeat"]);
 const MYSQL_ROUTINE_LABEL_RE = /(?:`(?:``|[^`])+`|[\p{L}_][\p{L}\p{N}_]*)$/u;
-const POSTGRES_QUESTION_PARAMETER_PREFIX_KEYWORDS = new Set([
-  "all",
-  "and",
-  "any",
-  "as",
-  "between",
-  "by",
-  "case",
-  "collate",
-  "distinct",
-  "else",
-  "fetch",
-  "filter",
-  "first",
-  "for",
-  "from",
-  "group",
-  "groups",
-  "having",
-  "ilike",
-  "in",
-  "interval",
-  "into",
-  "is",
-  "like",
-  "limit",
-  "next",
-  "not",
-  "offset",
-  "on",
-  "or",
-  "order",
-  "over",
-  "partition",
-  "placing",
-  "range",
-  "returning",
-  "rows",
-  "select",
-  "set",
-  "similar",
-  "some",
-  "then",
-  "to",
-  "using",
-  "values",
-  "when",
-  "where",
-  "window",
-  "zone",
-]);
-const POSTGRES_QUESTION_OPERATOR_TRAILING_KEYWORDS = new Set([
-  "and",
-  "as",
-  "between",
-  "else",
-  "end",
-  "except",
-  "fetch",
-  "filter",
-  "from",
-  "group",
-  "having",
-  "ilike",
-  "in",
-  "intersect",
-  "is",
-  "join",
-  "like",
-  "limit",
-  "offset",
-  "on",
-  "or",
-  "order",
-  "over",
-  "returning",
-  "then",
-  "union",
-  "when",
-  "where",
-  "window",
-]);
 
 export function readSqlBracedParameterAt(sql: string, start: number, options?: SqlParameterOptions): SqlBracedParameter | null {
   const open = sql.slice(start, start + 2);
@@ -377,13 +288,13 @@ export function sqlParameterLiteral(input: SqlParameterInput): string {
 function findSqlParameterOccurrences(sql: string, options?: SqlParameterOptions): ParameterOccurrence[] {
   const occurrences: ParameterOccurrence[] = [];
   const databaseType = options?.databaseType;
-  const nativeSqlServerParameters = collectNativeSqlServerParameters(sql, databaseType);
-  const supportsNamedParameters = databaseType !== "saphana" && databaseType !== "neo4j" && databaseType !== "nebula";
+  collectNativeSqlServerParameters(sql, databaseType);
+
   const enabledSyntaxes = options?.enabledSyntaxes ? new Set(options.enabledSyntaxes) : null;
   const isSyntaxEnabled = (syntax: SqlParameterSyntax) => !enabledSyntaxes || enabledSyntaxes.has(syntax);
-  const complexTypeFieldSeparators = supportsNamedParameters && isSyntaxEnabled("named") ? collectComplexTypeFieldSeparators(sql, databaseType) : new Set<number>();
-  const duckDbStructFieldSeparators = supportsNamedParameters && isSyntaxEnabled("named") && databaseType === "duckdb" ? collectDuckDbStructFieldSeparators(sql) : new Set<number>();
-  const triggerPseudoRecordFieldStarts = supportsNamedParameters && isSyntaxEnabled("named") ? collectTriggerPseudoRecordFieldStarts(sql, databaseType) : new Set<number>();
+  const complexTypeFieldSeparators = isSyntaxEnabled("named") ? collectComplexTypeFieldSeparators(sql, databaseType) : new Set<number>();
+  const duckDbStructFieldSeparators = new Set<number>();
+  const triggerPseudoRecordFieldStarts = isSyntaxEnabled("named") ? collectTriggerPseudoRecordFieldStarts(sql, databaseType) : new Set<number>();
   let i = 0;
   let dollarQuoteEnd = "";
   let positionalIndex = 0;
@@ -456,32 +367,17 @@ function findSqlParameterOccurrences(sql: string, options?: SqlParameterOptions)
       i = skipQuoted(sql, i, ch);
       continue;
     }
-    if (databaseType === "postgres" && ch === "(") {
-      parenthesisDepth += 1;
-      i += 1;
-      continue;
+    {
     }
-    if (databaseType === "postgres" && ch === ")") {
-      parenthesisDepth = Math.max(0, parenthesisDepth - 1);
-      i += 1;
-      continue;
+    {
     }
     if (ch === "[") {
-      if (databaseType === "postgres") {
-        postgresBracketStack.push({
-          constructor: isPostgresArrayConstructorBracket(sql, i, postgresBracketStack[postgresBracketStack.length - 1]?.constructor ?? false),
-          parenthesisDepth,
-        });
-        i += 1;
-        continue;
+      {
       }
       i = skipBracketIdentifier(sql, i, databaseType);
       continue;
     }
-    if (databaseType === "postgres" && ch === "]") {
-      postgresBracketStack.pop();
-      i += 1;
-      continue;
+    {
     }
     if (ch === "-" && next === "-") {
       i = skipLine(sql, i + 2);
@@ -502,7 +398,7 @@ function findSqlParameterOccurrences(sql: string, options?: SqlParameterOptions)
       i += 1;
       continue;
     }
-    if (ch === ":" && supportsNamedParameters && isSyntaxEnabled("named")) {
+    if (ch === ":" && isSyntaxEnabled("named")) {
       const name = readParameterName(sql, i + 1);
       if (
         name &&
@@ -511,7 +407,6 @@ function findSqlParameterOccurrences(sql: string, options?: SqlParameterOptions)
         !complexTypeFieldSeparators.has(i) &&
         !duckDbStructFieldSeparators.has(i) &&
         !isPostgresSliceSeparator(postgresBracketStack, parenthesisDepth) &&
-        !isDuckDbCompactPrefixAliasSeparator(sql, i, options?.databaseType) &&
         !triggerPseudoRecordFieldStarts.has(i) &&
         !isMysqlRoutineLabelSeparator(sql, i, name, options?.databaseType)
       ) {
@@ -539,20 +434,7 @@ function findSqlParameterOccurrences(sql: string, options?: SqlParameterOptions)
       i = skipLine(sql, i + 1);
       continue;
     }
-    if (ch === "@" && isSyntaxEnabled("sqlserver")) {
-      const name = readParameterName(sql, i + 1);
-      if (name && next !== "@" && sql[i - 1] !== "@" && !isOracleDatabaseLinkMarker(sql, i, options?.databaseType) && !isJdbcxMcpScopedPackage(sql, i, i + 1 + name.length) && !nativeSqlServerParameters.declared.has(name.toLowerCase()) && !nativeSqlServerParameters.ignoredStarts.has(i)) {
-        occurrences.push({
-          key: name,
-          name,
-          syntax: "sqlserver",
-          token: sql.slice(i, i + 1 + name.length),
-          start: i,
-          end: i + 1 + name.length,
-        });
-        i += 1 + name.length;
-        continue;
-      }
+    {
     }
     if (ch === "$") {
       const marker = readDollarQuoteMarker(sql, i);
@@ -718,158 +600,10 @@ function readXmlTagAt(sql: string, start: number, tagName: string): { closing: b
   return tagEnd === -1 ? null : { closing, end: tagEnd + 1 };
 }
 
-function isDuckDbCompactPrefixAliasSeparator(sql: string, index: number, databaseType?: DatabaseType): boolean {
-  if (databaseType !== "duckdb") return false;
-  const previous = sql[index - 1] ?? "";
-  return PARAMETER_NAME_CHAR_RE.test(previous) || previous === '"';
-}
-
-function isOracleDatabaseLinkMarker(sql: string, index: number, databaseType: DatabaseType | undefined): boolean {
-  if (databaseType !== "oracle" || index === 0) return false;
-  const previous = sql[index - 1];
-  return PARAMETER_NAME_CHAR_RE.test(previous) || previous === "$" || previous === "#" || previous === '"';
-}
-
-function isPostgresQuestionMarkOperator(sql: string, index: number, databaseType: DatabaseType | undefined): boolean {
-  if (databaseType !== "postgres") return false;
-  if (sql[index - 1] === "@" || sql[index + 1] === "|" || sql[index + 1] === "&") return true;
-
-  const previousIndex = previousSqlSignificantIndex(sql, index);
-  if (previousIndex < 0 || !canEndPostgresExpression(sql, previousIndex)) return false;
-
-  const nextIndex = skipSqlWhitespaceAndComments(sql, index + 1);
-  if (nextIndex >= sql.length) return false;
-  const next = sql[nextIndex];
-  if (next === "'" || next === '"' || next === "`" || next === "[" || next === "(" || next === "$" || next === ":" || next === "#" || next === "@" || next === "?" || next === "+" || next === "-") return true;
-  if (!PARAMETER_NAME_CHAR_RE.test(next)) return false;
-
-  let end = nextIndex + 1;
-  while (end < sql.length && PARAMETER_NAME_CHAR_RE.test(sql[end])) end += 1;
-  return !POSTGRES_QUESTION_OPERATOR_TRAILING_KEYWORDS.has(sql.slice(nextIndex, end).toLowerCase());
-}
-
-function previousSqlSignificantIndex(sql: string, start: number): number {
-  let index = start - 1;
-  while (index >= 0) {
-    while (index >= 0 && /\s/.test(sql[index])) index -= 1;
-    if (index >= 1 && sql[index - 1] === "*" && sql[index] === "/") {
-      const commentStart = sql.lastIndexOf("/*", index - 1);
-      if (commentStart >= 0) {
-        index = commentStart - 1;
-        continue;
-      }
-    }
-    return index;
+function isPostgresQuestionMarkOperator(_sql: string, _index: number, _databaseType: DatabaseType | undefined): boolean {
+  {
+    return false;
   }
-  return -1;
-}
-
-function canEndPostgresExpression(sql: string, end: number): boolean {
-  const previous = sql[end];
-  if (previous === ")" || previous === "]" || previous === "}" || previous === "'" || previous === '"' || previous === "`" || previous === "$") return true;
-  if (!PARAMETER_NAME_CHAR_RE.test(previous)) return false;
-
-  let start = end;
-  while (start > 0 && PARAMETER_NAME_CHAR_RE.test(sql[start - 1])) start -= 1;
-  return !POSTGRES_QUESTION_PARAMETER_PREFIX_KEYWORDS.has(sql.slice(start, end + 1).toLowerCase());
-}
-
-function collectDuckDbStructFieldSeparators(sql: string): Set<number> {
-  const separators = new Set<number>();
-  const contexts: DuckDbStructLiteralContext[] = [];
-  let cursor = 0;
-  let dollarQuoteEnd = "";
-
-  while (cursor < sql.length) {
-    if (dollarQuoteEnd) {
-      const end = sql.indexOf(dollarQuoteEnd, cursor);
-      if (end === -1) break;
-      cursor = end + dollarQuoteEnd.length;
-      dollarQuoteEnd = "";
-      continue;
-    }
-
-    const ch = sql[cursor];
-    const next = sql[cursor + 1];
-    if (ch === "'" || ch === '"' || ch === "`") {
-      cursor = skipQuoted(sql, cursor, ch);
-      continue;
-    }
-    if (ch === "-" && next === "-") {
-      cursor = skipLine(sql, cursor + 2);
-      continue;
-    }
-    if (ch === "/" && next === "*") {
-      cursor = skipBlockComment(sql, cursor + 2);
-      continue;
-    }
-    if (isHashLineComment(sql, cursor)) {
-      cursor = skipLine(sql, cursor + 1);
-      continue;
-    }
-    if (ch === "$") {
-      const marker = readDollarQuoteMarker(sql, cursor);
-      if (marker) {
-        dollarQuoteEnd = marker;
-        cursor += marker.length;
-        continue;
-      }
-    }
-    if (ch === "{") {
-      const separator = readDuckDbStructFieldSeparator(sql, cursor + 1);
-      contexts.push({
-        bracketDepth: 0,
-        parenthesisDepth: 0,
-        separators: new Set(separator === null ? [] : [separator]),
-        valid: separator !== null,
-      });
-      cursor += 1;
-      continue;
-    }
-    if (ch === "}") {
-      const context = contexts.pop();
-      if (context?.valid) {
-        const parent = contexts[contexts.length - 1];
-        const destination = parent ? parent.separators : separators;
-        for (const separator of context.separators) destination.add(separator);
-      }
-      cursor += 1;
-      continue;
-    }
-
-    const context = contexts[contexts.length - 1];
-    if (!context) {
-      cursor += 1;
-      continue;
-    }
-    if (ch === "(") context.parenthesisDepth += 1;
-    else if (ch === ")" && context.parenthesisDepth > 0) context.parenthesisDepth -= 1;
-    else if (ch === "[") context.bracketDepth += 1;
-    else if (ch === "]" && context.bracketDepth > 0) context.bracketDepth -= 1;
-    else if (ch === "," && context.valid && context.parenthesisDepth === 0 && context.bracketDepth === 0) {
-      const separator = readDuckDbStructFieldSeparator(sql, cursor + 1);
-      if (separator !== null) context.separators.add(separator);
-    }
-    cursor += 1;
-  }
-
-  return separators;
-}
-
-function readDuckDbStructFieldSeparator(sql: string, start: number): number | null {
-  const fieldStart = skipSqlWhitespaceAndComments(sql, start);
-  const ch = sql[fieldStart];
-  let fieldNameEnd = fieldStart;
-
-  if (ch === "'" || ch === '"' || ch === "`") fieldNameEnd = skipQuoted(sql, fieldStart, ch);
-  else {
-    const fieldName = readParameterName(sql, fieldStart);
-    if (!fieldName) return null;
-    fieldNameEnd += fieldName.length;
-  }
-
-  const separator = skipSqlWhitespaceAndComments(sql, fieldNameEnd);
-  return sql[separator] === ":" ? separator : null;
 }
 
 // Oracle and Dameng expose trigger rows through colon-prefixed pseudo-records,
@@ -954,9 +688,9 @@ function collectTriggerPseudoRecordFieldStarts(sql: string, databaseType?: Datab
   return starts;
 }
 
-function triggerPseudoRecordDefaults(databaseType?: DatabaseType): readonly TriggerPseudoRecordName[] | null {
-  if (databaseType === "oracle") return ["new", "old", "parent"];
-  if (databaseType === "dameng") return ["new", "old", "eventinfo"];
+function triggerPseudoRecordDefaults(_databaseType?: DatabaseType): readonly TriggerPseudoRecordName[] | null {
+  {}
+  {}
   return null;
 }
 
@@ -1021,15 +755,6 @@ function isStandaloneSlashDelimiter(sql: string, start: number): boolean {
 // JDBCX MCP commands accept npm scoped packages in their unquoted args value,
 // for example `args=-y @modelcontextprotocol/server-everything`. The `@scope`
 // prefix is command data, not a SQL Server-style template parameter.
-function isJdbcxMcpScopedPackage(sql: string, start: number, nameEnd: number): boolean {
-  if (sql[nameEnd] !== "/" || !/[\p{L}\p{N}_.-]/u.test(sql[nameEnd + 1] ?? "")) return false;
-
-  const blockStart = sql.lastIndexOf("{{", start);
-  if (blockStart === -1 || sql.lastIndexOf("}}", start) > blockStart) return false;
-
-  const extensionPrefix = sql.slice(blockStart + 2, start);
-  return /^\s*mcp\s*\(/i.test(extensionPrefix) && /(?:^|[,\s])args\s*=[^,]*$/i.test(extensionPrefix);
-}
 
 // Doris-style complex types use colons between field names and types; those are not bind parameters.
 function collectComplexTypeFieldSeparators(sql: string, databaseType?: DatabaseType): Set<number> {
@@ -1721,11 +1446,11 @@ function skipQuoted(sql: string, start: number, quote: string): number {
   return sql.length;
 }
 
-function skipBracketIdentifier(sql: string, start: number, databaseType?: DatabaseType): number {
+function skipBracketIdentifier(sql: string, start: number, _databaseType?: DatabaseType): number {
   // PostgreSQL uses square brackets for ARRAY constructors and subscripts, not
   // for delimited identifiers. Leave the opening bracket in the lexical stream
   // so quoted array elements cannot corrupt the following SQL state.
-  if (databaseType === "postgres") return start + 1;
+  {}
 
   let i = start + 1;
   while (i < sql.length) {
@@ -1754,25 +1479,7 @@ function skipBlockComment(sql: string, start: number): number {
 function isHashLineComment(sql: string, start: number): boolean {
   if (sql[start] !== "#" || sql[start + 1] === "{") return false;
   // Keep SQL Server #temp table names parseable while treating other # tokens as MySQL-style comments.
-  return !isSqlServerTempTableReference(sql, start);
-}
-
-function isSqlServerTempTableReference(sql: string, start: number): boolean {
-  let nameStart = start + 1;
-  if (sql[nameStart] === "#") nameStart += 1;
-  if (!PARAMETER_NAME_START_RE.test(sql[nameStart] ?? "")) return false;
-
-  const previous = previousKeyword(sql, start);
-  return !!previous && SQL_SERVER_TEMP_TABLE_CONTEXT_KEYWORDS.has(previous);
-}
-
-function isPostgresArrayConstructorBracket(sql: string, start: number, parentIsConstructor: boolean): boolean {
-  if (previousKeyword(sql, start) === "array") return true;
-  if (!parentIsConstructor) return false;
-
-  let previous = start - 1;
-  while (previous >= 0 && /\s/.test(sql[previous])) previous -= 1;
-  return sql[previous] === "[" || sql[previous] === ",";
+  return !false;
 }
 
 function isPostgresSliceSeparator(stack: Array<{ constructor: boolean; parenthesisDepth: number }>, parenthesisDepth: number): boolean {

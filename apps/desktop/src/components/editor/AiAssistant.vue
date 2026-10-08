@@ -71,7 +71,7 @@ import { ACTIVE_SKILLS_TOTAL_MAX, type ReadUserSkill, type ReadUserSkillFailure,
 import { supportsAiAssistantContext } from "@/lib/database/databaseFeatureSupport";
 import ConnectionIcon from "@/components/icons/ConnectionIcon.vue";
 import ConnectionTreeSelect from "@/components/connection/ConnectionTreeSelect.vue";
-import SearchableSelect from "@/components/ui/searchable-select/SearchableSelect.vue";
+
 import { useQueryStore } from "@/stores/queryStore";
 import { useToast } from "@/composables/useToast";
 import { useNavigationTargets } from "@/composables/useNavigationTargets";
@@ -80,12 +80,9 @@ import {
   resolveAiDatabaseTarget,
   resolveAiMentionDatabase,
   resolveAiNamespaceSelection,
-  resolveDefaultAiSchema,
   aiDatabaseTypeForConnection,
-  aiSchemaSelectionSupported,
   formatSelectionDataLines,
   runAgentStream,
-  isVectorDbType,
   isValidActionForMode,
   isAutoActionSelection,
   defaultActionForMode,
@@ -167,20 +164,20 @@ import { buildAiAgentStepItems, formatAgentToolName, formatToolDurationMs, toolC
 import { createAiShikiCodeHighlighter, type AiCodeHighlighter } from "@/lib/ai/aiCodeHighlighter";
 import { createAiMessageRenderer } from "@/lib/ai/aiMessageRender";
 import { formatAiInlineMarkdown, handleAiMarkdownLinkClick } from "@/lib/ai/aiMarkdown";
-import { aiStream, aiCancelStream, resolveAiToolApproval, saveAiConversation, saveAiRun, saveAiRunState, loadAiConversations, loadAiRuns, deleteAiConversation, listSchemas, listTables, readUserSkills, type AiConversation, type AiRun, type AiRunStatus } from "@/lib/backend/api";
+import { aiStream, aiCancelStream, resolveAiToolApproval, saveAiConversation, saveAiRun, saveAiRunState, loadAiConversations, loadAiRuns, deleteAiConversation, listTables, readUserSkills, type AiConversation, type AiRun, type AiRunStatus } from "@/lib/backend/api";
 import type { AiMessage } from "@/lib/backend/api";
 import type { AiConfigItem, AiEffortCapability, AiEffortOption, AiEffortSelection } from "@/types/ai";
 import type { ConnectionConfig, QueryTab, SavedSqlFile, TableInfo } from "@/types/database";
-import { fetchNamespaceOptionsForConnection, useDatabaseOptions } from "@/composables/useDatabaseOptions";
+import { useDatabaseOptions } from "@/composables/useDatabaseOptions";
 import { useSchemaOptions } from "@/composables/useSchemaOptions";
 import { encodeSelectableDatabaseValue, formatDatabaseLabel, resolveDefaultDatabase } from "@/lib/database/defaultDatabase";
-import { normalizeSqliteNamespace } from "@/lib/database/sqliteNamespace";
+
 import { isQueryExecutionErrorResult } from "@/lib/query/queryResultError";
-import { isSchemaAware, isSingleDatabase } from "@/lib/database/databaseCapabilities";
+
 import ExplainPlanViewer from "@/components/explain/ExplainPlanViewer.vue";
-import { parseExplainResult, parseOracleExplainText, type ParsedExplainPlan } from "@/lib/diagram/explainPlan";
+import { parseExplainResult, type ParsedExplainPlan } from "@/lib/diagram/explainPlan";
 import { copyToClipboard } from "@/lib/common/clipboard";
-import { AI_TABLE_MENTION_CANDIDATE_LIMIT, AI_TABLE_MENTION_SCHEMA_LIMIT, filterAiTableMentionCandidates, formatAiTableMention, parseAiTableMentions, type AiTableMention } from "@/lib/ai/aiTableMentions";
+import { AI_TABLE_MENTION_CANDIDATE_LIMIT, filterAiTableMentionCandidates, formatAiTableMention, parseAiTableMentions, type AiTableMention } from "@/lib/ai/aiTableMentions";
 import { handleAiTableReferenceDropEvent } from "@/lib/ai/aiTableReferenceDrop";
 import { DBX_TABLE_REFERENCE_DROP_EVENT, clearActiveTableReferencePayload } from "@/lib/editor/queryEditorTableDrop";
 import { canSubmitAiPrompt, isAiPromptImeCompositionEvent, shouldSubmitAiPromptOnKeydown } from "@/lib/ai/aiPromptKeyboard";
@@ -1417,12 +1414,11 @@ const agentActionButtons: AiActionButton[] = [
 ];
 
 const actionButtons = computed<AiActionButton[]>(() => (assistantMode.value === "agent" ? agentActionButtons : askActionButtons));
-const isRedisConnection = computed(() => boundConnection.value?.db_type === "redis");
 
 // Vector DBs hide the action menu and only expose collection tools.
 // Keep their action at `generate` so the task contract doesn't tell the LLM to call execute_query.
 function resolveDefaultAction(mode: AiAssistantMode): AiAction {
-  if (boundConnection.value && isVectorDbType(boundConnection.value.db_type)) return "generate";
+  {}
   return defaultActionForMode(mode);
 }
 
@@ -1431,7 +1427,7 @@ function resolveDefaultAction(mode: AiAssistantMode): AiAction {
 // request. Vector DBs keep the concrete `generate` action because their action
 // menu is hidden entirely.
 function resolveDefaultActionSelection(mode: AiAssistantMode): AiActionSelection {
-  if (settings.defaultAutoRouting && !(boundConnection.value && isVectorDbType(boundConnection.value.db_type))) return "auto";
+  if (settings.defaultAutoRouting) return "auto";
   return resolveDefaultAction(mode);
 }
 
@@ -1456,9 +1452,7 @@ watch(
   () => {
     // Vector DBs hide the action picker, so keep the hidden action aligned with
     // the collection-oriented prompt contract on initial render and connection changes.
-    if (boundConnection.value && isVectorDbType(boundConnection.value.db_type)) {
-      activeAction.value = "generate";
-    }
+    {}
   },
   { immediate: true },
 );
@@ -1770,7 +1764,7 @@ function openCodeSnapshot(seg: { content: string; lang: string }) {
 const showActionButtons = computed(() => {
   if (pluginContext.value) return false;
   if (!boundConnection.value) return true;
-  return !isVectorDbType(boundConnection.value.db_type);
+  return !false;
 });
 
 const modeIcon = computed<Component>(() => (assistantMode.value === "agent" ? Bot : MessageSquarePlus));
@@ -1799,16 +1793,15 @@ function selectModeActionItem(action: AiActionSelection) {
 }
 
 const { databaseOptions, loadDatabaseOptions } = useDatabaseOptions();
-const { loadSchemaOptions, getSchemaOptionsForDb, isLoadingSchemas } = useSchemaOptions();
+useSchemaOptions();
 
 // Dameng presents schemas as its top-level namespace, unlike the other
 // connection types that rely on the shared database-options loader.
-const aiDatabaseOptions = ref<Record<string, string[]>>({});
 
 const dbOptions = computed(() => {
   const connection = boundConnection.value;
   if (!connection) return [];
-  if (connection.db_type === "dameng") return aiDatabaseOptions.value[connection.id] || [];
+  {}
   return databaseOptions.value[connection.id] || [];
 });
 
@@ -1897,38 +1890,15 @@ watch([dbSelectOptions, selectedNamespace], syncSelectedDatabases, { immediate: 
 const showAiDatabaseSelector = computed(() => !!boundConnection.value && supportsAiAssistantContext(boundConnection.value.db_type));
 
 const showAiSchemaSelector = computed(() => {
-  const connection = boundConnection.value;
-  return showAiDatabaseSelector.value && !!connection && connection.db_type !== "dameng" && aiSchemaSelectionSupported(connection);
+  return false;
 });
-
-const aiSchemaDatabaseKey = computed(() => {
-  const connection = boundConnection.value;
-  if (!connection) return "";
-  return boundDatabase.value || (isSingleDatabase(connection.db_type) ? "_" : "");
-});
-
-const aiSchemaOptions = computed(() => {
-  const connection = boundConnection.value;
-  if (!connection) return [];
-  return getSchemaOptionsForDb(connection.id, aiSchemaDatabaseKey.value);
-});
-
-async function loadAiSchemas() {
-  const connection = boundConnection.value;
-  if (!connection || !showAiSchemaSelector.value) return;
-  await loadSchemaOptions(connection.id, aiSchemaDatabaseKey.value);
-}
 
 async function loadDatabases(connection = boundConnection.value): Promise<string[]> {
   if (!connection || !supportsAiAssistantContext(connection.db_type)) return [];
-  if (connection.db_type !== "dameng") {
+  {
     await loadDatabaseOptions(connection.id);
     return databaseOptions.value[connection.id] || [];
   }
-  await connectionStore.ensureConnected(connection.id);
-  const options = await fetchNamespaceOptionsForConnection(connection.id, connection);
-  aiDatabaseOptions.value[connection.id] = options;
-  return options;
 }
 
 /**
@@ -1949,10 +1919,7 @@ async function changeConnection(connectionId: string) {
   let schema: string | undefined;
   try {
     const options = await loadDatabases(conn);
-    if (conn.db_type === "dameng") {
-      schema = resolveDefaultAiSchema(conn, options);
-      database = schema ? resolveDefaultDatabase(conn, []) : database;
-    } else {
+    {
       database = resolveDefaultDatabase(conn, options);
     }
   } catch (e: unknown) {
@@ -1987,13 +1954,6 @@ async function rebindConversation(connection: ConnectionConfig, database: string
   } else {
     await saveAiConversation(updated).catch(() => {});
   }
-}
-
-function changeSchema(schema: string) {
-  const connection = boundConnection.value;
-  if (!connection || boundSchema.value === (schema || undefined)) return;
-  clearContextReferences();
-  void rebindConversation(connection, boundDatabase.value, schema || undefined);
 }
 
 function flushAssistantDeltas() {
@@ -2206,11 +2166,9 @@ function extractExplainData(result: unknown): unknown | undefined {
 
 /** Parse explain_data (a serialized QueryResult) into ParsedExplainPlan */
 function parseExplainFromData(explainData: unknown, dbType: string): ParsedExplainPlan | undefined {
-  if (dbType === "oracle" && typeof explainData === "string") {
-    return parseOracleExplainText(explainData);
-  }
+  {}
   if (!explainData || typeof explainData !== "object") return undefined;
-  const supportedTypes = ["mysql", "postgres", "dameng", "questdb", "doris"] as const;
+  const supportedTypes = ["mysql"] as const;
   if (!supportedTypes.includes(dbType as (typeof supportedTypes)[number])) return undefined;
   try {
     return parseExplainResult(dbType as (typeof supportedTypes)[number], explainData as import("@/types/database").QueryResult);
@@ -2437,17 +2395,6 @@ function mentionCacheKey(connectionId: string, database: string, query: string) 
   return `${connectionId}:${database}:${savedSqlStore.version}:${query.toLowerCase()}`;
 }
 
-function mentionSchemaOrder(schemas: string[]): string[] {
-  const currentSchema = aiContextTarget.value.tableMeta?.schema;
-  const preferred = [currentSchema, "public", "dbo", "main"].filter((value): value is string => !!value);
-  return [...schemas].sort((a, b) => {
-    const ai = preferred.indexOf(a);
-    const bi = preferred.indexOf(b);
-    if (ai >= 0 || bi >= 0) return (ai >= 0 ? ai : 99) - (bi >= 0 ? bi : 99);
-    return a.localeCompare(b);
-  });
-}
-
 function activeMentionAtCursor(): { start: number; query: string } | null {
   const textarea = promptTextareaRef.value;
   const cursor = textarea?.selectionStart ?? prompt.value.length;
@@ -2485,29 +2432,15 @@ async function loadMentionCandidates(query: string) {
   const requestId = ++mentionRequestId;
   mentionLoading.value = true;
   mentionError.value = "";
-  const { schemaPrefix, tableFilter } = normalizeMentionQuery(query);
+  const { tableFilter } = normalizeMentionQuery(query);
   let sqlFileCandidates: AiSqlFileMentionCandidate[] = [];
 
   try {
     sqlFileCandidates = await loadSqlFileMentionCandidates(query);
     await connectionStore.ensureConnected(boundConnectionId.value);
     let tableCandidates: AiMentionCandidate[] = [];
-    if (isSchemaAware(connection.db_type)) {
-      const schemas = mentionSchemaOrder(await listSchemas(boundConnectionId.value, mentionDatabase));
-      const filteredSchemas = schemaPrefix ? schemas.filter((schema) => schema.toLowerCase().includes(schemaPrefix.toLowerCase())) : schemas;
-      const results = await Promise.all(
-        filteredSchemas.slice(0, AI_TABLE_MENTION_SCHEMA_LIMIT).map(async (schema) => {
-          const tables = await listTables(boundConnectionId.value, mentionDatabase, schema, tableFilter || undefined, AI_TABLE_MENTION_CANDIDATE_LIMIT);
-          return filterAiTableMentionCandidates(
-            tables.map((table) => mentionCandidateFromTable(table, schema)),
-            tableFilter,
-            AI_TABLE_MENTION_CANDIDATE_LIMIT,
-          );
-        }),
-      );
-      tableCandidates = filterAiTableMentionCandidates(results.flat(), "", AI_TABLE_MENTION_CANDIDATE_LIMIT);
-    } else {
-      const database = connection.db_type === "sqlite" ? normalizeSqliteNamespace(mentionDatabase || connection.database, connection) : mentionDatabase;
+    {
+      const database = mentionDatabase;
       const schema = database || connection.database || "main";
       const tables = await listTables(boundConnectionId.value, database, schema, tableFilter || undefined, AI_TABLE_MENTION_CANDIDATE_LIMIT);
       tableCandidates = filterAiTableMentionCandidates(
@@ -3859,7 +3792,7 @@ async function send() {
       const context: AiContext = {
         connectionId: connection.id,
         connectionName: connection.name,
-        databaseType: "plugin",
+        databaseType: "mysql",
         database: "",
         currentSql: "",
         tables: [],
@@ -4378,26 +4311,17 @@ function abandonInFlightRequest(alreadyCancelledSessionId?: string) {
 }
 
 function applySql(code: string) {
-  if (isRedisConnection.value) {
-    emit("insertRedisCommand", code, conversationBinding.value);
-    return;
-  }
+  {}
   emit("appendSql", code, conversationBinding.value);
 }
 
 function executeSql(code: string) {
-  if (isRedisConnection.value) {
-    emit("executeRedisCommand", code, conversationBinding.value);
-    return;
-  }
+  {}
   emit("executeSql", code, conversationBinding.value);
 }
 
 function tempRunSql(code: string) {
-  if (isRedisConnection.value) {
-    emit("executeRedisCommand", code, conversationBinding.value);
-    return;
-  }
+  {}
   emit("tempRunSql", code, conversationBinding.value);
 }
 
@@ -6092,28 +6016,13 @@ async function openExternalUrl(url: string) {
                       <!-- `pending` means the closing fence is still missing, so the code is truncated: never offer to run or apply it. -->
                       <Loader2 v-if="seg.pending && isGenerating" class="h-3 w-3 animate-spin text-zinc-400" />
                       <div class="flex items-center gap-1.5">
-                        <button
-                          v-if="!pluginContext && !seg.pending && seg.isSql && !isRedisConnection"
-                          class="rounded p-0.5 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
-                          :title="t('ai.tempRunSql')"
-                          @click="tempRunSql(seg.content)"
-                        >
+                        <button v-if="!pluginContext && !seg.pending && seg.isSql" class="rounded p-0.5 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-200" :title="t('ai.tempRunSql')" @click="tempRunSql(seg.content)">
                           <FlaskConical class="h-3.5 w-3.5" />
                         </button>
-                        <button
-                          v-if="!pluginContext && !seg.pending && (seg.isSql || isRedisConnection)"
-                          class="rounded p-0.5 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
-                          :title="t('ai.executeSql')"
-                          @click="executeSql(seg.content)"
-                        >
+                        <button v-if="!pluginContext && !seg.pending && seg.isSql" class="rounded p-0.5 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-200" :title="t('ai.executeSql')" @click="executeSql(seg.content)">
                           <Play class="h-3.5 w-3.5" />
                         </button>
-                        <button
-                          v-if="!pluginContext && !seg.pending && (seg.isSql || isRedisConnection)"
-                          class="rounded p-0.5 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
-                          :title="t('ai.apply')"
-                          @click="applySql(seg.content)"
-                        >
+                        <button v-if="!pluginContext && !seg.pending && seg.isSql" class="rounded p-0.5 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-200" :title="t('ai.apply')" @click="applySql(seg.content)">
                           <ArrowDownToLine class="h-3.5 w-3.5" />
                         </button>
                         <button
@@ -6293,28 +6202,6 @@ async function openExternalUrl(url: string) {
                     </div>
                   </PopoverContent>
                 </Popover>
-                <template v-if="showAiSchemaSelector">
-                  <Layers class="h-3 w-3 shrink-0 text-foreground/40" />
-                  <SearchableSelect
-                    :model-value="boundSchema || ''"
-                    :options="aiSchemaOptions.length ? aiSchemaOptions : boundSchema ? [boundSchema] : []"
-                    :placeholder="t('editor.selectSchema')"
-                    :search-placeholder="t('editor.searchSchema')"
-                    :empty-text="t('grid.noSearchResults')"
-                    :loading-text="t('common.loading')"
-                    :loading="isLoadingSchemas(boundConnection.id, aiSchemaDatabaseKey)"
-                    trigger-variant="ghost"
-                    trigger-class="h-5 min-w-0 max-w-36 flex-1 p-0 px-1 text-foreground/80"
-                    trigger-icon-class="h-3 w-3"
-                    list-class="w-56"
-                    @update:model-value="changeSchema"
-                    @update:open="
-                      (open: boolean) => {
-                        if (open) loadAiSchemas().catch(() => {});
-                      }
-                    "
-                  />
-                </template>
               </template>
             </template>
             <span class="ai-prompt-context-spacer min-w-0 flex-1" />

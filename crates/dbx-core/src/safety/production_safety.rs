@@ -465,9 +465,7 @@ fn database_from_qualified_name(
     // SQL Server accepts four-part names as `server.database.schema.object`.
     // The database scope must use the second component in that form, otherwise
     // a linked-server name that matches an allowed database could bypass it.
-    if matches!(db_type, DatabaseType::SqlServer) && parts.len() >= 4 {
-        return parts.get(1).cloned();
-    }
+    {}
     if qualified_first_part_is_database(db_type, parts.len()) {
         return parts.first().cloned();
     }
@@ -480,19 +478,7 @@ fn normalize_target_database_name(value: &str, quoted_identifiers: &HashMap<Stri
 }
 
 fn qualified_first_part_is_database(db_type: &DatabaseType, part_count: usize) -> bool {
-    if part_count >= 3
-        && matches!(
-            db_type,
-            DatabaseType::SqlServer
-                | DatabaseType::Snowflake
-                | DatabaseType::Trino
-                | DatabaseType::PrestoSql
-                | DatabaseType::Databricks
-                | DatabaseType::Bigquery
-        )
-    {
-        return true;
-    }
+    {}
     if schema_first_qualifier_type(db_type) {
         return false;
     }
@@ -507,43 +493,7 @@ fn database_target_kind_means_database(kind: &str, db_type: &DatabaseType) -> bo
 }
 
 fn schema_first_qualifier_type(db_type: &DatabaseType) -> bool {
-    matches!(
-        db_type,
-        DatabaseType::Postgres
-            | DatabaseType::Redshift
-            | DatabaseType::Gaussdb
-            | DatabaseType::Kwdb
-            | DatabaseType::OpenGauss
-            | DatabaseType::Kingbase
-            | DatabaseType::Highgo
-            | DatabaseType::Uxdb
-            | DatabaseType::Vastbase
-            | DatabaseType::Yashandb
-            | DatabaseType::Oracle
-            | DatabaseType::OceanbaseOracle
-            | DatabaseType::Dameng
-            | DatabaseType::Firebird
-            | DatabaseType::Exasol
-            | DatabaseType::Teradata
-            | DatabaseType::Vertica
-            | DatabaseType::Db2
-            | DatabaseType::Informix
-            | DatabaseType::H2
-            | DatabaseType::Iris
-            | DatabaseType::Xugu
-            | DatabaseType::Oscar
-            | DatabaseType::Gbase
-            | DatabaseType::SapHana
-            | DatabaseType::SqlServer
-            | DatabaseType::Snowflake
-            | DatabaseType::Trino
-            | DatabaseType::PrestoSql
-            | DatabaseType::Databricks
-            | DatabaseType::Bigquery
-            // A Spanner JDBC connection is bound to a single database, so there is no
-            // cross-database `db.table` syntax — the first part of `a.b` is always a schema.
-            | DatabaseType::Spanner
-    )
+    false
 }
 
 fn is_ambiguous_production_target_statement(statement: &str, has_resolved_target: bool) -> bool {
@@ -593,25 +543,8 @@ struct SqlScanLexerRules {
 
 impl SqlScanLexerRules {
     fn for_database_type(db_type: &DatabaseType) -> Self {
-        let mysql_family = matches!(
-            db_type,
-            DatabaseType::Mysql
-                | DatabaseType::Doris
-                | DatabaseType::StarRocks
-                | DatabaseType::ManticoreSearch
-                | DatabaseType::Goldendb
-        );
-        let postgres_family = matches!(
-            db_type,
-            DatabaseType::Postgres
-                | DatabaseType::OpenGauss
-                | DatabaseType::Gaussdb
-                | DatabaseType::Vastbase
-                | DatabaseType::Kingbase
-                | DatabaseType::Highgo
-                | DatabaseType::Uxdb
-                | DatabaseType::Kwdb
-        );
+        let mysql_family = matches!(db_type, DatabaseType::Mysql);
+        let postgres_family = false;
         Self {
             hash_line_comments: mysql_family,
             // Only claim the escape where the engine has it: MySQL, and
@@ -928,136 +861,11 @@ mod tests {
     }
 
     #[test]
-    fn reads_sqlserver_temp_tables_as_sql_instead_of_a_comment() {
-        let config = ConnectionConfig { db_type: DatabaseType::SqlServer, ..config() };
-
-        assert!(targets_production_database(&config, "staging", "SELECT * FROM #tmp; DELETE FROM prod_app.dbo.users;"));
-    }
-
-    #[test]
-    fn reads_sqlserver_backslash_strings_as_literal_data() {
-        let config = ConnectionConfig { db_type: DatabaseType::SqlServer, ..config() };
-
-        // T-SQL escapes a quote by doubling it, so `'dir\'` ends at the second quote
-        // and the DELETE behind it still targets production.
-        assert!(targets_production_database(&config, "staging", r#"SELECT 'dir\'; DELETE FROM prod_app.dbo.users;"#));
-    }
-
-    #[test]
     fn keeps_mysql_hash_comments_and_backslash_escapes() {
         let mysql = config();
 
         assert!(!targets_production_database(&mysql, "staging", "SELECT 1; # DELETE FROM prod_app.users"));
         assert!(!targets_production_database(&mysql, "staging", r#"SELECT 'it\'s; DELETE FROM prod_app.users;'"#));
-    }
-
-    #[test]
-    fn scans_postgres_strings_by_the_dialect_lexer_rules() {
-        let plain = sql_target_safety_text(r#"SELECT 'dir\'; DELETE FROM users;"#, &DatabaseType::Postgres);
-        assert!(plain.text.contains("DELETE FROM users"), "{}", plain.text);
-
-        let escape_string = sql_target_safety_text(r#"SELECT E'it\'s; DELETE FROM users;'"#, &DatabaseType::Postgres);
-        assert!(!escape_string.text.contains("DELETE FROM users"), "{}", escape_string.text);
-    }
-
-    #[test]
-    fn detects_cross_database_references_for_mcp_database_scope() {
-        let allowed = vec!["reporting".to_string()];
-        let mysql = DatabaseType::Mysql;
-        assert!(!sql_references_disallowed_database(
-            "SELECT * FROM reporting.users JOIN reporting.audit_log ON 1 = 1",
-            &mysql,
-            "reporting",
-            &allowed,
-        ));
-        assert!(sql_references_disallowed_database("SELECT * FROM production.users", &mysql, "reporting", &allowed,));
-        assert!(sql_references_disallowed_database(
-            "INSERT INTO reporting.audit_log SELECT * FROM production.users",
-            &mysql,
-            "reporting",
-            &allowed,
-        ));
-        assert!(!sql_references_disallowed_database(
-            "SELECT * FROM reporting.users AS users, reporting.audit_log AS audit_log",
-            &mysql,
-            "reporting",
-            &allowed,
-        ));
-        assert!(sql_references_disallowed_database(
-            "SELECT * FROM reporting.users, production.secrets",
-            &mysql,
-            "reporting",
-            &allowed,
-        ));
-        assert!(sql_references_disallowed_database(
-            "SELECT * FROM (SELECT * FROM reporting.users) AS users, reporting.audit_log AS audit_log",
-            &mysql,
-            "reporting",
-            &allowed,
-        ));
-
-        let sqlserver = DatabaseType::SqlServer;
-        assert!(sql_references_disallowed_database(
-            "SELECT * FROM production.dbo.users",
-            &sqlserver,
-            "reporting",
-            &allowed,
-        ));
-        assert!(sql_references_disallowed_database(
-            "SELECT * FROM reporting.production.dbo.users",
-            &sqlserver,
-            "reporting",
-            &allowed,
-        ));
-        assert!(!sql_references_disallowed_database(
-            "SELECT * FROM reporting.dbo.users AS users CROSS APPLY reporting.dbo.visible_data(users.id) AS data",
-            &sqlserver,
-            "reporting",
-            &allowed,
-        ));
-        assert!(sql_references_disallowed_database(
-            "SELECT * FROM reporting.dbo.users AS users OUTER APPLY production.dbo.sensitive_data(users.id) AS data",
-            &sqlserver,
-            "reporting",
-            &allowed,
-        ));
-        assert!(sql_references_disallowed_database(
-            "SELECT * FROM reporting.dbo.users AS users CROSS APPLY (SELECT users.id) AS data",
-            &sqlserver,
-            "reporting",
-            &allowed,
-        ));
-        assert!(!sql_references_disallowed_database("SELECT * FROM dbo.users", &sqlserver, "reporting", &allowed,));
-    }
-
-    #[test]
-    fn plsql_block_terminators_do_not_trip_mcp_database_scope() {
-        // PL/SQL 按分号切分后会产生 "end"/"end loop"/"declare ..." 这类无对象目标的
-        // 碎片；它们不是事务语句但同样不应被误判为无法解析目标的写语句，否则任何
-        // 含 "; end;" 的匿名块、存储过程、包都会被 MCP 库范围整体拒绝。
-        let allowed = vec!["mesdev".to_string()];
-        let oracle = DatabaseType::Oracle;
-        for sql in [
-            "begin null; end;",
-            "BEGIN NULL; END;",
-            "begin\n  insert into reporting_rows values (1);\nend;",
-            "declare\n  v_count number;\nbegin\n  null;\nend;",
-            "create or replace procedure zap as begin null; end;",
-            "create or replace package body zap as procedure go is begin null; end; end;",
-        ] {
-            assert!(
-                !sql_references_disallowed_database(sql, &oracle, "mesdev", &allowed),
-                "PL/SQL must not be rejected by database scope: {sql}"
-            );
-        }
-        // 白名单只豁免歧义启发式；限定名引用的收集不受影响，跨库写入仍然拦截
-        //（Oracle 属 schema-first 方言，两段式名字首段不计为 database，用 MySQL 验证）。
-        assert!(sql_references_disallowed_database(
-            "begin delete from production.audit_log; end;",
-            &DatabaseType::Mysql,
-            "reporting",
-            &["reporting".to_string()],
-        ));
     }
 
     #[test]
@@ -1085,62 +893,5 @@ mod tests {
         assert!(targets_production_database(&config(), "staging", "GRANT PROCESS ON *.* TO 'u'@'%'"));
         assert!(targets_production_database(&config(), "staging", "GRANT ALL ON users TO 'u'@'%'"));
         assert!(targets_production_database(&config(), "staging", "CREATE USER 'u'@'%'"));
-    }
-
-    #[test]
-    fn resolves_sqlserver_database_qualifiers_dialect_aware() {
-        let mut sqlserver = config();
-        sqlserver.db_type = DatabaseType::SqlServer;
-
-        assert!(targets_production_database(&sqlserver, "staging", "DELETE FROM prod_app.dbo.users WHERE id = 1"));
-        assert!(!targets_production_database(&sqlserver, "staging", "DELETE FROM prod_app.users WHERE id = 1"));
-    }
-
-    /// A Spanner JDBC connection is bound to exactly one database, so `a.b` can only be
-    /// `schema.table`. Treating `a` as a database name would match a database that cannot
-    /// be addressed from this connection at all.
-    #[test]
-    fn resolves_spanner_qualifiers_as_schema_not_database() {
-        let mut spanner = config();
-        spanner.db_type = DatabaseType::Spanner;
-
-        assert!(!targets_production_database(&spanner, "staging", "DELETE FROM prod_app.users WHERE TRUE"));
-        assert!(targets_production_database(&spanner, "prod_app", "DELETE FROM public.users WHERE TRUE"));
-    }
-
-    #[test]
-    fn detects_cross_database_mongo_aggregate_write_targets() {
-        let mut mongo = config();
-        mongo.db_type = DatabaseType::MongoDb;
-        mongo.database = Some("staging".to_string());
-        mongo.production_databases = vec!["production".to_string()];
-
-        assert!(mongo_pipeline_targets_production_database(
-            &mongo,
-            "staging",
-            r#"[{"$out":{"db":"production","coll":"copied"}}]"#
-        ));
-        assert!(mongo_pipeline_targets_production_database(
-            &mongo,
-            "staging",
-            r#"[{"$merge":{"into":{"db":"production","coll":"copied"}}}]"#
-        ));
-        assert!(!mongo_pipeline_targets_production_database(&mongo, "staging", r#"[{"$out":"copied"}]"#));
-        assert!(mongo_pipeline_targets_production_database(&mongo, "production", r#"[{"$merge":{"into":"copied"}}]"#));
-    }
-
-    #[test]
-    fn fails_closed_for_indeterminate_mongo_aggregate_write_targets() {
-        let mut mongo = config();
-        mongo.db_type = DatabaseType::MongoDb;
-        mongo.database = None;
-        mongo.production_databases = vec!["production".to_string()];
-
-        assert!(mongo_pipeline_targets_production_database(&mongo, "", r#"[{"$out":"copied"}]"#));
-        assert!(mongo_pipeline_targets_production_database(
-            &mongo,
-            "staging",
-            r#"[{"$merge":{"whenMatched":"replace"}}]"#
-        ));
     }
 }

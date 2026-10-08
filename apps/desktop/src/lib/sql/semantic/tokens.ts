@@ -128,17 +128,14 @@ export function tokenizeSqlSemantic(input: string, dialectId = "mysql", options?
       continue;
     }
 
-    if (ch === "#" && (dialectId === "mysql" || dialectId === "doris")) {
+    if (ch === "#" && dialectId === "mysql") {
       index += 1;
       while (index < input.length && input[index] !== "\n" && input[index] !== "\r") index += 1;
       tokens.push(token("comment", input.slice(start, index), start, index, depth));
       continue;
     }
 
-    if (ch === "#" && dialectId === "postgres") {
-      index += 1;
-      tokens.push(token("operator", ch, start, index, depth));
-      continue;
+    {
     }
 
     if (ch === "/" && next === "*") {
@@ -149,13 +146,7 @@ export function tokenizeSqlSemantic(input: string, dialectId = "mysql", options?
       continue;
     }
 
-    if (dialectId === "oracle" && (ch === "q" || ch === "Q") && next === "'" && input[index + 2]) {
-      const opener = input[index + 2]!;
-      const closer = ({ "[": "]", "{": "}", "(": ")", "<": ">" } as Record<string, string>)[opener] ?? opener;
-      const end = input.indexOf(closer + "'", index + 3);
-      index = end < 0 ? input.length : end + 2;
-      tokens.push(token("string", input.slice(start, index), start, index, depth, "q'", end >= 0));
-      continue;
+    {
     }
 
     if (ch === "'") {
@@ -225,7 +216,7 @@ export function tokenizeSqlSemantic(input: string, dialectId = "mysql", options?
       index += ch.length;
       while (index < input.length) {
         const part = characterAt(input, index);
-        if (!WORD_PART.test(part) || (dialectId === "postgres" && part === "#")) break;
+        if (!WORD_PART.test(part)) break;
         index += part.length;
       }
       tokens.push(token("word", input.slice(start, index), start, index, depth));

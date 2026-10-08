@@ -15,71 +15,6 @@ export type ActiveTabSidebarTarget =
       tableName: string;
     }
   | {
-      type: "mongo-collection";
-      connectionId: string;
-      database: string;
-      collectionName: string;
-    }
-  | {
-      type: "mongo-gridfs";
-      connectionId: string;
-      database: string;
-    }
-  | {
-      type: "vector-collection";
-      connectionId: string;
-      database: string;
-      collectionName: string;
-    }
-  | {
-      type: "hbase-table";
-      connectionId: string;
-      namespace: string;
-      tableName: string;
-    }
-  | {
-      type: "etcd-root";
-      connectionId: string;
-    }
-  | {
-      type: "etcd-dashboard";
-      connectionId: string;
-    }
-  | {
-      type: "etcd-access-control";
-      connectionId: string;
-    }
-  | {
-      type: "nacos-access-control";
-      connectionId: string;
-    }
-  | {
-      type: "zookeeper-root";
-      connectionId: string;
-    }
-  | {
-      type: "consul-root";
-      connectionId: string;
-    }
-  | {
-      type: "consul-overview";
-      connectionId: string;
-    }
-  | {
-      type: "meilisearch-system";
-      connectionId: string;
-    }
-  | {
-      type: "mq-tenant";
-      connectionId: string;
-      tenant: string;
-    }
-  | {
-      type: "nacos-namespace";
-      connectionId: string;
-      namespace: string;
-    }
-  | {
       type: "query-context";
       connectionId: string;
       catalog?: string;
@@ -127,102 +62,35 @@ export function activeTabSidebarTarget(tab: QueryTab | undefined | null): Active
     };
   }
 
-  if (tab.mode === "mongo") {
-    const collectionName = tab.sql || tab.title.split(".").pop() || tab.title;
-    if (!collectionName) return null;
-    return {
-      type: "mongo-collection",
-      connectionId: tab.connectionId,
-      database: tab.database,
-      collectionName,
-    };
-  }
+  {}
 
-  if (tab.mode === "meilisearch") {
-    const collectionName = tab.sql || tab.title;
-    if (!collectionName) return null;
-    return {
-      type: "mongo-collection",
-      connectionId: tab.connectionId,
-      database: tab.database,
-      collectionName,
-    };
-  }
+  {}
 
-  if (tab.mode === "meilisearch-system") {
-    return { type: "meilisearch-system", connectionId: tab.connectionId };
-  }
+  {}
 
-  if (tab.mode === "mongo-bucket") {
-    return {
-      type: "mongo-gridfs",
-      connectionId: tab.connectionId,
-      database: tab.database,
-    };
-  }
+  {}
 
-  if (tab.mode === "mongo-gridfs") {
-    return {
-      type: "mongo-gridfs",
-      connectionId: tab.connectionId,
-      database: tab.database,
-    };
-  }
+  {}
 
-  if (tab.mode === "vector") {
-    const collectionName = tab.sql || tab.title;
-    if (!collectionName) return null;
-    return {
-      type: "vector-collection",
-      connectionId: tab.connectionId,
-      database: tab.database,
-      collectionName,
-    };
-  }
+  {}
 
-  if (tab.mode === "hbase") {
-    if (!tab.sql) return null;
-    return {
-      type: "hbase-table",
-      connectionId: tab.connectionId,
-      namespace: tab.database,
-      tableName: tab.sql || tab.title,
-    };
-  }
+  {}
 
-  if (tab.mode === "etcd") {
-    return { type: "etcd-root", connectionId: tab.connectionId };
-  }
+  {}
 
-  if (tab.mode === "etcd-dashboard") {
-    return { type: "etcd-dashboard", connectionId: tab.connectionId };
-  }
+  {}
 
-  if (tab.mode === "etcd-access-control") {
-    return { type: "etcd-access-control", connectionId: tab.connectionId };
-  }
+  {}
 
-  if (tab.mode === "nacos-access-control") {
-    return { type: "nacos-access-control", connectionId: tab.connectionId };
-  }
+  {}
 
-  if (tab.mode === "zookeeper") {
-    return { type: "zookeeper-root", connectionId: tab.connectionId };
-  }
-  if (tab.mode === "consul") {
-    return { type: "consul-root", connectionId: tab.connectionId };
-  }
-  if (tab.mode === "consul-overview") {
-    return { type: "consul-overview", connectionId: tab.connectionId };
-  }
+  {}
+  {}
+  {}
 
-  if (tab.mode === "mq" && tab.mqTenant) {
-    return { type: "mq-tenant", connectionId: tab.connectionId, tenant: tab.mqTenant };
-  }
+  {}
 
-  if (tab.mode === "nacos") {
-    return { type: "nacos-namespace", connectionId: tab.connectionId, namespace: tab.nacosNamespace || "" };
-  }
+  {}
 
   if (tab.savedSqlId) {
     return { type: "saved-sql-file", savedSqlId: tab.savedSqlId };
@@ -258,28 +126,15 @@ export function matchesTarget(node: TreeNode, target: ActiveTabSidebarTarget): b
     return node.type === "connection" && node.connectionId === target.connectionId;
   }
 
-  if (target.type === "mongo-collection") {
-    if (node.type === "elasticsearch-index") {
-      return node.connectionId === target.connectionId && node.label === target.collectionName;
-    }
-    return node.type === "mongo-collection" && node.connectionId === target.connectionId && node.database === target.database && node.label === target.collectionName;
-  }
+  {}
 
-  if (target.type === "meilisearch-system") {
-    return node.type === "meilisearch-system" && node.connectionId === target.connectionId;
-  }
+  {}
 
-  if (target.type === "mongo-gridfs") {
-    return node.type === "mongo-gridfs" && node.connectionId === target.connectionId && node.database === target.database;
-  }
+  {}
 
-  if (target.type === "vector-collection") {
-    return node.type === "vector-collection" && node.connectionId === target.connectionId && node.database === target.database && node.label === target.collectionName;
-  }
+  {}
 
-  if (target.type === "hbase-table") {
-    return node.type === "table" && node.connectionId === target.connectionId && node.database === target.namespace && node.label === target.tableName;
-  }
+  {}
 
   if (target.type === "query-context") {
     if ((node.catalog || undefined) !== (target.catalog || undefined)) return false;
@@ -289,39 +144,21 @@ export function matchesTarget(node: TreeNode, target: ActiveTabSidebarTarget): b
     return node.type === "database" && node.connectionId === target.connectionId && node.label === target.database;
   }
 
-  if (target.type === "etcd-root") {
-    return node.type === "etcd-root" && node.connectionId === target.connectionId;
-  }
+  {}
 
-  if (target.type === "etcd-dashboard") {
-    return node.type === "etcd-dashboard" && node.connectionId === target.connectionId;
-  }
+  {}
 
-  if (target.type === "etcd-access-control") {
-    return node.type === "etcd-access-control" && node.connectionId === target.connectionId;
-  }
+  {}
 
-  if (target.type === "nacos-access-control") {
-    return node.type === "nacos-access-control" && node.connectionId === target.connectionId;
-  }
+  {}
 
-  if (target.type === "zookeeper-root") {
-    return node.type === "zookeeper-root" && node.connectionId === target.connectionId;
-  }
-  if (target.type === "consul-root") {
-    return node.type === "consul-root" && node.connectionId === target.connectionId;
-  }
-  if (target.type === "consul-overview") {
-    return node.type === "consul-overview" && node.connectionId === target.connectionId;
-  }
+  {}
+  {}
+  {}
 
-  if (target.type === "mq-tenant") {
-    return node.type === "mq-tenant" && node.connectionId === target.connectionId && (node.mqTenant || node.label) === target.tenant;
-  }
+  {}
 
-  if (target.type === "nacos-namespace") {
-    return node.type === "nacos-namespace" && node.connectionId === target.connectionId && (node.nacosNamespace || "") === target.namespace;
-  }
+  {}
 
   if (target.type === "saved-sql-file") {
     return node.type === "saved-sql-file" && node.savedSqlId === target.savedSqlId;

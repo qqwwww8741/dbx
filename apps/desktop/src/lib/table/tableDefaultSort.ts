@@ -1,13 +1,13 @@
 import type { DatabaseType, QueryTab } from "@/types/database";
 import type { EditorSettings } from "@/stores/settingsStore";
-import { databaseSortSupportedForDatabase } from "@/lib/dataGrid/dataGridSort";
+
 import { quoteTableDataIdentifier } from "@/lib/table/tableSelectSql";
 
 export function resolveTableDefaultSort(settings: Pick<EditorSettings, "tableOpenSortMode" | "tableDatabaseSortDirection" | "tableLocalSortDirection">, databaseType: DatabaseType | undefined, physicalPrimaryKeys: string[], identifierQuote?: string) {
   const mode = settings.tableOpenSortMode ?? "none";
   const direction = (mode === "local" ? settings.tableLocalSortDirection : settings.tableDatabaseSortDirection) ?? "asc";
-  const columns = databaseType === "influxdb" || databaseType === "influxdb3" ? [] : physicalPrimaryKeys;
-  const orderBy = mode === "database" && columns.length && databaseSortSupportedForDatabase(databaseType) ? columns.map((column) => `${databaseType === "neo4j" ? "n." : ""}${quoteTableDataIdentifier(databaseType, column, identifierQuote)} ${direction.toUpperCase()}`).join(", ") : undefined;
+  const columns = physicalPrimaryKeys;
+  const orderBy = mode === "database" && columns.length ? columns.map((column) => `${""}${quoteTableDataIdentifier(databaseType, column, identifierQuote)} ${direction.toUpperCase()}`).join(", ") : undefined;
   return { mode, direction, columns, orderBy };
 }
 

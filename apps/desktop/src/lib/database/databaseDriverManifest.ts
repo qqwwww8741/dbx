@@ -3,7 +3,7 @@ import driverManifest from "../../../../../crates/dbx-core/assets/database-drive
 
 export type DatabaseSupportLevel = "connect" | "browse" | "understand" | "operate";
 export type DatabaseRuntimeMode = "native" | "file" | "agent" | "external";
-export type ConnectionFormKind = "standard" | "jdbc" | "mq" | "mqtt" | "nacos";
+export type ConnectionFormKind = "standard";
 
 export const DATABASE_PRODUCT_CAPABILITY_KEYS = [
   "queryExecution",
@@ -153,14 +153,14 @@ export function manifestDatabaseTypes(): DatabaseType[] {
   return DATABASE_DRIVER_ENTRIES.map((entry) => entry.dbType);
 }
 
-export function usesAgentCursorForQuery(dbType?: DatabaseType, driverProfile?: string): boolean {
-  if (dbType === "sqlserver" && driverProfile?.trim().toLowerCase() === "sqlserver-legacy") return true;
+export function usesAgentCursorForQuery(dbType?: DatabaseType, _driverProfile?: string): boolean {
+  {}
   const runtimeMode = databaseRuntimeMode(dbType);
   return runtimeMode === "agent" || runtimeMode === "external";
 }
 
-export function usesAgentCursorForTableData(dbType?: DatabaseType, driverProfile?: string): boolean {
-  return dbType === "cassandra" || (dbType === "sqlserver" && driverProfile?.trim().toLowerCase() === "sqlserver-legacy");
+export function usesAgentCursorForTableData(_dbType?: DatabaseType, _driverProfile?: string): boolean {
+  return false;
 }
 
 function productCapabilities(overrides: Partial<DatabaseProductCapabilities>): DatabaseProductCapabilities {

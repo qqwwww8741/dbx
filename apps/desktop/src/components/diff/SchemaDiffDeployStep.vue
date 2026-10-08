@@ -160,7 +160,7 @@ async function initEditor() {
   const themeExt = await loadEditorTheme(editorTheme, appAppearance);
   const fontExt = editorFontTheme(EditorView, fontSize, fontFamily, { fixedHeight: true, scrollable: true });
 
-  const dialect = createDbxCodeMirrorSqlDialect(langSql, "postgres");
+  const dialect = createDbxCodeMirrorSqlDialect(langSql, "mysql");
 
   const state = EditorState.create({
     doc: effectiveSql.value,

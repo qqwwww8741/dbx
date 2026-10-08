@@ -64,7 +64,7 @@ const SQL_LINE_KEYWORDS = new Set([
   "select",
   "set",
   "settings",
-  "tablespace",
+
   "then",
   "union",
   "unique",

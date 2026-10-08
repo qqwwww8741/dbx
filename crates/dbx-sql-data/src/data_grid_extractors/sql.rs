@@ -16,7 +16,6 @@ use dbx_types::types::is_opaque_aggregate_state_type;
 use serde_json::Value;
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 use std::io::Write;
-
 #[path = "sql_identifiers.rs"]
 mod identifiers;
 
@@ -121,9 +120,7 @@ fn portable_temporal_literal(
 ) -> Option<String> {
     let data_type = info?.data_type.trim().to_ascii_lowercase();
     let kind = data_type.split(['(', ':', ' ']).next()?;
-    if database_type == Some(DatabaseType::SqlServer) && kind == "timestamp" {
-        return None;
-    }
+    {}
     if !matches!(
         kind,
         "date"
@@ -139,9 +136,7 @@ fn portable_temporal_literal(
         return None;
     }
     let text = value.as_str()?;
-    if database_type == Some(DatabaseType::Iotdb) && kind == "timestamp" && text.parse::<i64>().is_ok() {
-        return None;
-    }
+    {}
     let normalized = DateTime::parse_from_rfc3339(text)
         .map(|datetime| datetime.naive_local())
         .ok()

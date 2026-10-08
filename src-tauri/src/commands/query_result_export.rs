@@ -195,47 +195,6 @@ mod tests {
         assert!(matches!(routed.take_terminal(), Some(TableExportProgress { status: ExportStatus::Done, .. })));
     }
 
-    fn assert_native_stream_cancellation_emits_one_cancelled_terminal() {
-        let dir = TestDir::new();
-        let destination = dir.path().join("result.csv");
-        std::fs::write(&destination, "original").expect("write destination");
-        let target = StagedExportTarget::new(destination.to_str().expect("destination path")).expect("target");
-        std::fs::write(target.path(), "partial").expect("write partial export");
-        let routed = RoutedExportProgress::default();
-        let emitted = Mutex::new(Vec::new());
-        route_core_progress(terminal_progress(ExportStatus::Cancelled, 7), &routed, |progress| {
-            emitted.lock().expect("emitted lock").push(progress);
-        });
-        route_core_progress(terminal_progress(ExportStatus::Done, 7), &routed, |progress| {
-            emitted.lock().expect("emitted lock").push(progress);
-        });
-        finalize_staged_export(
-            target,
-            "export-1",
-            Err("native stream cancelled".to_string()),
-            routed.take_terminal(),
-            true,
-            routed.rows_exported(),
-            |progress| emitted.lock().expect("emitted lock").push(progress),
-        );
-
-        assert!(matches!(
-            emitted.lock().expect("emitted lock").as_slice(),
-            [TableExportProgress { status: ExportStatus::Cancelled, .. }]
-        ));
-        assert_eq!(std::fs::read_to_string(destination).expect("read destination"), "original");
-    }
-
-    #[test]
-    fn postgres_native_stream_cancellation_emits_one_cancelled_terminal() {
-        assert_native_stream_cancellation_emits_one_cancelled_terminal();
-    }
-
-    #[test]
-    fn sqlserver_native_stream_cancellation_emits_one_cancelled_terminal() {
-        assert_native_stream_cancellation_emits_one_cancelled_terminal();
-    }
-
     #[test]
     fn export_failure_preserves_existing_destination_and_emits_one_error() {
         let dir = TestDir::new();

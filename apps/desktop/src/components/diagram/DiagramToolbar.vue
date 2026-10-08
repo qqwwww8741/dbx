@@ -8,7 +8,7 @@ import { Copy, Download, Link2, Loader2, Maximize2, Minimize2, Network, Plus, Re
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import DatabaseIcon from "@/components/icons/DatabaseIcon.vue";
 import ConnectionGroupBadge from "@/components/connection/ConnectionGroupBadge.vue";
-import DiagramSchemaSelect from "./DiagramSchemaSelect.vue";
+
 import type { ConnectionConfig } from "@/types/database";
 import type { DiagramExportFormat } from "@/lib/export/diagramFormats";
 
@@ -118,8 +118,6 @@ function connectionIconType(id: string) {
         <SelectItem v-for="db in databases" :key="db" :value="db">{{ db }}</SelectItem>
       </SelectContent>
     </Select>
-
-    <DiagramSchemaSelect v-if="isSchemaAware" :schemas="schemas" :selected-schemas="selectedSchemas || (schema ? [schema] : [])" :loading="loadingSchemas" :disabled="!schemas.length || loadingSchemas" @update:selected-schemas="(value: string[]) => emit('set-selected-schemas', value)" />
 
     <div class="relative min-w-40 flex-1">
       <Search class="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />

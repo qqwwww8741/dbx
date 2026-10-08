@@ -14,14 +14,6 @@ define_registry![
     list_databases,
     list_database_metadata,
     list_database_storage,
-    list_xugu_tablespaces,
-    get_sqlserver_completion_context,
-    list_doris_catalogs,
-    list_doris_catalog_databases,
-    list_sqlserver_linked_servers,
-    list_sqlserver_linked_server_catalogs,
-    list_sqlserver_linked_server_schemas,
-    list_sqlserver_linked_server_tables,
     list_tables,
     get_table_comment,
     get_mysql_table_auto_increment,
@@ -31,14 +23,12 @@ define_registry![
     completion_assistant_search,
     get_object_source,
     get_event_info,
-    get_custom_type_details,
     list_schemas,
     list_schema_infos,
     list_data_types,
     get_columns,
     get_plugin_table_metadata,
     get_all_columns,
-    get_sqlserver_column_metadata,
     list_indexes,
     list_reference_key_columns,
     list_reference_keys,
@@ -57,9 +47,6 @@ define_registry![
     list_rules,
     list_owners,
     get_table_owner,
-    list_extensions,
-    list_available_extensions,
-    list_event_triggers,
 ];
 
 pub fn handles(command: &str) -> bool {
@@ -85,9 +72,10 @@ mod tests {
 
     #[test]
     fn handles_only_schema_commands() {
-        assert_eq!(COMMANDS.len(), 49);
+        assert_eq!(COMMANDS.len(), 36);
         assert!(handles("list_databases"));
-        assert!(handles("list_event_triggers"));
+        assert!(handles("get_event_info"));
+        assert!(!handles("list_event_triggers"));
         assert!(!handles("prepare_schema_diff"));
         assert!(!handles("load_connections"));
     }

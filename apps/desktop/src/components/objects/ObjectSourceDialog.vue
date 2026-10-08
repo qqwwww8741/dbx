@@ -9,7 +9,7 @@ import { copyToClipboard } from "@/lib/common/clipboard";
 import { formatSqlForDisplay, type SqlFormatDialect } from "@/lib/sql/sqlFormatter";
 import { buildEditableObjectSource, buildExecutableObjectSourceStatements, executeObjectSourceSave, formatObjectSourceSaveError, resolveObjectSourceEditDraft } from "@/lib/table/objectSourceEditor";
 import { loadObjectSourceWithRoutineFallback } from "@/lib/table/objectSourceLoad";
-import { jdbcRoutineMetadata, xuguRoutineMetadataFromDefinition, type RoutineMetadata } from "@/lib/table/routineParameters";
+import { jdbcRoutineMetadata, type RoutineMetadata } from "@/lib/table/routineParameters";
 import { executeWithProductionSqlGuard } from "@/lib/database/productionExecutionGuard";
 import * as api from "@/lib/backend/api";
 import QueryEditor from "@/components/editor/QueryEditor.vue";
@@ -29,7 +29,7 @@ const props = withDefaults(
     signature?: string;
     objectType: ObjectSourceKind;
     databaseType?: DatabaseType;
-    dialect: "mysql" | "postgres" | "sqlserver";
+    dialect: "mysql";
     formatDialect?: SqlFormatDialect;
     initialEditing?: boolean;
   }>(),
@@ -65,7 +65,7 @@ onBeforeUnmount(() => {
   ++loadSerial;
 });
 
-const canEdit = computed(() => sourceEditable.value && (props.objectType !== "SEQUENCE" || props.databaseType === "oceanbase-oracle"));
+const canEdit = computed(() => sourceEditable.value && props.objectType !== "SEQUENCE");
 const title = computed(() => `${editing.value ? t("contextMenu.editView") : t("contextMenu.viewSource")} - ${props.name}`);
 const hasRoutineMetadata = computed(() => !!routineMetadata.value && (routineMetadata.value.parameters.length > 0 || !!routineMetadata.value.returnType));
 
@@ -112,7 +112,7 @@ async function loadSource(nextEditing = props.initialEditing && canEdit.value) {
     if (serial !== loadSerial) return;
     resolvedObjectType.value = resolvedType;
     const isRoutine = resolvedType === "PROCEDURE" || resolvedType === "FUNCTION";
-    routineMetadata.value = !isRoutine ? null : result.routine_parameters !== undefined ? jdbcRoutineMetadata(result.routine_parameters) : target.databaseType === "xugu" ? xuguRoutineMetadataFromDefinition(result.source) : null;
+    routineMetadata.value = !isRoutine ? null : result.routine_parameters !== undefined ? jdbcRoutineMetadata(result.routine_parameters) : null;
     sourceEditable.value = editableAllowed;
     const displaySource = resolvedType === "SEQUENCE" ? result.source : editable;
     const formatted = await formatSqlForDisplay(displaySource, target.formatDialect ?? target.dialect, settingsStore.editorSettings.sqlFormatter);

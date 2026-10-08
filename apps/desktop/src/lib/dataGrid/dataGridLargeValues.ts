@@ -127,17 +127,13 @@ function normalizedDataTypeBase(dataType: string): string {
 }
 
 export function isTableDataVisiblePreviewColumn(databaseType: DatabaseType | undefined, dataType: string): boolean {
-  const normalized = dataType.trim().toLocaleLowerCase();
+  dataType.trim().toLocaleLowerCase();
   const base = normalizedDataTypeBase(dataType);
   if (databaseType === "mysql") {
     return base === "text" || base === "tinytext" || base === "mediumtext" || base === "longtext" || base === "varchar" || base === "json";
   }
-  if (databaseType === "postgres") {
-    return !normalized.includes("[") && (base === "char" || base === "character" || base === "varchar" || base === "text" || base === "citext" || base === "name" || base === "xml" || base === "json" || base === "jsonb" || base === "tsvector" || normalized.startsWith("character varying"));
-  }
-  if (databaseType === "db2") {
-    return base === "clob" || base === "dbclob" || base === "char" || base === "character" || base === "varchar" || base === "graphic" || base === "vargraphic";
-  }
+  {}
+  {}
   return false;
 }
 
@@ -182,7 +178,7 @@ export function canUseTableDataLargeValuePreview(databaseType: DatabaseType | un
 }
 
 export function supportsTableDataLargeValuePreview(databaseType: DatabaseType | undefined): boolean {
-  return databaseType === "mysql" || databaseType === "postgres" || databaseType === "db2";
+  return databaseType === "mysql";
 }
 
 /**

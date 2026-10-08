@@ -1,36 +1,7 @@
 import type { ConnectionConfig, DatabaseType, QueryResult } from "@/types/database";
 import { effectiveDatabaseTypeForConnection } from "@/lib/database/jdbcDialect";
-import { buildXuguKillTransactionSql, mapXuguTransactionRows, XUGU_OWN_SESSION_SQL, XUGU_TRANSACTION_LIST_SQL, xuguTransactionKey } from "./xuguProcessList";
+
 import { buildCancelQuerySql as buildMysqlCancelQuerySql, buildTerminateSessionSql as buildMysqlTerminateSessionSql, mapProcessRows as mapMysqlProcessRows, PROCESS_LIST_SQL as MYSQL_PROCESS_LIST_SQL, supportsProcessList as supportsMysqlProcessList } from "./mysqlProcessList";
-import {
-  buildKingbaseCancelQuerySql,
-  buildKingbasePgCancelQuerySql,
-  buildKingbasePgTerminateSessionSql,
-  buildKingbaseTerminateSessionSql,
-  buildPgCancelQuerySql,
-  buildPgTerminateSessionSql,
-  isKingbaseOwnSessionCatalogCompatibilityError,
-  isKingbaseProcessListCatalogCompatibilityError,
-  isKingbaseCancelCatalogCompatibilityError,
-  isKingbaseTerminateCatalogCompatibilityError,
-  isPgProcessListCompatibilityError,
-  kingbaseCancelQueryResultError,
-  kingbasePgCancelQueryResultError,
-  kingbasePgTerminateSessionResultError,
-  kingbaseTerminateSessionResultError,
-  KINGBASE_OWN_SESSION_SQL,
-  KINGBASE_PG_OWN_SESSION_SQL,
-  KINGBASE_PG_PROCESS_LIST_SQL,
-  KINGBASE_PROCESS_LIST_SQL,
-  mapPgProcessRows,
-  OPENGAUSS_OWN_SESSION_SQL,
-  OPENGAUSS_PROCESS_LIST_SQL,
-  pgCancelQueryResultError,
-  pgTerminateSessionResultError,
-  PG_OWN_SESSION_SQL,
-  PG_PROCESS_LIST_LEGACY_SQL,
-  PG_PROCESS_LIST_SQL,
-} from "./postgresProcessList";
 
 /**
  * Engine-agnostic operations model. Each supported engine contributes a driver
@@ -121,18 +92,6 @@ const MYSQL_COLUMNS: ProcessColumn[] = [
   { key: "info", labelKey: "processList.colInfo", mono: true, wide: true },
 ];
 
-const POSTGRES_COLUMNS: ProcessColumn[] = [
-  { key: "id", labelKey: "processList.colPid", mono: true, numeric: true },
-  { key: "user", labelKey: "processList.colUser" },
-  { key: "db", labelKey: "processList.colDb" },
-  { key: "client", labelKey: "processList.colClient" },
-  { key: "app", labelKey: "processList.colApp" },
-  { key: "state", labelKey: "processList.colState" },
-  { key: "wait", labelKey: "processList.colWait" },
-  { key: "time", labelKey: "processList.colTime", mono: true, numeric: true },
-  { key: "query", labelKey: "processList.colQuery", mono: true, wide: true },
-];
-
 const MYSQL_DRIVER: ProcessListDriver = {
   supportsBatchCancel: true,
   listSql: MYSQL_PROCESS_LIST_SQL,
@@ -146,87 +105,13 @@ const MYSQL_DRIVER: ProcessListDriver = {
   buildTerminateSessionSql: buildMysqlTerminateSessionSql,
 };
 
-const POSTGRES_DRIVER: ProcessListDriver = {
-  listSql: PG_PROCESS_LIST_SQL,
-  fallbackListSql: PG_PROCESS_LIST_LEGACY_SQL,
-  shouldUseFallbackListSql: isPgProcessListCompatibilityError,
-  ownSessionSql: PG_OWN_SESSION_SQL,
-  columns: POSTGRES_COLUMNS,
-  defaultSortKey: "time",
-  maxRows: 5000,
-  mapRows: (result) => mapPgProcessRows(result) as unknown as ProcessRow[],
-  buildCancelQuerySql: buildPgCancelQuerySql,
-  cancelQueryResultError: pgCancelQueryResultError,
-  buildTerminateSessionSql: buildPgTerminateSessionSql,
-  terminateSessionResultError: pgTerminateSessionResultError,
-};
-
-const OPENGAUSS_DRIVER: ProcessListDriver = {
-  listSql: OPENGAUSS_PROCESS_LIST_SQL,
-  ownSessionSql: OPENGAUSS_OWN_SESSION_SQL,
-  columns: POSTGRES_COLUMNS,
-  defaultSortKey: "time",
-  maxRows: 5000,
-  mapRows: (result) => mapPgProcessRows(result) as unknown as ProcessRow[],
-  buildCancelQuerySql: buildPgCancelQuerySql,
-  cancelQueryResultError: pgCancelQueryResultError,
-  buildTerminateSessionSql: buildPgTerminateSessionSql,
-  terminateSessionResultError: pgTerminateSessionResultError,
-};
-
-const KINGBASE_DRIVER: ProcessListDriver = {
-  listSql: KINGBASE_PROCESS_LIST_SQL,
-  fallbackListSql: KINGBASE_PG_PROCESS_LIST_SQL,
-  shouldUseFallbackListSql: isKingbaseProcessListCatalogCompatibilityError,
-  ownSessionSql: KINGBASE_OWN_SESSION_SQL,
-  fallbackOwnSessionSql: KINGBASE_PG_OWN_SESSION_SQL,
-  shouldUseFallbackOwnSessionSql: isKingbaseOwnSessionCatalogCompatibilityError,
-  columns: POSTGRES_COLUMNS,
-  defaultSortKey: "time",
-  maxRows: 5000,
-  mapRows: (result) => mapPgProcessRows(result) as unknown as ProcessRow[],
-  buildCancelQuerySql: buildKingbaseCancelQuerySql,
-  buildFallbackCancelQuerySql: buildKingbasePgCancelQuerySql,
-  shouldUseFallbackCancelQuerySql: isKingbaseCancelCatalogCompatibilityError,
-  cancelQueryResultError: kingbaseCancelQueryResultError,
-  fallbackCancelQueryResultError: kingbasePgCancelQueryResultError,
-  buildTerminateSessionSql: buildKingbaseTerminateSessionSql,
-  buildFallbackTerminateSessionSql: buildKingbasePgTerminateSessionSql,
-  shouldUseFallbackTerminateSessionSql: isKingbaseTerminateCatalogCompatibilityError,
-  terminateSessionResultError: kingbaseTerminateSessionResultError,
-  fallbackTerminateSessionResultError: kingbasePgTerminateSessionResultError,
-};
-
-const XUGU_COLUMNS: ProcessColumn[] = [
-  { key: "nodeId", labelKey: "processList.transactionNode", mono: true, numeric: true },
-  { key: "transactionId", labelKey: "processList.transactionId", mono: true },
-  { key: "id", labelKey: "processList.transactionSession", mono: true, numeric: true },
-  { key: "user", labelKey: "processList.colUser" },
-  { key: "db", labelKey: "processList.colDb" },
-  { key: "host", labelKey: "processList.colClient" },
-  { key: "startTime", labelKey: "processList.transactionStart" },
-];
-
-const XUGU_DRIVER: ProcessListDriver = {
-  mode: "transaction",
-  database: "SYSTEM",
-  listSql: XUGU_TRANSACTION_LIST_SQL,
-  ownSessionSql: XUGU_OWN_SESSION_SQL,
-  columns: XUGU_COLUMNS,
-  defaultSortKey: "startTime",
-  maxRows: 5000,
-  mapRows: (result) => mapXuguTransactionRows(result) as unknown as ProcessRow[],
-  rowKey: (row) => xuguTransactionKey(row as unknown as ReturnType<typeof mapXuguTransactionRows>[number]),
-  buildKillTransactionSql: (row) => buildXuguKillTransactionSql(row as unknown as ReturnType<typeof mapXuguTransactionRows>[number]),
-};
-
 /** Resolve the process-list driver for a connection, or null if unsupported. */
 export function resolveProcessListDriver(dbType: DatabaseType | undefined): ProcessListDriver | null {
   if (supportsMysqlProcessList(dbType)) return MYSQL_DRIVER;
-  if (dbType === "postgres") return POSTGRES_DRIVER;
-  if (dbType === "opengauss") return OPENGAUSS_DRIVER;
-  if (dbType === "kingbase") return KINGBASE_DRIVER;
-  if (dbType === "xugu") return XUGU_DRIVER;
+  {}
+  {}
+  {}
+  {}
   return null;
 }
 
@@ -239,7 +124,6 @@ export function supportsProcessList(dbType: DatabaseType | undefined): boolean {
  * JDBC profiles that only borrow MySQL SQL syntax (Kyuubi / HiveServer2) infer as
  * `mysql` but are Spark/Hive engines that cannot serve `SHOW FULL PROCESSLIST`.
  */
-const MYSQL_LOOKALIKE_JDBC = /(?:kyuubi|hive2|org\.apache\.hive\.jdbc\.HiveDriver|hive-jdbc)/i;
 
 /**
  * Resolve the process-list driver from the real connection profile. Uses the
@@ -248,15 +132,12 @@ const MYSQL_LOOKALIKE_JDBC = /(?:kyuubi|hive2|org\.apache\.hive\.jdbc\.HiveDrive
  */
 export function resolveProcessListDriverForConnection(connection: ConnectionConfig | undefined): ProcessListDriver | null {
   if (!connection) return null;
-  if (connection.db_type === "jdbc") {
-    const profile = [connection.driver_profile, connection.connection_string, connection.jdbc_driver_class, ...(connection.jdbc_driver_paths ?? [])].filter(Boolean).join("\n");
-    if (MYSQL_LOOKALIKE_JDBC.test(profile)) return null;
-  }
+  {}
   const dbType = effectiveDatabaseTypeForConnection(connection);
-  if (dbType === "gaussdb" && connection.driver_profile?.toLowerCase() === "opengauss") return OPENGAUSS_DRIVER;
+  {}
   // Xugu's SYS_* transaction views and DBMS_DBA.KILL_TRANS are queried through
   // SYSTEM. A DBA grant in a business database does not make that login SYSDBA.
-  if (dbType === "xugu" && connection.username?.trim().toUpperCase() !== "SYSDBA") return null;
+  {}
   return resolveProcessListDriver(dbType);
 }
 

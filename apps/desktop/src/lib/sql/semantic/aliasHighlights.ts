@@ -20,7 +20,7 @@ interface QueryBlock {
 
 const SET_OPERATORS = new Set(["union", "intersect", "except"]);
 // MySQL aliases and SQL Server default collations compare identifiers case-insensitively.
-const CASE_INSENSITIVE_ALIAS_DIALECTS = new Set(["mysql", "sqlserver", "sqlite"]);
+const CASE_INSENSITIVE_ALIAS_DIALECTS = new Set(["mysql"]);
 export const MAX_ALIAS_HIGHLIGHT_SQL_LENGTH = 128 * 1024;
 
 function lastBlock(blocks: QueryBlock[], predicate: (block: QueryBlock) => boolean): QueryBlock | undefined {

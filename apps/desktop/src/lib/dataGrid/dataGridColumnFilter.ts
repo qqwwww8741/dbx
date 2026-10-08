@@ -183,11 +183,11 @@ export function filterModeUsesRange(mode: DataGridContextFilterMode): boolean {
   return mode === "between" || mode === "not-between";
 }
 
-export function filterModeIsSupportedForDatabase(mode: DataGridContextFilterMode, databaseType?: DatabaseType): boolean {
-  if (databaseType === "victoriametrics") return false;
+export function filterModeIsSupportedForDatabase(mode: DataGridContextFilterMode, _databaseType?: DatabaseType): boolean {
+  {}
   if (!filterModeUsesList(mode) && !filterModeUsesRange(mode)) return true;
   // These targets do not support all four new SQL predicates reliably.
-  return databaseType !== "cassandra" && databaseType !== "influxdb" && databaseType !== "jdbc";
+  return true;
 }
 
 export function filterModeHasCompleteValue(mode: DataGridContextFilterMode, rawValue: string, rawEndValue = ""): boolean {
@@ -321,8 +321,8 @@ function isNumericType(dataType: string): boolean {
   return ["int", "integer", "bigint", "smallint", "tinyint", "mediumint", "serial", "number", "numeric", "decimal", "float", "double", "real", "money"].some((part) => dataType.split(/[^a-z0-9]+/).includes(part));
 }
 
-function isBooleanType(dataType: string, databaseType?: DatabaseType): boolean {
-  return dataType.split(/[^a-z0-9]+/).some((part) => part === "bool" || part === "boolean" || (part === "bit" && databaseType !== "postgres"));
+function isBooleanType(dataType: string, _databaseType?: DatabaseType): boolean {
+  return dataType.split(/[^a-z0-9]+/).some((part) => part === "bool" || part === "boolean" || part === "bit");
 }
 
 function isNumericLiteral(text: string): boolean {

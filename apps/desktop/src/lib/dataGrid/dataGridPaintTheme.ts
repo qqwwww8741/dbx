@@ -206,13 +206,13 @@ function normalizeCssColorWithBrowser(value: string): string | null {
 }
 
 function normalizeColorWithCanvas(value: string): string | null {
-  if (!value || typeof document === "undefined") return value || null;
+  if (!value || typeof document === "undefined") return value;
   try {
     if (canvasColorProbe === undefined) {
       canvasColorProbe = document.createElement("canvas").getContext("2d");
     }
     const ctx = canvasColorProbe;
-    if (!ctx) return value;
+    if (!ctx) return value || null;
 
     ctx.fillStyle = "#010203";
     ctx.fillStyle = value;

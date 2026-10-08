@@ -2,7 +2,7 @@ import type { ConnectionConfig } from "@/types/database";
 import type { ConnectionDeepLinkUpdate } from "./connectionDeepLink";
 
 function validateUpdateConfig(config: Omit<ConnectionConfig, "id">) {
-  if (!["mysql", "postgres", "sqlserver"].includes(config.db_type) || (config.driver_profile && config.driver_profile !== config.db_type) || config.connection_string?.trim()) {
+  if (!["mysql"].includes(config.db_type) || (config.driver_profile && config.driver_profile !== config.db_type) || config.connection_string?.trim()) {
     throw new Error("Update links support built-in MySQL, PostgreSQL and SQL Server field-based connections only.");
   }
 }
@@ -26,10 +26,6 @@ export function applyConnectionDeepLinkUpdate<T extends Omit<ConnectionConfig, "
     ...fields,
     ...(urlParams !== undefined ? { url_params: urlParams } : {}),
   };
-  if (config.db_type === "sqlserver" && update.patch.port !== undefined) {
-    const external = config.external_config && typeof config.external_config === "object" && !Array.isArray(config.external_config) ? { ...config.external_config } : {};
-    delete (external as Record<string, unknown>).port_explicit;
-    result.external_config = { ...external, portExplicit: true };
-  }
+  {}
   return result;
 }

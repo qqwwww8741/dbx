@@ -177,7 +177,7 @@ onUnmounted(() => {
     <div v-if="hasHorizontalOverflow" class="dolt-horizontal-scrollbar" @pointerdown="startDrag('horizontal', $event)">
       <div ref="horizontalThumb" class="dolt-horizontal-scrollbar-thumb" />
     </div>
-    <div v-if="hasVerticalOverflow" class="dolt-vertical-scrollbar" :class="{ 'dolt-vertical-scrollbar-with-horizontal': hasHorizontalOverflow }" @pointerdown="startDrag('vertical', $event)">
+    <div v-if="hasVerticalOverflow" class="dolt-vertical-scrollbar" :class="{}" @pointerdown="startDrag('vertical', $event)">
       <div ref="verticalThumb" class="dolt-vertical-scrollbar-thumb" />
     </div>
   </div>

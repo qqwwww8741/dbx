@@ -207,7 +207,7 @@ export function useDataGridLargeValues(options: UseDataGridLargeValuesOptions) {
       generation !== visibleLargeValuePreviewRequestedGeneration ||
       failedVisibleLargeValuePreviewResults.has(sourceResult) ||
       options.showTranspose.value ||
-      (options.databaseType.value !== "mysql" && options.databaseType.value !== "postgres") ||
+      options.databaseType.value !== "mysql" ||
       !options.connectionId.value ||
       !tableMeta?.tableName ||
       tableMeta.primaryKeys.length === 0 ||
@@ -487,12 +487,7 @@ export function useDataGridLargeValues(options: UseDataGridLargeValuesOptions) {
       }
     }
     if (requestsByColumn.size === 0) return resolved;
-    if (
-      (options.databaseType.value !== "mysql" && options.databaseType.value !== "postgres" && options.databaseType.value !== "oracle" && options.databaseType.value !== "db2") ||
-      !options.connectionId.value ||
-      !options.tableMeta.value?.tableName ||
-      options.tableMeta.value.primaryKeys.length === 0
-    ) {
+    if (options.databaseType.value !== "mysql" || !options.connectionId.value || !options.tableMeta.value?.tableName || options.tableMeta.value.primaryKeys.length === 0) {
       throw new Error(options.translate("grid.largeValueNeedsRowIdentifier"));
     }
     const primaryKeyIndexes = options.tableMeta.value.primaryKeys.map(largeValueSourceColumnIndex);

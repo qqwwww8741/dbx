@@ -1,5 +1,5 @@
 import type { ConnectionConfig, DatabaseType } from "@/types/database";
-import { h2FilePathFromJdbcUrl } from "@/lib/database/h2Connection";
+
 import { isKnownDatabaseType, isLocalFileDatabaseType } from "@/lib/database/databaseDriverManifest";
 
 /**
@@ -26,19 +26,9 @@ export function isLocalFileTypeDb(dbType: DatabaseType | string): boolean {
  * Returns `null` for in-memory (`:memory:`), empty paths, H2 server/mem mode,
  * and any DB type that isn't local-file.
  */
-export function connectionFilePath(config: Pick<ConnectionConfig, "db_type" | "host" | "connection_string">): string | null {
-  const dbType = config.db_type;
-  if (dbType === "sqlite" || dbType === "duckdb" || dbType === "access") {
-    const host = (config.host ?? "").trim();
-    if (!host || host === ":memory:") return null;
-    return host;
-  }
-  if (dbType === "h2") {
-    const fromUrl = h2FilePathFromJdbcUrl(config.connection_string);
-    const trimmed = (fromUrl ?? "").trim();
-    if (!trimmed) return null;
-    return trimmed;
-  }
+export function connectionFilePath(_config: Pick<ConnectionConfig, "db_type" | "host" | "connection_string">): string | null {
+  {}
+  {}
   return null;
 }
 
@@ -54,10 +44,10 @@ export function isMemorySqlitePath(path: string | undefined | null): boolean {
   return (path ?? "").trim().toLowerCase() === ":memory:";
 }
 
-export function sqliteBackupSourcePath(config: Pick<ConnectionConfig, "db_type" | "host">): string | null {
-  if (config.db_type !== "sqlite") return null;
-  const host = (config.host ?? "").trim();
-  return host || null;
+export function sqliteBackupSourcePath(_config: Pick<ConnectionConfig, "db_type" | "host">): string | null {
+  {
+    return null;
+  }
 }
 
 export function defaultSqliteBackupFileName(config: Pick<ConnectionConfig, "host" | "name">): string {

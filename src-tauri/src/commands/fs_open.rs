@@ -1,6 +1,5 @@
 use std::path::{Component, Path, PathBuf};
 
-use dbx_core::db::sqlite::path_has_sqlite_header;
 use dbx_core::path_utils::expand_tilde;
 
 /// Reveal a file in the platform's file manager.
@@ -73,12 +72,6 @@ fn validate_path(raw: &str) -> Result<PathBuf, String> {
 pub async fn reveal_path_in_file_manager(path: String) -> Result<(), String> {
     let resolved = validate_path(&path)?;
     reveal_in_file_manager(&resolved)
-}
-
-#[tauri::command]
-pub async fn is_sqlite_database_file(path: String) -> Result<bool, String> {
-    let resolved = validate_path(&path)?;
-    path_has_sqlite_header(&resolved)
 }
 
 fn validate_database_backup_root(raw: &str) -> Result<PathBuf, String> {
@@ -276,26 +269,6 @@ mod tests {
         assert!(result.is_err());
         assert!(path.exists());
         let _ = std::fs::remove_dir_all(scratch);
-    }
-
-    #[test]
-    fn sqlite_header_is_detected() {
-        let path = std::env::temp_dir().join(format!("dbx-sqlite-header-{}.conf", uuid::Uuid::new_v4()));
-        std::fs::write(&path, b"SQLite format 3\0extra").unwrap();
-
-        assert!(path_has_sqlite_header(&path).unwrap());
-
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn non_sqlite_header_is_rejected() {
-        let path = std::env::temp_dir().join(format!("dbx-sqlite-header-{}.conf", uuid::Uuid::new_v4()));
-        std::fs::write(&path, b"not sqlite").unwrap();
-
-        assert!(!path_has_sqlite_header(&path).unwrap());
-
-        let _ = std::fs::remove_file(path);
     }
 
     #[test]

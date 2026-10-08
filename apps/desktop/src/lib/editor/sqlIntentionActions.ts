@@ -22,7 +22,7 @@ export interface IntentionActionContext {
   sql: string;
   cursor: number;
   databaseType?: DatabaseType;
-  dialect?: "mysql" | "postgres" | "sqlserver";
+  dialect?: "mysql";
   /** 选择区间，非空时优先走批量限定逻辑 */
   selection?: { from: number; to: number };
 }
@@ -799,7 +799,7 @@ function resolveNavigationTarget(model: SqlSemanticModel, cursorIntent: SqlSeman
 
 // ==================== Expand Wildcard Context ====================
 
-export function prepareExpandWildcardContext(sql: string, cursor: number, databaseType?: DatabaseType, dialect?: "mysql" | "postgres" | "sqlserver"): { rowSources: SqlSemanticRowSource[]; starSpan: { start: number; end: number } } | null {
+export function prepareExpandWildcardContext(sql: string, cursor: number, databaseType?: DatabaseType, dialect?: "mysql"): { rowSources: SqlSemanticRowSource[]; starSpan: { start: number; end: number } } | null {
   const model = buildSqlSemanticModel(sql, cursor, { databaseType, dialect });
 
   if (model.cursorIntent.kind !== "star") return null;

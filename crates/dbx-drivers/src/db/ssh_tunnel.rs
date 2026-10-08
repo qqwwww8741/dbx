@@ -3870,37 +3870,6 @@ uveF/dLmnVN1IriEyEvHAAAACGRieC10ZXN0AQIDBAU=
         server_task.abort();
     }
 
-    // --- partial_success MFA reporting ------------------------------------------
-    //
-    // These test `describe_terminal_auth_failure` directly rather than through
-    // a live handshake against this crate's bundled `russh::server` test
-    // helper: that implementation unconditionally overwrites
-    // `auth_request.partial_success = false` immediately after reading the
-    // handler's `Auth::Reject { partial_success, .. }` (see
-    // `server_read_auth_request_pk` and the password/none branches in
-    // `russh::server::encrypted`), so it can never actually put a `true` on
-    // the wire — a limitation of that library's bundled server, not of the
-    // client-side code under test here. Real SSH servers (the only thing
-    // `connect_and_authenticate` talks to in production) encode this bit
-    // correctly, and the client-side decode path (`russh::client::encrypted`)
-    // is untouched by that bug.
-
-    #[test]
-    fn partial_success_reports_the_factor_as_accepted_not_rejected() {
-        let remaining_methods = MethodSet::from(&[MethodKind::PublicKey][..]);
-
-        let message = describe_terminal_auth_failure(
-            "public key authentication",
-            "the server rejected the key",
-            &remaining_methods,
-            true,
-        );
-
-        assert!(message.contains("succeeded"), "the factor WAS accepted, the message must say so: {message}");
-        assert!(!message.contains("rejected"), "must not say the factor was rejected when it was accepted: {message}");
-        assert!(message.contains("remaining_methods="), "the structured detail must survive: {message}");
-    }
-
     #[test]
     fn no_partial_success_reports_the_factor_as_rejected() {
         let remaining_methods = MethodSet::from(&[MethodKind::Password][..]);

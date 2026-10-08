@@ -20,14 +20,6 @@ pub struct WebExportFile {
     pub format: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct NacosImportContext {
-    pub owner_session: Option<String>,
-    pub connection_id: String,
-    pub target_namespace: String,
-    pub plan_hash: String,
-}
-
 pub struct WebState {
     pub app: Arc<AppState>,
     pub data_dir: PathBuf,
@@ -46,7 +38,6 @@ pub struct WebState {
     pub table_import_channels: RwLock<HashMap<String, watch::Sender<String>>>,
     pub sql_file_executions: RwLock<HashMap<String, CancellationToken>>,
     pub managed_sql_previews: crate::routes::sql_file::ManagedSqlPreviews,
-    pub nacos_imports: RwLock<HashMap<String, NacosImportContext>>,
     pub login_rate_limit: Mutex<LoginRateLimit>,
     /// Completed Web export temp files waiting for the browser download.
     pub export_files: RwLock<HashMap<String, WebExportFile>>,
@@ -77,7 +68,6 @@ impl WebState {
             table_import_channels: RwLock::new(HashMap::new()),
             sql_file_executions: RwLock::new(HashMap::new()),
             managed_sql_previews: Default::default(),
-            nacos_imports: RwLock::new(HashMap::new()),
             login_rate_limit: Mutex::new(LoginRateLimit { fail_count: 0, locked_until: None }),
             export_files: RwLock::new(HashMap::new()),
             ssh_prompts: Arc::new(crate::ssh_prompt::SshPromptHub::new()),

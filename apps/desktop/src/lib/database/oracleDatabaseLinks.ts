@@ -1,7 +1,7 @@
 import type { DatabaseType, QueryResult } from "@/types/database";
 
-export function supportsOracleDatabaseLinks(databaseType?: DatabaseType): boolean {
-  return databaseType === "oracle" || databaseType === "oceanbase-oracle";
+export function supportsOracleDatabaseLinks(_databaseType?: DatabaseType): boolean {
+  return false;
 }
 
 export interface OracleDatabaseLink {
@@ -30,8 +30,8 @@ export const OCEANBASE_ORACLE_DATABASE_LINKS_SQL = `SELECT L.OWNER, L.DB_LINK, L
 FROM ALL_DB_LINKS L
 ORDER BY L.DB_LINK`;
 
-export function oracleDatabaseLinksSql(databaseType?: DatabaseType): string {
-  return databaseType === "oceanbase-oracle" ? OCEANBASE_ORACLE_DATABASE_LINKS_SQL : ORACLE_DATABASE_LINKS_SQL;
+export function oracleDatabaseLinksSql(_databaseType?: DatabaseType): string {
+  return ORACLE_DATABASE_LINKS_SQL;
 }
 
 export function oracleDatabaseLinksFromResult(result: QueryResult): OracleDatabaseLink[] {
@@ -101,11 +101,11 @@ export function alterOracleDatabaseLinkSql(link: OracleDatabaseLink, password: s
   return `ALTER ${link.owner === "PUBLIC" ? "PUBLIC " : ""}DATABASE LINK ${oracleDatabaseLinkName(link.name)} CONNECT TO ${oracleQuotedIdentifier(link.username, true)} IDENTIFIED BY "${password}"`;
 }
 
-export function dropOracleDatabaseLinkSql(link: OracleDatabaseLink, databaseType?: DatabaseType): string {
-  const publicKeyword = databaseType !== "oceanbase-oracle" && link.owner === "PUBLIC" ? "PUBLIC " : "";
+export function dropOracleDatabaseLinkSql(link: OracleDatabaseLink, _databaseType?: DatabaseType): string {
+  const publicKeyword = link.owner === "PUBLIC" ? "PUBLIC " : "";
   return `DROP ${publicKeyword}DATABASE LINK ${oracleDatabaseLinkName(link.name)}`;
 }
-export function testOracleDatabaseLinkSql(link: OracleDatabaseLink, databaseType?: DatabaseType): string {
+export function testOracleDatabaseLinkSql(link: OracleDatabaseLink, _databaseType?: DatabaseType): string {
   const name = oracleDatabaseLinkName(link.name);
-  return databaseType === "oceanbase-oracle" ? `SELECT 1 AS DBX_LINK_OK FROM SYS.ALL_USERS@${name} WHERE ROWNUM = 1` : `SELECT 1 AS DBX_LINK_OK FROM DUAL@${name}`;
+  return `SELECT 1 AS DBX_LINK_OK FROM DUAL@${name}`;
 }

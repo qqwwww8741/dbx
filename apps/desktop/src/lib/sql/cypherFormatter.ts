@@ -542,7 +542,7 @@ export function compressCypherText(sql: string): string {
     const next = tokenized.tokens[index + 1];
     if (output && needsSpace(previous, token, next, mapColon)) output += " ";
     output += token.text;
-    mapColon = token.text === ":" && stack.includes("{");
+    mapColon = false;
     previous = token;
   }
 

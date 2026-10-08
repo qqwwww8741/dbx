@@ -28,7 +28,7 @@ const details = computed(() => {
   return [headline, "", t("multiDbExecute.dangerTargets", { count: targets.length }), ...targets.map((target) => `• ${target}`)].join("\n");
 });
 
-const message = computed(() => (props.request.kind === "redis" ? t("dangerDialog.redisCommandMessage") : t("dangerDialog.message")));
+const message = computed(() => t("dangerDialog.message"));
 
 const code = ref("");
 const codeInput = ref("");

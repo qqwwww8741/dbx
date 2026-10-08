@@ -21,14 +21,6 @@ export interface DiagramDialectAdapter {
 
 const DEFAULT_ID_TYPE_BY_DIALECT: Partial<Record<TableStructureDialect, string>> = {
   mysql: "bigint",
-  postgres: "bigint",
-  sqlserver: "bigint",
-  h2: "bigint",
-  informix: "bigint",
-  oracle: "NUMBER",
-  sqlite: "INTEGER",
-  duckdb: "INTEGER",
-  clickhouse: "UInt64",
 };
 
 function resolveDefaultIdType(dialect: TableStructureDialect, dataTypeOptions: readonly string[]): string {

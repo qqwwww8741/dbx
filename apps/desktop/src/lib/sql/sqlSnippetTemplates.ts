@@ -128,23 +128,14 @@ interface BuiltinSqlSnippetRule {
   buildBody: BuiltinSqlSnippetBodyBuilder;
 }
 
-const PARENTHESIZED_ADD_COLUMN_DATABASES = new Set<DatabaseType>(["oracle", "oceanbase-oracle", "yashandb", "xugu", "dameng", "iris", "informix"]);
-const ADD_COLUMN_WITHOUT_COLUMN_KEYWORD_DATABASES = new Set<DatabaseType>(["sqlserver", "kingbase", "cassandra", "teradata"]);
-
-function buildUpdateSnippetBody(databaseType?: DatabaseType): string {
-  if (databaseType === "clickhouse") {
-    return "ALTER TABLE table\nUPDATE column = value\nWHERE condition;";
-  }
+function buildUpdateSnippetBody(_databaseType?: DatabaseType): string {
+  {}
   return "UPDATE table\nSET column = value\nWHERE condition;";
 }
 
-function buildAlterTableAddColumnSnippetBody(databaseType?: DatabaseType): string {
-  if (databaseType && PARENTHESIZED_ADD_COLUMN_DATABASES.has(databaseType)) {
-    return "ALTER TABLE table\nADD (column type);";
-  }
-  if (databaseType && ADD_COLUMN_WITHOUT_COLUMN_KEYWORD_DATABASES.has(databaseType)) {
-    return "ALTER TABLE table\nADD column type;";
-  }
+function buildAlterTableAddColumnSnippetBody(_databaseType?: DatabaseType): string {
+  {}
+  {}
   return "ALTER TABLE table\nADD COLUMN column type;";
 }
 

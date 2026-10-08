@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { emptyAnnotations } from "@/docs/annotationEdits";
 import type { SchemaSnapshot, SnapshotWarning, TableKind } from "@/docs/types";
 import * as api from "@/lib/backend/api";
-import { isSchemaAware } from "@/lib/database/databaseFeatureSupport";
+
 import type { SidebarObjectKind } from "@/lib/database/databaseObjectCapabilities";
 import {
   applyTemplate,
@@ -71,7 +71,7 @@ let generation = 0;
 
 const steps = computed(() => [t("dataDictionary.stepDatabases"), t("dataDictionary.stepObjects"), t("dataDictionary.stepTemplate"), t("dataDictionary.stepLayout"), t("dataDictionary.stepFile")]);
 const dbType = computed(() => connectionStore.getConfig(props.prefillConnectionId || "")?.db_type);
-const schemaAware = computed(() => isSchemaAware(dbType.value));
+
 const checkedDatabases = computed(() => databases.value.filter((item) => item.checked).map((item) => item.name));
 const checkedSchemas = computed(() => schemas.value.filter((item) => item.checked && checkedDatabases.value.includes(item.database)));
 const filteredObjects = computed(() => {
@@ -81,7 +81,7 @@ const filteredObjects = computed(() => {
 const orderedObjects = computed(() => order.value.flatMap((key) => objects.value.filter((item) => objectKey(item) === key)));
 const canNext = computed(() => {
   if (loading.value) return false;
-  if (step.value === 0) return checkedDatabases.value.length > 0 && (!schemaAware.value || checkedSchemas.value.length > 0 || schemas.value.length === 0);
+  if (step.value === 0) return checkedDatabases.value.length > 0;
   if (step.value === 1) return order.value.length > 0;
   return true;
 });
@@ -192,25 +192,10 @@ async function toggleDatabase(item: { name: string; checked: boolean }, checked:
 }
 
 async function loadSchemas(): Promise<void> {
-  if (!schemaAware.value) {
+  {
     schemas.value = [];
     return;
   }
-  const connectionId = props.prefillConnectionId;
-  if (!connectionId) return;
-  const previous = new Set(schemas.value.filter((item) => item.checked).map((item) => `${item.database}.${item.name}`));
-  const firstLoad = schemas.value.length === 0;
-  const next: Array<{ database: string; name: string; checked: boolean }> = [];
-  for (const database of checkedDatabases.value) {
-    const names = dictionaryCatalogNames(await api.listSchemas(connectionId, database), dbType.value, database === props.prefillDatabase ? props.prefillSchema : undefined);
-    for (const name of names) {
-      const key = `${database}.${name}`;
-      const prefilled = !props.prefillSchema || (database === props.prefillDatabase && name === props.prefillSchema);
-      next.push({ database, name, checked: firstLoad ? prefilled : previous.has(key) });
-    }
-  }
-  if (firstLoad && props.prefillSchema && next.length > 0 && !next.some((item) => item.checked)) next.forEach((item) => (item.checked = true));
-  schemas.value = next;
 }
 
 async function loadObjects(): Promise<void> {
@@ -219,7 +204,7 @@ async function loadObjects(): Promise<void> {
   loading.value = true;
   loadError.value = null;
   try {
-    const targets = schemaAware.value ? checkedSchemas.value.map((item) => ({ database: item.database, schema: item.name })) : checkedDatabases.value.map((database) => ({ database, schema: "" }));
+    const targets = checkedDatabases.value.map((database) => ({ database, schema: "" }));
     const listed: DictionaryObjectRef[] = [];
     for (const target of targets) {
       const tables = await api.listTables(connectionId, target.database, target.schema, undefined, undefined, undefined, ["TABLE", "VIEW", "MATERIALIZED_VIEW"] satisfies SidebarObjectKind[]);
@@ -260,7 +245,7 @@ async function collectSelection(): Promise<{ tables: DictionaryTable[]; warnings
     }
   }
   for (const database of checkedDatabases.value) {
-    const schemaNames = schemaAware.value ? checkedSchemas.value.filter((item) => item.database === database).map((item) => item.name) : [];
+    const schemaNames: string[] = [];
     const tableNames = orderedObjects.value.filter((item) => item.database === database).map((item) => (item.schema ? `${item.schema}.${item.name}` : item.name));
     if (tableNames.length === 0) continue;
     try {
@@ -483,14 +468,6 @@ onBeforeUnmount(() => {
             <label v-for="item in databases" :key="item.name" class="flex items-center gap-2 py-1 text-sm">
               <input type="checkbox" :checked="item.checked" @change="toggleDatabase(item, ($event.target as HTMLInputElement).checked)" />
               <span>{{ item.name }}</span>
-            </label>
-          </section>
-          <section v-if="schemaAware">
-            <h3 class="mb-2 text-sm font-medium">{{ t("dataDictionary.schemasHeading") }}</h3>
-            <p v-if="schemas.length === 0" class="text-sm text-muted-foreground">{{ t("dataDictionary.noSchemaLevel") }}</p>
-            <label v-for="item in schemas" :key="`${item.database}.${item.name}`" class="flex items-center gap-2 py-1 text-sm">
-              <input v-model="item.checked" type="checkbox" />
-              <span>{{ item.database }}.{{ item.name }}</span>
             </label>
           </section>
         </div>

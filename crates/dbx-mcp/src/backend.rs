@@ -9,7 +9,7 @@ use dbx_core::{
     agent_events::{ToolCall, ToolResult},
     agent_tools::{self, format_query_result_as_text, AgentSqlPermissions, QueryCellWindow},
     connection::{connection_configs_pool_equivalent, AppState, ConnectionLifecycleSnapshot, SalesforceCurrentUser},
-    db::{mongo_driver::MongoIndexSpec, redis_driver::RedisCommandResult, ColumnInfo, TableInfo},
+    db::{ColumnInfo, TableInfo},
     history::HistoryEntry,
     mcp_policy::{connection_group_paths, McpConnectionGroupPath},
     models::connection::{ConnectionConfig, DatabaseType},
@@ -21,10 +21,7 @@ use tokio::sync::Mutex;
 
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 
-use crate::{
-    mongo::MongoCommand,
-    transaction::{MysqlTransactionIo, TransactionOwner, TransactionOwnerConfig, TransactionOwnerRegistry},
-};
+use crate::transaction::{MysqlTransactionIo, TransactionOwner, TransactionOwnerConfig, TransactionOwnerRegistry};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct ConnectionSummary {
@@ -136,11 +133,10 @@ fn is_false(value: &bool) -> bool {
 }
 
 pub(crate) fn native_mysql_transaction_connection(connection: &ConnectionConfig) -> bool {
-    connection.db_type == DatabaseType::Mysql
-        && connection.driver_profile.as_deref().is_none_or(|profile| {
-            let profile = profile.trim();
-            profile.is_empty() || profile.eq_ignore_ascii_case("mysql")
-        })
+    true && connection.driver_profile.as_deref().is_none_or(|profile| {
+        let profile = profile.trim();
+        profile.is_empty() || profile.eq_ignore_ascii_case("mysql")
+    })
 }
 
 fn transaction_operation_timeout(
@@ -311,26 +307,7 @@ pub trait DbxBackend: Send + Sync {
         arguments: Value,
         permissions: AgentSqlPermissions,
     ) -> ToolResult;
-    #[cfg(feature = "mq-admin")]
-    async fn send_message(
-        &self,
-        connection: &ConnectionConfig,
-        request: dbx_core::mq::SendMessageRequest,
-    ) -> Result<dbx_core::mq::SendMessageResponse, String> {
-        let _ = (connection, request);
-        Err("Message queue sending is not supported by this backend.".to_string())
-    }
-    #[cfg(feature = "mq-admin")]
-    async fn peek_messages(
-        &self,
-        connection: &ConnectionConfig,
-        topic: dbx_core::mq::TopicRef,
-        count: u32,
-        options: dbx_core::mq::PeekMessagesOptions,
-    ) -> Result<dbx_core::mq::PeekMessagesResult, String> {
-        let _ = (connection, topic, count, options);
-        Err("Message queue reading is not supported by this backend.".to_string())
-    }
+
     async fn execute_query(
         &self,
         connection: &ConnectionConfig,
@@ -436,33 +413,7 @@ pub trait DbxBackend: Send + Sync {
         let _ = (connection, database, schema, name, object_type, signature);
         Err("Routine source is not supported by this backend.".to_string())
     }
-    async fn execute_redis_command(
-        &self,
-        connection: &ConnectionConfig,
-        database: u32,
-        command: &str,
-        skip_safety_check: bool,
-    ) -> Result<RedisCommandResult, String> {
-        let _ = (connection, database, command, skip_safety_check);
-        Err("Redis commands are not supported by this backend.".to_string())
-    }
-    async fn execute_mongo_command(
-        &self,
-        connection: &ConnectionConfig,
-        database: &str,
-        command: &MongoCommand,
-    ) -> Result<dbx_core::db::QueryResult, String> {
-        let _ = (connection, database, command);
-        Err("MongoDB shell commands are not supported by this backend.".to_string())
-    }
-    /// Connected-user identity for a Salesforce connection: who a write would be
-    /// attributed to, plus the profile's "Modify All Data" flag. Salesforce has
-    /// no session-scoped identity, so this reads the pool's cached user info and
-    /// creates the pool when the MCP process is still cold.
-    async fn salesforce_current_user(&self, connection: &ConnectionConfig) -> Result<SalesforceCurrentUser, String> {
-        let _ = connection;
-        Err("Salesforce identity is not supported by this backend.".to_string())
-    }
+
     /// Release the connection pool pinned by an MCP session (`client_session_id`).
     async fn close_client_session(
         &self,
@@ -842,13 +793,7 @@ impl LocalBackend {
         let desktop_settings = storage.load_desktop_settings().await.unwrap_or_default();
         let data_dir = path.parent().unwrap_or_else(|| Path::new(".")).to_path_buf();
         let plugin_dir = local_plugin_dir(&desktop_settings, &data_dir);
-        let agent_dir = local_agent_dir(&desktop_settings, &data_dir);
-        let state = Arc::new(AppState::new_with_plugin_and_agent_dir_and_app_version(
-            storage,
-            plugin_dir,
-            agent_dir,
-            app_version,
-        ));
+        let state = Arc::new(AppState::new_with_plugin_dir_and_app_version(storage, plugin_dir, app_version));
         let config_map: HashMap<String, ConnectionConfig> =
             configs.into_iter().map(|config| (config.id.clone(), config)).collect();
         *state.configs.write().await = config_map;
@@ -1058,24 +1003,6 @@ fn parse_routine_kind(object_type: &str) -> Result<dbx_core::db::ObjectSourceKin
     }
 }
 
-fn local_agent_dir(settings: &DesktopSettings, data_dir: &Path) -> PathBuf {
-    let legacy_driver_base =
-        settings.driver_store_dir.as_ref().filter(|value| !value.trim().is_empty()).map(PathBuf::from);
-    settings
-        .agent_store_dir
-        .as_ref()
-        .filter(|value| !value.trim().is_empty())
-        .map(PathBuf::from)
-        .or_else(|| legacy_driver_base.map(|base| base.join("agents")))
-        .unwrap_or_else(|| {
-            if std::env::var_os("DBX_DATA_DIR").filter(|value| !value.is_empty()).is_some() {
-                data_dir.join("agents")
-            } else {
-                dbx_core::connection::default_agent_dir()
-            }
-        })
-}
-
 #[async_trait]
 impl DbxBackend for LocalBackend {
     async fn load_mcp_global_policy(&self) -> Result<McpGlobalPolicy, String> {
@@ -1113,16 +1040,7 @@ impl DbxBackend for LocalBackend {
     }
 
     async fn list_databases(&self, connection: &ConnectionConfig) -> Result<Vec<String>, String> {
-        if connection.db_type == DatabaseType::MongoDb {
-            if self.state.pool_handle(&connection.id).await.is_none() {
-                self.state.get_or_create_pool(&connection.id, None).await?;
-            }
-            if matches!(self.state.pool_handle(&connection.id).await, Some(dbx_core::connection::PoolKind::MongoDb(_)))
-            {
-                return dbx_core::mongo_ops::mongo_list_databases_core(&self.state, &connection.id).await;
-            }
-            // Keep the existing metadata retry path for MongoDB agent pools.
-        }
+        {}
 
         // `list_databases_core` supports many database engines and therefore
         // produces a very large future. Boxing it here keeps the async-trait
@@ -1172,34 +1090,6 @@ impl DbxBackend for LocalBackend {
             schema.as_deref(),
             &connection.db_type,
             permissions,
-        )
-        .await
-    }
-
-    #[cfg(feature = "mq-admin")]
-    async fn send_message(
-        &self,
-        connection: &ConnectionConfig,
-        request: dbx_core::mq::SendMessageRequest,
-    ) -> Result<dbx_core::mq::SendMessageResponse, String> {
-        dbx_core::mq::service::mq_send_message_core(&self.state, &connection.id, request).await
-    }
-
-    #[cfg(feature = "mq-admin")]
-    async fn peek_messages(
-        &self,
-        connection: &ConnectionConfig,
-        topic: dbx_core::mq::TopicRef,
-        count: u32,
-        options: dbx_core::mq::PeekMessagesOptions,
-    ) -> Result<dbx_core::mq::PeekMessagesResult, String> {
-        dbx_core::mq::service::mq_peek_messages_core(
-            &self.state,
-            &connection.id,
-            topic,
-            "__dbx_kafka_viewer__".into(),
-            count,
-            Some(options),
         )
         .await
     }
@@ -1306,9 +1196,8 @@ impl DbxBackend for LocalBackend {
         database: &str,
         sql: &str,
     ) -> dbx_core::sql::SqlExecutionPlan {
-        let is_sqlserver_agent =
-            dbx_core::query::connection_pool_is_sqlserver_agent(self.state.as_ref(), &connection.id, database).await;
-        dbx_core::query::query_execution_plan(sql, Some(connection.db_type), is_sqlserver_agent)
+        let is_sqlserver_agent = false;
+        dbx_core::query::query_execution_plan(sql, Some(connection.db_type), false)
     }
 
     async fn add_connection_for_mcp(&self, config: ConnectionConfig) -> Result<ConnectionConfig, String> {
@@ -1430,45 +1319,6 @@ impl DbxBackend for LocalBackend {
         .await
     }
 
-    async fn execute_redis_command(
-        &self,
-        connection: &ConnectionConfig,
-        database: u32,
-        command: &str,
-        skip_safety_check: bool,
-    ) -> Result<RedisCommandResult, String> {
-        dbx_core::redis_ops::redis_execute_command_core(
-            &self.state,
-            &connection.id,
-            database,
-            command,
-            skip_safety_check,
-        )
-        .await
-    }
-
-    async fn execute_mongo_command(
-        &self,
-        connection: &ConnectionConfig,
-        database: &str,
-        command: &MongoCommand,
-    ) -> Result<dbx_core::db::QueryResult, String> {
-        dbx_core::mongo_ops::execute_mongo_command_core(&self.state, &connection.id, database, command, 100).await
-    }
-
-    async fn salesforce_current_user(&self, connection: &ConnectionConfig) -> Result<SalesforceCurrentUser, String> {
-        if connection.db_type != DatabaseType::Salesforce {
-            return Err("Not a Salesforce connection".to_string());
-        }
-        // The identity is the pool's cached connected-user record, so a cold MCP
-        // process has to establish the connection first — the same thing the
-        // metadata paths above do before reading pool state.
-        if self.state.pool_handle(&connection.id).await.is_none() {
-            self.state.get_or_create_pool(&connection.id, None).await?;
-        }
-        self.state.salesforce_current_user(&connection.id).await
-    }
-
     async fn close_client_session(
         &self,
         connection_id: &str,
@@ -1524,34 +1374,6 @@ impl DbxBackend for WebBackend {
     async fn list_databases(&self, connection: &ConnectionConfig) -> Result<Vec<String>, String> {
         self.ensure_connected(connection).await?;
         match connection.db_type {
-            DatabaseType::MongoDb => self
-                .request(
-                    reqwest::Method::POST,
-                    "/api/mongo/list-databases",
-                    Some(json!({ "connectionId": connection.id })),
-                )
-                .await?
-                .json::<Vec<String>>()
-                .await
-                .map_err(|error| format!("Invalid MongoDB database list response: {error}")),
-            DatabaseType::Redis => {
-                let databases = self
-                    .request(
-                        reqwest::Method::POST,
-                        "/api/redis/list-databases",
-                        Some(json!({ "connectionId": connection.id })),
-                    )
-                    .await?
-                    .json::<Vec<Value>>()
-                    .await
-                    .map_err(|error| format!("Invalid Redis database list response: {error}"))?;
-                Ok(databases
-                    .into_iter()
-                    .filter_map(|database| {
-                        database.get("db").and_then(Value::as_u64).map(|database| database.to_string())
-                    })
-                    .collect())
-            }
             _ => self
                 .request(
                     reqwest::Method::GET,
@@ -1598,11 +1420,7 @@ impl DbxBackend for WebBackend {
             if tool_name != "execute_query" {
                 return Err(format!("Unsupported DBX Web agent tool: {tool_name}"));
             }
-            if connection.db_type == DatabaseType::MongoDb {
-                return Err(
-                    "MongoDB shell commands in DBX Web mode are not implemented by the Rust MCP yet.".to_string()
-                );
-            }
+            {}
             self.ensure_connected(connection).await?;
             let sql = arguments.get("sql").and_then(Value::as_str).ok_or("Missing SQL query")?;
 
@@ -1670,45 +1488,6 @@ impl DbxBackend for WebBackend {
         }
     }
 
-    #[cfg(feature = "mq-admin")]
-    async fn send_message(
-        &self,
-        connection: &ConnectionConfig,
-        request: dbx_core::mq::SendMessageRequest,
-    ) -> Result<dbx_core::mq::SendMessageResponse, String> {
-        #[derive(Serialize)]
-        #[serde(rename_all = "camelCase")]
-        struct SendMessageBody {
-            connection_id: String,
-            req: dbx_core::mq::SendMessageRequest,
-        }
-
-        self.request(
-            reqwest::Method::POST,
-            "/api/mq/send-message",
-            Some(json!(SendMessageBody { connection_id: connection.id.clone(), req: request })),
-        )
-        .await?
-        .json()
-        .await
-        .map_err(|error| format!("Invalid message send response: {error}"))
-    }
-
-    #[cfg(feature = "mq-admin")]
-    async fn peek_messages(
-        &self,
-        connection: &ConnectionConfig,
-        topic: dbx_core::mq::TopicRef,
-        count: u32,
-        options: dbx_core::mq::PeekMessagesOptions,
-    ) -> Result<dbx_core::mq::PeekMessagesResult, String> {
-        self.request(
-            reqwest::Method::POST,
-            "/api/mq/subscriptions/peek-messages",
-            Some(json!({ "connectionId": connection.id, "topic": topic, "sub": "__dbx_kafka_viewer__", "count": count, "options": options })),
-        ).await?.json().await.map_err(|error| format!("Invalid message peek response: {error}"))
-    }
-
     async fn execute_query(
         &self,
         connection: &ConnectionConfig,
@@ -1717,9 +1496,7 @@ impl DbxBackend for WebBackend {
         _max_rows: Option<usize>,
         timeout_secs: Option<u64>,
     ) -> Result<dbx_core::db::QueryResult, String> {
-        if connection.db_type == DatabaseType::MongoDb {
-            return Err("MongoDB shell commands in DBX Web mode are not implemented by the Rust CLI yet.".to_string());
-        }
+        {}
         self.ensure_connected(connection).await?;
         self.request(
             reqwest::Method::POST,
@@ -1740,9 +1517,7 @@ impl DbxBackend for WebBackend {
         sql: &str,
         options: dbx_core::query::QueryExecutionOptions,
     ) -> Result<Vec<BatchStatementResult>, String> {
-        if connection.db_type == DatabaseType::MongoDb {
-            return Err("MongoDB batch execution in DBX Web mode is not implemented by the Rust CLI yet.".to_string());
-        }
+        {}
         self.ensure_connected(connection).await?;
         let mut body = json!({
             "connectionId": connection.id,
@@ -1851,35 +1626,7 @@ impl DbxBackend for WebBackend {
         schema: &str,
     ) -> Result<Vec<TableInfo>, String> {
         self.ensure_connected(connection).await?;
-        if connection.db_type == DatabaseType::MongoDb {
-            let values: Vec<Value> = self
-                .request(
-                    reqwest::Method::POST,
-                    "/api/mongo/list-collections",
-                    Some(json!({ "connectionId": connection.id, "database": database })),
-                )
-                .await?
-                .json()
-                .await
-                .map_err(|error| format!("Invalid collection list response: {error}"))?;
-            return Ok(values
-                .into_iter()
-                .filter_map(|value| {
-                    let name = value
-                        .as_str()
-                        .map(ToOwned::to_owned)
-                        .or_else(|| value.get("name").and_then(Value::as_str).map(ToOwned::to_owned))?;
-                    Some(TableInfo {
-                        name,
-                        table_type: "COLLECTION".to_string(),
-                        valid: None,
-                        comment: None,
-                        parent_schema: None,
-                        parent_name: None,
-                    })
-                })
-                .collect());
-        }
+        {}
         self.request(
             reqwest::Method::GET,
             &format!(
@@ -1904,30 +1651,7 @@ impl DbxBackend for WebBackend {
         table: &str,
     ) -> Result<Vec<ColumnInfo>, String> {
         self.ensure_connected(connection).await?;
-        if connection.db_type == DatabaseType::MongoDb {
-            #[derive(Deserialize)]
-            struct MongoDocuments {
-                documents: Vec<Value>,
-            }
-            let result: MongoDocuments = self
-                .request(
-                    reqwest::Method::POST,
-                    "/api/mongo/find-documents",
-                    Some(json!({
-                        "connectionId": connection.id,
-                        "database": database,
-                        "collection": table,
-                        "skip": 0,
-                        "limit": 20,
-                        "filter": "{}",
-                    })),
-                )
-                .await?
-                .json()
-                .await
-                .map_err(|error| format!("Invalid MongoDB document response: {error}"))?;
-            return Ok(infer_document_columns(&result.documents));
-        }
+        {}
         self.request(
             reqwest::Method::GET,
             &format!(
@@ -2029,527 +1753,6 @@ impl DbxBackend for WebBackend {
         .await
         .map_err(|error| format!("Invalid docs snapshot response: {error}"))
     }
-
-    async fn execute_redis_command(
-        &self,
-        connection: &ConnectionConfig,
-        database: u32,
-        command: &str,
-        skip_safety_check: bool,
-    ) -> Result<RedisCommandResult, String> {
-        self.ensure_connected(connection).await?;
-        self.request(
-            reqwest::Method::POST,
-            "/api/redis/execute-command",
-            Some(json!({
-                "connectionId": connection.id,
-                "db": database,
-                "command": command,
-                "skipSafetyCheck": skip_safety_check,
-            })),
-        )
-        .await?
-        .json()
-        .await
-        .map_err(|error| format!("Invalid Redis command response: {error}"))
-    }
-
-    async fn salesforce_current_user(&self, connection: &ConnectionConfig) -> Result<SalesforceCurrentUser, String> {
-        self.ensure_connected(connection).await?;
-        self.request(
-            reqwest::Method::GET,
-            &format!("/api/salesforce/current-user?connection_id={}", url_encode(&connection.id)),
-            None,
-        )
-        .await?
-        .json()
-        .await
-        .map_err(|error| format!("Invalid Salesforce identity response: {error}"))
-    }
-
-    async fn execute_mongo_command(
-        &self,
-        connection: &ConnectionConfig,
-        database: &str,
-        command: &MongoCommand,
-    ) -> Result<dbx_core::db::QueryResult, String> {
-        self.ensure_connected(connection).await?;
-        let connection_id = &connection.id;
-        match command {
-            MongoCommand::InDatabase { database, command } => {
-                Box::pin(self.execute_mongo_command(connection, database, command)).await
-            }
-            MongoCommand::Version => {
-                let version: String = self
-                    .request(
-                        reqwest::Method::POST,
-                        "/api/mongo/server-version",
-                        Some(json!({ "connectionId": connection_id, "database": database })),
-                    )
-                    .await?
-                    .json()
-                    .await
-                    .map_err(|error| format!("Invalid MongoDB version response: {error}"))?;
-                Ok(scalar_query_result("version", Value::String(version)))
-            }
-            MongoCommand::Use { database } => Ok(scalar_query_result("database", Value::String(database.clone()))),
-            MongoCommand::ShowDatabases => {
-                let result = self
-                    .request(
-                        reqwest::Method::POST,
-                        "/api/mongo/run-command",
-                        Some(json!({
-                            "connectionId": connection_id,
-                            "database": dbx_core::mongo_ops::MONGO_SHOW_DATABASES_DATABASE,
-                            "commandJson": dbx_core::mongo_ops::MONGO_SHOW_DATABASES_COMMAND_JSON,
-                        })),
-                    )
-                    .await?
-                    .json::<WebMongoDocuments>()
-                    .await
-                    .map_err(|error| format!("Invalid MongoDB listDatabases response: {error}"))?;
-                dbx_core::mongo_ops::mongo_show_databases_query_result(result.documents, 100)
-            }
-            MongoCommand::RunCommand { .. } => {
-                Err("MongoDB runCommand is not available through the DBX MCP backend".to_string())
-            }
-            MongoCommand::Find { collection, filter, projection, sort, collation, skip, limit } => {
-                let result = self
-                    .request(
-                        reqwest::Method::POST,
-                        "/api/mongo/find-documents",
-                        Some(json!({
-                            "connectionId": connection_id,
-                            "database": database,
-                            "collection": collection,
-                            "skip": skip,
-                            "limit": limit,
-                            "filter": filter,
-                            "projection": projection,
-                            "sort": sort,
-                            "collation": collation,
-                        })),
-                    )
-                    .await?
-                    .json::<WebMongoDocuments>()
-                    .await
-                    .map_err(|error| format!("Invalid MongoDB find response: {error}"))?;
-                Ok(mongo_documents_query_result(result.documents))
-            }
-            MongoCommand::FindExplain { collection, filter, projection, sort, collation, skip, limit, verbosity } => {
-                let result = self
-                    .request(
-                        reqwest::Method::POST,
-                        "/api/mongo/explain-find",
-                        Some(json!({
-                            "connectionId": connection_id,
-                            "database": database,
-                            "collection": collection,
-                            "skip": skip,
-                            "limit": limit,
-                            "filter": filter,
-                            "projection": projection,
-                            "sort": sort,
-                            "collation": collation,
-                            "verbosity": verbosity,
-                        })),
-                    )
-                    .await?
-                    .json::<Value>()
-                    .await
-                    .map_err(|error| format!("Invalid MongoDB explain response: {error}"))?;
-                Ok(mongo_documents_query_result(vec![result]))
-            }
-            MongoCommand::FindOne { collection, filter, projection, options } => {
-                let result = self
-                    .request(
-                        reqwest::Method::POST,
-                        "/api/mongo/find-one",
-                        Some(json!({
-                            "connectionId": connection_id,
-                            "database": database,
-                            "collection": collection,
-                            "filter": filter,
-                            "projection": projection,
-                            "options": options,
-                        })),
-                    )
-                    .await?
-                    .json::<WebMongoDocuments>()
-                    .await
-                    .map_err(|error| format!("Invalid MongoDB findOne response: {error}"))?;
-                Ok(mongo_documents_query_result(result.documents))
-            }
-            MongoCommand::Count { collection, filter, accurate } => {
-                let total: u64 = self
-                    .request(
-                        reqwest::Method::POST,
-                        "/api/mongo/count-documents",
-                        Some(json!({
-                            "connectionId": connection_id,
-                            "database": database,
-                            "collection": collection,
-                            "filter": filter,
-                            "mode": if *accurate { "accurate" } else { "legacy" },
-                        })),
-                    )
-                    .await?
-                    .json()
-                    .await
-                    .map_err(|error| format!("Invalid MongoDB count response: {error}"))?;
-                Ok(scalar_query_result("count", Value::from(total)))
-            }
-            MongoCommand::Aggregate { collection, pipeline, options } => {
-                let result = self
-                    .request(
-                        reqwest::Method::POST,
-                        "/api/mongo/aggregate-documents",
-                        Some(json!({
-                            "connectionId": connection_id,
-                            "database": database,
-                            "collection": collection,
-                            "pipelineJson": pipeline,
-                            "maxRows": 100,
-                            "optionsJson": options,
-                        })),
-                    )
-                    .await?
-                    .json::<WebMongoDocuments>()
-                    .await
-                    .map_err(|error| format!("Invalid MongoDB aggregate response: {error}"))?;
-                Ok(mongo_documents_query_result(result.documents))
-            }
-            MongoCommand::Distinct { collection, field, filter } => {
-                let result = self
-                    .request(
-                        reqwest::Method::POST,
-                        "/api/mongo/distinct",
-                        Some(json!({
-                            "connectionId": connection_id,
-                            "database": database,
-                            "collection": collection,
-                            "field": field,
-                            "filter": filter,
-                        })),
-                    )
-                    .await?
-                    .json::<WebMongoDocuments>()
-                    .await
-                    .map_err(|error| format!("Invalid MongoDB distinct response: {error}"))?;
-                Ok(mongo_documents_query_result(result.documents))
-            }
-            MongoCommand::GetIndexes { collection } => {
-                let specs = self
-                    .request(
-                        reqwest::Method::POST,
-                        "/api/mongo/list-index-specs",
-                        Some(json!({
-                            "connectionId": connection_id,
-                            "database": database,
-                            "collection": collection,
-                        })),
-                    )
-                    .await?
-                    .json::<Vec<MongoIndexSpec>>()
-                    .await
-                    .map_err(|error| format!("Invalid MongoDB index specs response: {error}"))?;
-                Ok(dbx_core::mongo_ops::mongo_indexes_query_result(specs, 100))
-            }
-            MongoCommand::CollectionStats { collection, metric, scale } => {
-                let value: Value = self
-                    .request(
-                        reqwest::Method::POST,
-                        "/api/mongo/collection-stats",
-                        Some(json!({
-                            "connectionId": connection_id,
-                            "database": database,
-                            "collection": collection,
-                            "scale": scale,
-                        })),
-                    )
-                    .await?
-                    .json()
-                    .await
-                    .map_err(|error| format!("Invalid MongoDB stats response: {error}"))?;
-                if metric == "stats" {
-                    Ok(mongo_documents_query_result(vec![value]))
-                } else {
-                    let key = match metric.as_str() {
-                        "dataSize" => "size",
-                        "storageSize" => "storageSize",
-                        "totalIndexSize" => "totalIndexSize",
-                        _ => metric,
-                    };
-                    let metric_value = value.get(key).cloned().unwrap_or(Value::Null);
-                    Ok(scalar_query_result(metric, metric_value))
-                }
-            }
-            MongoCommand::Insert { collection, documents } => {
-                let value: Value = self
-                    .request(
-                        reqwest::Method::POST,
-                        "/api/mongo/insert-documents",
-                        Some(json!({
-                            "connectionId": connection_id,
-                            "database": database,
-                            "collection": collection,
-                            "docsJson": documents,
-                        })),
-                    )
-                    .await?
-                    .json()
-                    .await
-                    .map_err(|error| format!("Invalid MongoDB insert response: {error}"))?;
-                Ok(affected_query_result(affected_rows_from_value(&value)))
-            }
-            MongoCommand::BulkWrite { collection, operations, options } => {
-                let result: dbx_core::db::mongo_driver::MongoBulkWriteResult = self
-                    .request(
-                        reqwest::Method::POST,
-                        "/api/mongo/bulk-write",
-                        Some(json!({
-                            "connectionId": connection_id,
-                            "database": database,
-                            "collection": collection,
-                            "operationsJson": operations,
-                            "optionsJson": options,
-                        })),
-                    )
-                    .await?
-                    .json()
-                    .await
-                    .map_err(|error| format!("Invalid MongoDB bulkWrite response: {error}"))?;
-                Ok(dbx_core::mongo_ops::mongo_bulk_write_query_result(&result))
-            }
-            MongoCommand::Replace { collection, filter, replacement, options } => {
-                let value: Value = self
-                    .request(
-                        reqwest::Method::POST,
-                        "/api/mongo/replace-document",
-                        Some(json!({
-                            "connectionId": connection_id,
-                            "database": database,
-                            "collection": collection,
-                            "filterJson": filter,
-                            "replacementJson": replacement,
-                            "optionsJson": options,
-                        })),
-                    )
-                    .await?
-                    .json()
-                    .await
-                    .map_err(|error| format!("Invalid MongoDB replace response: {error}"))?;
-                Ok(affected_query_result(affected_rows_from_value(&value)))
-            }
-            MongoCommand::Update { collection, filter, update, options, many } => {
-                let value: Value = self
-                    .request(
-                        reqwest::Method::POST,
-                        "/api/mongo/update-documents",
-                        Some(json!({
-                            "connectionId": connection_id,
-                            "database": database,
-                            "collection": collection,
-                            "filterJson": filter,
-                            "updateJson": update,
-                            "many": many,
-                            "optionsJson": options,
-                        })),
-                    )
-                    .await?
-                    .json()
-                    .await
-                    .map_err(|error| format!("Invalid MongoDB update response: {error}"))?;
-                Ok(affected_query_result(affected_rows_from_value(&value)))
-            }
-            MongoCommand::Delete { collection, filter, many } => {
-                let value: Value = self
-                    .request(
-                        reqwest::Method::POST,
-                        "/api/mongo/delete-documents",
-                        Some(json!({
-                            "connectionId": connection_id,
-                            "database": database,
-                            "collection": collection,
-                            "filterJson": filter,
-                            "many": many,
-                        })),
-                    )
-                    .await?
-                    .json()
-                    .await
-                    .map_err(|error| format!("Invalid MongoDB delete response: {error}"))?;
-                Ok(affected_query_result(affected_rows_from_value(&value)))
-            }
-            MongoCommand::CreateIndex { collection, keys, options } => {
-                let value: Value = self
-                    .request(
-                        reqwest::Method::POST,
-                        "/api/mongo/create-index",
-                        Some(json!({
-                            "connectionId": connection_id,
-                            "database": database,
-                            "collection": collection,
-                            "keysJson": keys,
-                            "optionsJson": options,
-                        })),
-                    )
-                    .await?
-                    .json()
-                    .await
-                    .map_err(|error| format!("Invalid MongoDB create index response: {error}"))?;
-                Ok(scalar_query_result(
-                    "name",
-                    Value::String(value.get("name").and_then(Value::as_str).unwrap_or("").to_string()),
-                ))
-            }
-            MongoCommand::CreateUser { user_json, write_concern_json } => {
-                let value: Value = self
-                    .request(
-                        reqwest::Method::POST,
-                        "/api/mongo/create-user",
-                        Some(json!({
-                            "connectionId": connection_id,
-                            "database": database,
-                            "userJson": user_json,
-                            "writeConcernJson": write_concern_json,
-                        })),
-                    )
-                    .await?
-                    .json()
-                    .await
-                    .map_err(|error| format!("Invalid MongoDB create user response: {error}"))?;
-                Ok(affected_query_result(affected_rows_from_value(&value)))
-            }
-            MongoCommand::DropIndexes { collection, indexes, single } => {
-                let value: Value = self
-                    .request(
-                        reqwest::Method::POST,
-                        "/api/mongo/drop-indexes",
-                        Some(json!({
-                            "connectionId": connection_id,
-                            "database": database,
-                            "collection": collection,
-                            "indexesJson": indexes,
-                            "single": single,
-                        })),
-                    )
-                    .await?
-                    .json()
-                    .await
-                    .map_err(|error| format!("Invalid MongoDB drop indexes response: {error}"))?;
-                let dropped_names = value
-                    .get("dropped_names")
-                    .or_else(|| value.get("droppedNames"))
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
-                    .filter_map(Value::as_str)
-                    .map(str::to_string)
-                    .collect::<Vec<_>>();
-                let failures = value
-                    .get("failures")
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|failure| {
-                        Some((
-                            failure.get("name")?.as_str()?.to_string(),
-                            failure.get("message")?.as_str()?.to_string(),
-                        ))
-                    })
-                    .collect::<Vec<_>>();
-                Ok(mongo_drop_indexes_query_result(dropped_names, failures, affected_rows_from_value(&value)))
-            }
-            MongoCommand::RenameCollection { collection, new_name } => {
-                self.request(
-                    reqwest::Method::POST,
-                    "/api/mongo/rename-collection",
-                    Some(json!({
-                        "connectionId": connection_id,
-                        "database": database,
-                        "collection": collection,
-                        "newName": new_name,
-                    })),
-                )
-                .await?;
-                Ok(scalar_query_result("renamed", Value::String(format!("{collection} -> {new_name}"))))
-            }
-            MongoCommand::DropCollection { collection } => {
-                self.request(
-                    reqwest::Method::POST,
-                    "/api/mongo/drop-collection",
-                    Some(json!({ "connectionId": connection_id, "database": database, "collection": collection })),
-                )
-                .await?;
-                Ok(affected_query_result(1))
-            }
-            MongoCommand::FindOneAndUpdate { collection, filter, update, options } => {
-                let result = self
-                    .request(
-                        reqwest::Method::POST,
-                        "/api/mongo/find-one-and-update",
-                        Some(json!({
-                            "connectionId": connection_id,
-                            "database": database,
-                            "collection": collection,
-                            "filterJson": filter,
-                            "updateJson": update,
-                            "optionsJson": options,
-                        })),
-                    )
-                    .await?
-                    .json::<WebMongoDocuments>()
-                    .await
-                    .map_err(|error| format!("Invalid MongoDB findOneAndUpdate response: {error}"))?;
-                Ok(mongo_documents_query_result(result.documents))
-            }
-            MongoCommand::FindOneAndReplace { collection, filter, replacement, options } => {
-                let result = self
-                    .request(
-                        reqwest::Method::POST,
-                        "/api/mongo/find-one-and-replace",
-                        Some(json!({
-                            "connectionId": connection_id,
-                            "database": database,
-                            "collection": collection,
-                            "filterJson": filter,
-                            "replacementJson": replacement,
-                            "optionsJson": options,
-                        })),
-                    )
-                    .await?
-                    .json::<WebMongoDocuments>()
-                    .await
-                    .map_err(|error| format!("Invalid MongoDB findOneAndReplace response: {error}"))?;
-                Ok(mongo_documents_query_result(result.documents))
-            }
-            MongoCommand::FindOneAndDelete { collection, filter, options } => {
-                let result = self
-                    .request(
-                        reqwest::Method::POST,
-                        "/api/mongo/find-one-and-delete",
-                        Some(json!({
-                            "connectionId": connection_id,
-                            "database": database,
-                            "collection": collection,
-                            "filterJson": filter,
-                            "optionsJson": options,
-                        })),
-                    )
-                    .await?
-                    .json::<WebMongoDocuments>()
-                    .await
-                    .map_err(|error| format!("Invalid MongoDB findOneAndDelete response: {error}"))?;
-                Ok(mongo_documents_query_result(result.documents))
-            }
-        }
-    }
-}
-
-#[derive(Deserialize)]
-struct WebMongoDocuments {
-    documents: Vec<Value>,
 }
 
 fn extract_session_cookie(header: &str) -> Option<String> {
@@ -2705,60 +1908,6 @@ fn affected_query_result(affected_rows: u64) -> dbx_core::db::QueryResult {
     query_result(Vec::new(), Vec::new(), affected_rows)
 }
 
-fn mongo_drop_indexes_query_result(
-    dropped_names: Vec<String>,
-    failures: Vec<(String, String)>,
-    affected_rows: u64,
-) -> dbx_core::db::QueryResult {
-    if failures.is_empty() {
-        let rows = dropped_names.into_iter().map(|name| vec![Value::String(name)]).collect::<Vec<_>>();
-        return query_result(if rows.is_empty() { Vec::new() } else { vec!["name".to_string()] }, rows, affected_rows);
-    }
-
-    let mut rows = dropped_names
-        .into_iter()
-        .map(|name| vec![Value::String(name), Value::String("dropped".to_string()), Value::Null])
-        .collect::<Vec<_>>();
-    rows.extend(
-        failures.into_iter().map(|(name, message)| {
-            vec![Value::String(name), Value::String("failed".to_string()), Value::String(message)]
-        }),
-    );
-    query_result(vec!["name".to_string(), "status".to_string(), "message".to_string()], rows, affected_rows)
-}
-
-fn mongo_documents_query_result(documents: Vec<Value>) -> dbx_core::db::QueryResult {
-    if documents.is_empty() {
-        return query_result(Vec::new(), Vec::new(), 0);
-    }
-    let mut columns = std::collections::BTreeSet::new();
-    for document in &documents {
-        if let Some(object) = document.as_object() {
-            columns.extend(object.keys().cloned());
-        } else {
-            columns.insert("value".to_string());
-        }
-    }
-    let columns = columns.into_iter().collect::<Vec<_>>();
-    let rows = documents
-        .into_iter()
-        .map(|document| {
-            columns
-                .iter()
-                .map(|column| {
-                    document
-                        .as_object()
-                        .and_then(|object| object.get(column))
-                        .cloned()
-                        .or_else(|| (column == "value").then(|| document.clone()))
-                        .unwrap_or(Value::Null)
-                })
-                .collect()
-        })
-        .collect();
-    query_result(columns, rows, 0)
-}
-
 fn affected_rows_from_value(value: &Value) -> u64 {
     value.get("affected_rows").or_else(|| value.get("affectedRows")).and_then(Value::as_u64).unwrap_or(0)
 }
@@ -2789,49 +1938,6 @@ fn markdown_table(headers: &[String], rows: &[Vec<String>]) -> String {
 
 fn escape_markdown_cell(value: &str) -> String {
     value.replace('|', "\\|").replace(['\r', '\n'], " ")
-}
-
-fn infer_document_columns(documents: &[Value]) -> Vec<ColumnInfo> {
-    let mut columns = std::collections::BTreeMap::<String, String>::new();
-    for document in documents {
-        let Some(object) = document.as_object() else { continue };
-        for (name, value) in object {
-            columns.entry(name.clone()).or_insert_with(|| json_type_name(value).to_string());
-        }
-    }
-    columns
-        .into_iter()
-        .map(|(name, data_type)| ColumnInfo {
-            name,
-            data_type,
-            resolved_schema: None,
-            is_nullable: true,
-            column_default: None,
-            is_primary_key: false,
-            is_unique: false,
-            extra: None,
-            comment: None,
-            numeric_precision: None,
-            numeric_scale: None,
-            character_maximum_length: None,
-            enum_values: None,
-            character_set: None,
-            collation: None,
-            metadata_capabilities: None,
-        })
-        .collect()
-}
-
-fn json_type_name(value: &Value) -> &'static str {
-    match value {
-        Value::Null => "null",
-        Value::Bool(_) => "boolean",
-        Value::Number(number) if number.is_i64() || number.is_u64() => "integer",
-        Value::Number(_) => "number",
-        Value::String(_) => "string",
-        Value::Array(_) => "array",
-        Value::Object(_) => "object",
-    }
 }
 
 pub fn parse_database_type(value: &str) -> Result<DatabaseType, String> {
@@ -2877,14 +1983,17 @@ mod unavailable_backend_tests {
 
     const REASON: &str = "SECRET_KEY_UNAVAILABLE: this process cannot read the DBX data encryption key";
 
+    // The server used to exit before the transport started, so the client saw
+    // EOF and this text never left stderr. Serving it means every entry point
+    // has to carry it rather than failing blank.
     fn sample_connection() -> ConnectionConfig {
         new_connection_config(
             "source".into(),
             "Source".into(),
-            DatabaseType::Postgres,
+            DatabaseType::Mysql,
             "127.0.0.1".into(),
-            5432,
-            "postgres".into(),
+            3306,
+            "root".into(),
             "test-password".into(),
             None,
             false,
@@ -2892,10 +2001,6 @@ mod unavailable_backend_tests {
         )
         .unwrap()
     }
-
-    // The server used to exit before the transport started, so the client saw
-    // EOF and this text never left stderr. Serving it means every entry point
-    // has to carry it rather than failing blank.
     #[tokio::test]
     async fn every_required_entry_point_reports_the_reason() {
         let backend = UnavailableBackend::new(REASON);
@@ -2955,10 +2060,10 @@ mod tests {
         new_connection_config(
             "source".into(),
             "Source".into(),
-            DatabaseType::Postgres,
+            DatabaseType::Mysql,
             "127.0.0.1".into(),
-            5432,
-            "postgres".into(),
+            3306,
+            "root".into(),
             "test-password".into(),
             None,
             false,
@@ -2966,7 +2071,6 @@ mod tests {
         )
         .unwrap()
     }
-
     #[tokio::test]
     async fn local_connection_mutations_notify_desktop_only_after_success() {
         let data_dir = tempfile::tempdir().unwrap();
@@ -3074,19 +2178,6 @@ mod tests {
     }
 
     #[test]
-    fn plugin_lacks_mcp_surface_skips_unknown_method_but_keeps_real_errors() {
-        // The exact error a plugin that never implemented the optional mcp/tools bridge returns
-        // (e.g. com.yiqiui.leetcode-cn's JSON-RPC -32601 fallback). Discovery must skip these.
-        assert!(plugin_lacks_mcp_surface("unknown method: mcp/tools"));
-        assert!(plugin_lacks_mcp_surface("JSON-RPC error -32601: Method not found"));
-        assert!(plugin_lacks_mcp_surface("rpc error: code=-32601"));
-        // Genuine failures must still abort discovery, not be silently skipped.
-        assert!(!plugin_lacks_mcp_surface("connection refused"));
-        assert!(!plugin_lacks_mcp_surface("sidecar panicked"));
-        assert!(!plugin_lacks_mcp_surface(""));
-    }
-
-    #[test]
     fn legacy_read_only_overrides_configured_and_unconfigured_policies() {
         // DBX_MCP_ALLOW_WRITES=0 always forces read_only, even when the
         // persistent MCP policy is configured as writable.
@@ -3100,65 +2191,6 @@ mod tests {
         // Unset env var leaves the policy as-is.
         assert!(!effective_mcp_policy_with_legacy_allow_writes(policy_state(true, false), None).read_only);
         assert!(effective_mcp_policy_with_legacy_allow_writes(policy_state(true, true), None).read_only);
-    }
-
-    #[test]
-    fn legacy_read_only_also_revokes_the_salesforce_dml_opt_in() {
-        // DBX_MCP_ALLOW_WRITES=0 marks an unconfirmed CLI run. The Salesforce DML
-        // opt-in is a write permission like any other, so it must be withdrawn
-        // with the rest — an opted-in connection must not become writable just
-        // because the org speaks REST instead of SQL.
-        let mut state = policy_state(true, false);
-        state.connection_policies = vec![dbx_core::storage::McpConnectionPolicy {
-            connection_id: "sfdc".to_string(),
-            read_only: false,
-            allow_dangerous_sql: true,
-            execution_mode_configured: false,
-            execution_mode_policy_version: None,
-            database_scope: dbx_core::storage::McpDatabaseScope::All,
-            allowed_databases: Vec::new(),
-            database_policies: Vec::new(),
-            allow_salesforce_dml: true,
-        }];
-
-        let forced = effective_mcp_policy_with_legacy_allow_writes(state.clone(), Some(false));
-        assert!(forced.read_only);
-        assert!(!forced.connection_policies[0].allow_salesforce_dml);
-        assert!(!forced.connection_policies[0].allow_dangerous_sql);
-
-        // Without the env override the stored opt-in survives untouched.
-        let untouched = effective_mcp_policy_with_legacy_allow_writes(state, None);
-        assert!(untouched.connection_policies[0].allow_salesforce_dml);
-    }
-
-    #[test]
-    fn parses_database_type_using_dbx_protocol_names() {
-        assert_eq!(parse_database_type("Postgres").unwrap(), DatabaseType::Postgres);
-        assert_eq!(parse_database_type("mongodb").unwrap(), DatabaseType::MongoDb);
-        assert_eq!(parse_database_type("Solr").unwrap(), DatabaseType::Solr);
-        assert_eq!(parse_database_type("solr").unwrap(), DatabaseType::Solr);
-        assert!(parse_database_type("unknown").is_err());
-    }
-
-    #[test]
-    fn new_connection_config_accepts_solr() {
-        // Solr connections are created through the generic descriptor path; the
-        // REST core lives in the query text, not a database field.
-        let connection = new_connection_config(
-            "solr".to_string(),
-            "solr".to_string(),
-            DatabaseType::Solr,
-            "localhost".to_string(),
-            8983,
-            String::new(),
-            String::new(),
-            None,
-            false,
-            None,
-        )
-        .unwrap();
-        assert_eq!(connection.db_type, DatabaseType::Solr);
-        assert_eq!(connection.port, 8983);
     }
 
     #[test]
@@ -3287,334 +2319,6 @@ mod tests {
     }
 
     #[test]
-    fn agent_query_timeout_web_policy_applies_over_connection_effective_timeout() {
-        // Unset policy inherits the connection's effective timeout
-        let mut conn = new_connection_config(
-            "timeout".to_string(),
-            "timeout".to_string(),
-            DatabaseType::Postgres,
-            "localhost".to_string(),
-            5432,
-            String::new(),
-            String::new(),
-            None,
-            false,
-            None,
-        )
-        .unwrap();
-        conn.query_timeout_secs = 60;
-        assert_eq!(agent_tools::agent_query_timeout_secs(None, Some(&conn)), 60);
-
-        conn.query_timeout_secs = 0;
-        assert_eq!(agent_tools::agent_query_timeout_secs(None, Some(&conn)), 0);
-
-        // Policy 300 overrides both a 60 and a 0 connection.
-        assert_eq!(agent_tools::agent_query_timeout_secs(Some(300), Some(&conn)), 300);
-
-        // Spanner floor applies to a finite policy but not to 0.
-        let mut spanner = new_connection_config(
-            "spanner".to_string(),
-            "spanner".to_string(),
-            DatabaseType::Spanner,
-            "localhost".to_string(),
-            5432,
-            String::new(),
-            String::new(),
-            None,
-            false,
-            None,
-        )
-        .unwrap();
-        spanner.query_timeout_secs = 60;
-        assert_eq!(agent_tools::agent_query_timeout_secs(Some(60), Some(&spanner)), 120);
-        assert_eq!(agent_tools::agent_query_timeout_secs(Some(0), Some(&spanner)), 0);
-        assert_eq!(agent_tools::agent_query_timeout_secs(None, Some(&spanner)), 120);
-    }
-
-    #[tokio::test]
-    async fn web_execute_agent_tool_carries_resolved_timeout_secs_in_body() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let (request_sender, request_receiver) = mpsc::channel();
-        let server = std::thread::spawn(move || {
-            for _ in 0..2 {
-                let (mut stream, _) = listener.accept().unwrap();
-                stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-                let mut request = Vec::new();
-                let mut buffer = [0_u8; 1024];
-                let header_end = loop {
-                    let count = stream.read(&mut buffer).unwrap();
-                    request.extend_from_slice(&buffer[..count]);
-                    if let Some(position) = request.windows(4).position(|window| window == b"\r\n\r\n") {
-                        break position + 4;
-                    }
-                };
-                let headers = String::from_utf8_lossy(&request[..header_end]);
-                let content_length = headers
-                    .lines()
-                    .find_map(|line| {
-                        let (name, value) = line.split_once(':')?;
-                        name.eq_ignore_ascii_case("content-length").then_some(value.trim())
-                    })
-                    .unwrap()
-                    .parse::<usize>()
-                    .unwrap();
-                while request.len() < header_end + content_length {
-                    let count = stream.read(&mut buffer).unwrap();
-                    request.extend_from_slice(&buffer[..count]);
-                }
-                let request = String::from_utf8(request).unwrap();
-                let body = request[header_end..header_end + content_length].to_string();
-                request_sender.send((request.lines().next().unwrap().to_string(), body)).unwrap();
-
-                let response_body = r#"{"columns":["?"],"column_types":[],"column_sortables":[],"rows":[["1"]],"affected_rows":0,"execution_time_ms":0,"truncated":false,"has_more":false}"#;
-                write!(
-                    stream,
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                    response_body.len(),
-                    response_body
-                )
-                .unwrap();
-            }
-        });
-
-        let backend = WebBackend::new(format!("http://{address}"), String::new()).unwrap();
-        backend.auth.lock().await.checked = true;
-        let mut connection = new_connection_config(
-            "web-timeout".to_string(),
-            "web-timeout".to_string(),
-            DatabaseType::Postgres,
-            "localhost".to_string(),
-            5432,
-            String::new(),
-            String::new(),
-            None,
-            false,
-            None,
-        )
-        .unwrap();
-        connection.query_timeout_secs = 60;
-        // ensure_connected only POSTs /api/connection/connect when the backend has
-        // no cached config; pre-seed the cache so the mock needs to answer only the
-        // /api/query/execute request.
-        backend.connected.lock().await.insert(connection.id.clone(), connection.clone());
-
-        // No policy argument -> inherit the connection's effective timeout (60).
-        let result = backend
-            .execute_agent_tool(
-                &connection,
-                "postgres",
-                "execute_query",
-                json!({ "sql": "SELECT 1", "limit": 10 }),
-                AgentSqlPermissions { allow_writes: false, allow_dangerous: false, confirmed_write_sql: None },
-            )
-            .await;
-        assert!(!result.is_error, "{:?}", result);
-        let (request_line, body) = request_receiver.recv().unwrap();
-        assert_eq!(request_line, "POST /api/query/execute HTTP/1.1");
-        let request: Value = serde_json::from_str(&body).unwrap();
-        assert_eq!(request["timeoutSecs"], 60);
-        assert_eq!(request["maxRows"], 10);
-
-        // Policy argument 300 overrides the connection; maxRows is clamped to the
-        // published ceiling instead of being forwarded as-is.
-        let result = backend
-            .execute_agent_tool(
-                &connection,
-                "postgres",
-                "execute_query",
-                json!({ "sql": "SELECT 1", "limit": 100000, "timeout_secs": 300 }),
-                AgentSqlPermissions { allow_writes: false, allow_dangerous: false, confirmed_write_sql: None },
-            )
-            .await;
-        assert!(!result.is_error, "{:?}", result);
-
-        server.join().unwrap();
-        let (_request_line, second_body) = request_receiver.recv().unwrap();
-        let second_request: Value = serde_json::from_str(&second_body).unwrap();
-        assert_eq!(second_request["timeoutSecs"], 300);
-        assert_eq!(second_request["maxRows"], agent_tools::MAX_EXECUTE_QUERY_ROWS);
-    }
-
-    #[cfg(feature = "mq-admin")]
-    #[tokio::test]
-    async fn web_peek_messages_forwards_kafka_options_and_preserves_partial_results() {
-        use dbx_core::mq::{PeekMessagesOptions, PeekStartPosition, TopicRef};
-        use std::io::BufRead;
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let server = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-            let mut reader = std::io::BufReader::new(&mut stream);
-            let mut line = String::new();
-            reader.read_line(&mut line).unwrap();
-            assert_eq!(line.trim(), "POST /api/mq/subscriptions/peek-messages HTTP/1.1");
-            let mut content_length = 0;
-            loop {
-                line.clear();
-                assert!(reader.read_line(&mut line).unwrap() > 0);
-                if line == "\r\n" {
-                    break;
-                }
-                if let Some((name, value)) = line.split_once(':') {
-                    if name.eq_ignore_ascii_case("content-length") {
-                        content_length = value.trim().parse::<usize>().unwrap();
-                    }
-                }
-            }
-            let mut body = vec![0; content_length];
-            reader.read_exact(&mut body).unwrap();
-            let body: Value = serde_json::from_slice(&body).unwrap();
-            assert_eq!(body["connectionId"], "kafka-peek");
-            assert_eq!(body["topic"]["topic"], "events");
-            assert_eq!(body["sub"], "__dbx_kafka_viewer__");
-            assert_eq!(body["count"], 7);
-            assert_eq!(body["options"], json!({"startPosition":"offset", "partition":2, "offset":17}));
-            let response = r#"{"messages":[{"position":1,"messageId":"2:17","payloadBase64":"/w==","headers":{"type":"binary"}}],"incomplete":true}"#;
-            write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", response.len(), response).unwrap();
-        });
-        let backend =
-            WebBackend::new_with_config(format!("http://{address}"), String::new(), None, None, None, false, None)
-                .unwrap();
-        backend.auth.lock().await.checked = true;
-        let connection = new_connection_config(
-            "kafka-peek".into(),
-            "Kafka".into(),
-            DatabaseType::MessageQueue,
-            "localhost".into(),
-            9092,
-            String::new(),
-            String::new(),
-            None,
-            false,
-            None,
-        )
-        .unwrap();
-        let result = backend
-            .peek_messages(
-                &connection,
-                TopicRef { topic: "events".into(), ..Default::default() },
-                7,
-                PeekMessagesOptions {
-                    start_position: Some(PeekStartPosition::Offset),
-                    partition: Some(2),
-                    offset: Some(17),
-                },
-            )
-            .await
-            .unwrap();
-        assert!(result.incomplete);
-        assert_eq!(result.messages[0].payload_base64, "/w==");
-        assert_eq!(result.messages[0].message_id.as_deref(), Some("2:17"));
-        assert_eq!(result.messages[0].headers.get("type").map(String::as_str), Some("binary"));
-        server.join().unwrap();
-    }
-
-    #[tokio::test]
-    async fn web_execute_batch_hits_execute_multi_and_decodes_statement_results() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let (request_sender, request_receiver) = mpsc::channel();
-        let server = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-            let mut request = Vec::new();
-            let mut buffer = [0_u8; 1024];
-            let header_end = loop {
-                let count = stream.read(&mut buffer).unwrap();
-                request.extend_from_slice(&buffer[..count]);
-                if let Some(position) = request.windows(4).position(|window| window == b"\r\n\r\n") {
-                    break position + 4;
-                }
-            };
-            let headers = String::from_utf8_lossy(&request[..header_end]);
-            let content_length = headers
-                .lines()
-                .find_map(|line| {
-                    let (name, value) = line.split_once(':')?;
-                    name.eq_ignore_ascii_case("content-length").then_some(value.trim())
-                })
-                .unwrap()
-                .parse::<usize>()
-                .unwrap();
-            while request.len() < header_end + content_length {
-                let count = stream.read(&mut buffer).unwrap();
-                request.extend_from_slice(&buffer[..count]);
-            }
-            let request = String::from_utf8(request).unwrap();
-            let body = request[header_end..header_end + content_length].to_string();
-            request_sender.send((request.lines().next().unwrap().to_string(), body)).unwrap();
-
-            let response_body = r#"[{"columns":["id"],"column_types":[],"column_sortables":[],"rows":[["1"],["2"]],"affected_rows":0,"execution_time_ms":1,"truncated":false,"has_more":false,"statement_index":0},{"columns":[],"column_types":[],"column_sortables":[],"rows":[],"affected_rows":2,"execution_time_ms":1,"truncated":false,"has_more":false,"statement_index":1}]"#;
-            write!(
-                stream,
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                response_body.len(),
-                response_body
-            )
-            .unwrap();
-        });
-
-        // The mock is a loopback server, so it must not inherit a contributor's
-        // outbound proxy configuration.
-        let backend =
-            WebBackend::new_with_config(format!("http://{address}"), String::new(), None, None, None, false, None)
-                .unwrap();
-        backend.auth.lock().await.checked = true;
-        let connection = new_connection_config(
-            "web-batch".to_string(),
-            "web-batch".to_string(),
-            DatabaseType::Postgres,
-            "localhost".to_string(),
-            5432,
-            String::new(),
-            String::new(),
-            None,
-            false,
-            None,
-        )
-        .unwrap();
-        // Pre-seed so the mock only needs to answer /api/query/execute-multi.
-        backend.connected.lock().await.insert(connection.id.clone(), connection.clone());
-
-        let results = backend
-            .execute_batch(
-                &connection,
-                "postgres",
-                None,
-                "SELECT 1; INSERT INTO t VALUES (1)",
-                dbx_core::query::QueryExecutionOptions {
-                    max_rows: Some(100),
-                    timeout_secs: Some(0),
-                    continue_on_error: true,
-                    use_transaction: Some(true),
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(results.len(), 2);
-        // Two metadata fields are transferred from the JSON envelope.
-        assert_eq!(results[0].result.columns, vec!["id".to_string()]);
-        assert_eq!(results[0].result.rows.len(), 2);
-        assert_eq!(results[1].statement_index, Some(1));
-        assert_eq!(results[1].result.affected_rows, 2);
-
-        let (request_line, body) = request_receiver.recv().unwrap();
-        assert_eq!(request_line, "POST /api/query/execute-multi HTTP/1.1");
-        let request: Value = serde_json::from_str(&body).unwrap();
-        assert_eq!(request["sql"], "SELECT 1; INSERT INTO t VALUES (1)");
-        assert_eq!(request["continueOnError"], true);
-        assert_eq!(request["useTransaction"], true);
-        assert_eq!(request["maxRows"], 100);
-        assert_eq!(request["timeoutSecs"], 0);
-
-        server.join().unwrap();
-    }
-
-    #[test]
     fn format_query_result_appends_server_messages() {
         let mut result = query_result(Vec::new(), Vec::new(), 3);
         assert_eq!(format_query_result(&result, 100), "Query executed. 3 row(s) affected.");
@@ -3639,331 +2343,6 @@ mod tests {
             format_query_result(&result, 100),
             "Query executed. 3 row(s) affected.\n\nServer messages:\n- NOTICE: hello world (code: 00000, hint: use a table)\n- WARNING: careful"
         );
-    }
-
-    #[test]
-    fn mongo_drop_indexes_query_result_preserves_partial_failures() {
-        let result = mongo_drop_indexes_query_result(
-            vec!["email_1".to_string()],
-            vec![("missing_1".to_string(), "index not found".to_string())],
-            1,
-        );
-
-        assert_eq!(result.columns, ["name", "status", "message"]);
-        assert_eq!(
-            result.rows,
-            [
-                vec![Value::String("email_1".to_string()), Value::String("dropped".to_string()), Value::Null],
-                vec![
-                    Value::String("missing_1".to_string()),
-                    Value::String("failed".to_string()),
-                    Value::String("index not found".to_string()),
-                ],
-            ]
-        );
-        assert_eq!(result.affected_rows, 1);
-    }
-
-    #[tokio::test]
-    async fn web_mongo_get_indexes_uses_list_index_specs_endpoint() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let (request_sender, request_receiver) = mpsc::channel();
-        let server = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-            let mut request = Vec::new();
-            let mut buffer = [0_u8; 1024];
-            let header_end = loop {
-                let count = stream.read(&mut buffer).unwrap();
-                request.extend_from_slice(&buffer[..count]);
-                if let Some(position) = request.windows(4).position(|window| window == b"\r\n\r\n") {
-                    break position + 4;
-                }
-            };
-            let request_text = String::from_utf8_lossy(&request);
-            let request_line = request_text.lines().next().unwrap().to_string();
-            let content_length = request_text
-                .lines()
-                .find_map(|line| {
-                    let (name, value) = line.split_once(':')?;
-                    name.eq_ignore_ascii_case("content-length").then_some(value.trim())
-                })
-                .unwrap()
-                .parse::<usize>()
-                .unwrap();
-            while request.len() < header_end + content_length {
-                let count = stream.read(&mut buffer).unwrap();
-                if count == 0 {
-                    break;
-                }
-                request.extend_from_slice(&buffer[..count]);
-            }
-            let request_body = String::from_utf8_lossy(&request[header_end..]).to_string();
-            request_sender.send((request_line.clone(), request_body)).unwrap();
-            let body = r#"[
-                {
-                    "name": "_id_",
-                    "keys": [{"field": "_id", "direction": "1"}],
-                    "is_unique": true,
-                    "is_primary": true,
-                    "is_sparse": false,
-                    "expire_after_seconds": null,
-                    "partial_filter_expression": null,
-                    "background": false,
-                    "bucket_size": null,
-                    "hidden": false,
-                    "properties_complete": true,
-                    "extra_options": null
-                },
-                {
-                    "name": "createdAt_1",
-                    "keys": [{"field": "createdAt", "direction": "1"}],
-                    "is_unique": false,
-                    "is_primary": false,
-                    "is_sparse": false,
-                    "expire_after_seconds": 3600,
-                    "partial_filter_expression": null,
-                    "background": false,
-                    "bucket_size": null,
-                    "hidden": false,
-                    "properties_complete": true,
-                    "extra_options": null
-                }
-            ]"#;
-            write!(
-                stream,
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                body.len(),
-                body
-            )
-            .unwrap();
-        });
-
-        let backend = WebBackend::new(format!("http://{address}"), String::new()).unwrap();
-        backend.auth.lock().await.checked = true;
-        let connection = new_connection_config(
-            "legacy".to_string(),
-            "Legacy MongoDB".to_string(),
-            DatabaseType::MongoDb,
-            "localhost".to_string(),
-            27017,
-            String::new(),
-            String::new(),
-            Some("app".to_string()),
-            false,
-            Some("mongodb-legacy".to_string()),
-        )
-        .unwrap();
-        backend.connected.lock().await.insert(connection.id.clone(), connection.clone());
-
-        let result = backend
-            .execute_mongo_command(&connection, "app", &MongoCommand::GetIndexes { collection: "im_msg".to_string() })
-            .await
-            .unwrap();
-
-        server.join().unwrap();
-        let (request_line, request_body) = request_receiver.recv().unwrap();
-        assert_eq!(request_line, "POST /api/mongo/list-index-specs HTTP/1.1");
-        let request_json: Value = serde_json::from_str(&request_body).unwrap();
-        assert_eq!(request_json, json!({"connectionId": "legacy", "database": "app", "collection": "im_msg"}));
-        assert_eq!(result.columns, ["name", "columns", "unique", "primary", "type", "filter", "expireAfterSeconds"]);
-        assert_eq!(
-            result.rows,
-            [
-                vec![
-                    Value::String("_id_".to_string()),
-                    Value::String("_id".to_string()),
-                    Value::Bool(true),
-                    Value::Bool(true),
-                    Value::String("_id: 1".to_string()),
-                    Value::Null,
-                    Value::Null,
-                ],
-                vec![
-                    Value::String("createdAt_1".to_string()),
-                    Value::String("createdAt".to_string()),
-                    Value::Bool(false),
-                    Value::Bool(false),
-                    Value::String("createdAt: 1".to_string()),
-                    Value::Null,
-                    Value::from(3600),
-                ],
-            ]
-        );
-        assert_eq!(result.affected_rows, 2);
-    }
-
-    #[tokio::test]
-    async fn web_mongo_show_databases_uses_one_admin_read_command() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let (request_sender, request_receiver) = mpsc::channel();
-        let server = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-            let mut request = Vec::new();
-            let mut buffer = [0_u8; 1024];
-            let header_end = loop {
-                let count = stream.read(&mut buffer).unwrap();
-                request.extend_from_slice(&buffer[..count]);
-                if let Some(position) = request.windows(4).position(|window| window == b"\r\n\r\n") {
-                    break position + 4;
-                }
-            };
-            let headers = String::from_utf8_lossy(&request[..header_end]);
-            let content_length = headers
-                .lines()
-                .find_map(|line| {
-                    let (name, value) = line.split_once(':')?;
-                    name.eq_ignore_ascii_case("content-length").then_some(value.trim())
-                })
-                .unwrap()
-                .parse::<usize>()
-                .unwrap();
-            while request.len() < header_end + content_length {
-                let count = stream.read(&mut buffer).unwrap();
-                request.extend_from_slice(&buffer[..count]);
-            }
-            let request = String::from_utf8(request).unwrap();
-            request_sender
-                .send((
-                    request.lines().next().unwrap().to_string(),
-                    request[header_end..header_end + content_length].to_string(),
-                ))
-                .unwrap();
-
-            let response_body = r#"{"documents":[{"databases":[{"name":"admin","sizeOnDisk":40960,"empty":false},{"name":"app","sizeOnDisk":8192,"empty":true}],"ok":1}]}"#;
-            write!(
-                stream,
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                response_body.len(),
-                response_body
-            )
-            .unwrap();
-        });
-
-        let backend = WebBackend::new(format!("http://{address}"), String::new()).unwrap();
-        backend.auth.lock().await.checked = true;
-        let connection = new_connection_config(
-            "legacy".to_string(),
-            "Legacy MongoDB".to_string(),
-            DatabaseType::MongoDb,
-            "localhost".to_string(),
-            27017,
-            String::new(),
-            String::new(),
-            Some("app".to_string()),
-            false,
-            Some("mongodb-legacy".to_string()),
-        )
-        .unwrap();
-        backend.connected.lock().await.insert(connection.id.clone(), connection.clone());
-
-        let result = backend.execute_mongo_command(&connection, "app", &MongoCommand::ShowDatabases).await.unwrap();
-
-        server.join().unwrap();
-        let (request_line, body) = request_receiver.recv().unwrap();
-        assert_eq!(request_line, "POST /api/mongo/run-command HTTP/1.1");
-        let request: Value = serde_json::from_str(&body).unwrap();
-        assert_eq!(request["connectionId"], "legacy");
-        assert_eq!(request["database"], "admin");
-        assert_eq!(request["commandJson"], r#"{"listDatabases":1}"#);
-        assert_eq!(result.columns, ["name", "sizeOnDisk", "empty"]);
-        assert_eq!(result.rows.len(), 2);
-        assert_eq!(result.affected_rows, 2);
-    }
-
-    #[tokio::test]
-    async fn web_mongo_find_explain_uses_explain_endpoint_and_preserves_options() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let (request_sender, request_receiver) = mpsc::channel();
-        let server = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-            let mut request = Vec::new();
-            let mut buffer = [0_u8; 1024];
-            let header_end = loop {
-                let count = stream.read(&mut buffer).unwrap();
-                request.extend_from_slice(&buffer[..count]);
-                if let Some(position) = request.windows(4).position(|window| window == b"\r\n\r\n") {
-                    break position + 4;
-                }
-            };
-            let headers = String::from_utf8_lossy(&request[..header_end]);
-            let content_length = headers
-                .lines()
-                .find_map(|line| {
-                    let (name, value) = line.split_once(':')?;
-                    name.eq_ignore_ascii_case("content-length").then_some(value.trim())
-                })
-                .unwrap()
-                .parse::<usize>()
-                .unwrap();
-            while request.len() < header_end + content_length {
-                let count = stream.read(&mut buffer).unwrap();
-                request.extend_from_slice(&buffer[..count]);
-            }
-            let request = String::from_utf8(request).unwrap();
-            let body = request[header_end..header_end + content_length].to_string();
-            request_sender.send((request.lines().next().unwrap().to_string(), body)).unwrap();
-
-            let response_body = r#"{"queryPlanner":{"winningPlan":{"stage":"COLLSCAN"}}}"#;
-            write!(
-                stream,
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                response_body.len(),
-                response_body
-            )
-            .unwrap();
-        });
-
-        let backend = WebBackend::new(format!("http://{address}"), String::new()).unwrap();
-        backend.auth.lock().await.checked = true;
-        let connection = new_connection_config(
-            "legacy".to_string(),
-            "Legacy MongoDB".to_string(),
-            DatabaseType::MongoDb,
-            "localhost".to_string(),
-            27017,
-            String::new(),
-            String::new(),
-            Some("app".to_string()),
-            false,
-            Some("mongodb-legacy".to_string()),
-        )
-        .unwrap();
-        backend.connected.lock().await.insert(connection.id.clone(), connection.clone());
-
-        let command = MongoCommand::FindExplain {
-            collection: "im_msg".to_string(),
-            filter: r#"{"active":true}"#.to_string(),
-            projection: Some(r#"{"email":1}"#.to_string()),
-            sort: Some(r#"{"email":1}"#.to_string()),
-            collation: Some(r#"{"locale":"en","strength":1}"#.to_string()),
-            skip: 2,
-            limit: 5,
-            verbosity: "executionStats".to_string(),
-        };
-        let result = backend.execute_mongo_command(&connection, "app", &command).await.unwrap();
-
-        server.join().unwrap();
-        let (request_line, body) = request_receiver.recv().unwrap();
-        assert_eq!(request_line, "POST /api/mongo/explain-find HTTP/1.1");
-        let request: Value = serde_json::from_str(&body).unwrap();
-        assert_eq!(request["connectionId"], "legacy");
-        assert_eq!(request["database"], "app");
-        assert_eq!(request["collection"], "im_msg");
-        assert_eq!(request["skip"], 2);
-        assert_eq!(request["limit"], 5);
-        assert_eq!(request["filter"], r#"{"active":true}"#);
-        assert_eq!(request["projection"], r#"{"email":1}"#);
-        assert_eq!(request["sort"], r#"{"email":1}"#);
-        assert_eq!(request["collation"], r#"{"locale":"en","strength":1}"#);
-        assert_eq!(request["verbosity"], "executionStats");
-        assert_eq!(result.columns, ["queryPlanner"]);
-        assert_eq!(result.rows.len(), 1);
     }
 
     #[test]
@@ -4507,55 +2886,6 @@ mod tests {
         assert!(storage.load_connections().await.unwrap().is_empty());
     }
 
-    #[tokio::test]
-    async fn local_backend_uses_desktop_plugin_directory() {
-        let data_dir = tempfile::tempdir().unwrap();
-        let database_path = data_dir.path().join("dbx.db");
-        let jdbc_plugin_dir = data_dir.path().join("plugins").join("jdbc");
-        std::fs::create_dir_all(&jdbc_plugin_dir).unwrap();
-        std::fs::write(
-            jdbc_plugin_dir.join("manifest.json"),
-            r#"{
-                "id": "jdbc",
-                "name": "DBX JDBC Plugin",
-                "drivers": [{
-                    "id": "jdbc",
-                    "label": "JDBC",
-                    "kind": "external",
-                    "database_type": "jdbc"
-                }]
-            }"#,
-        )
-        .unwrap();
-        let storage = Storage::open(&database_path).await.unwrap();
-        drop(storage);
-
-        let backend = LocalBackend::open(&database_path).await.unwrap();
-
-        assert_eq!(backend.state().plugins.root_dir(), data_dir.path().join("plugins"));
-        assert!(backend.state().plugins.find_driver("jdbc").unwrap().is_some());
-    }
-
-    #[tokio::test]
-    async fn local_backend_uses_desktop_agent_directory() {
-        let data_dir = tempfile::tempdir().unwrap();
-        let database_path = data_dir.path().join("dbx.db");
-        let agent_dir = data_dir.path().join("agents-custom");
-        let storage = Storage::open(&database_path).await.unwrap();
-        storage
-            .save_desktop_settings(&DesktopSettings {
-                agent_store_dir: Some(agent_dir.to_string_lossy().to_string()),
-                ..DesktopSettings::default()
-            })
-            .await
-            .unwrap();
-        drop(storage);
-
-        let backend = LocalBackend::open(&database_path).await.unwrap();
-
-        assert_eq!(backend.state().agent_manager.base_dir(), &agent_dir);
-    }
-
     struct LifecycleTestIo {
         disconnects: Arc<AtomicUsize>,
     }
@@ -4641,68 +2971,6 @@ mod tests {
             .unwrap();
     }
 
-    #[tokio::test]
-    async fn local_backend_standalone_open_skips_plugin_dbx_engine_gate() {
-        let data_dir = tempfile::tempdir().unwrap();
-        let database_path = data_dir.path().join("dbx.db");
-        let plugin_dir = data_dir.path().join("plugins").join("io.dbx.gated");
-        std::fs::create_dir_all(plugin_dir.join("ui")).unwrap();
-        std::fs::write(plugin_dir.join("ui").join("index.html"), "<!doctype html>").unwrap();
-        std::fs::write(
-            plugin_dir.join("manifest.json"),
-            r#"{
-                "manifest_version": 1,
-                "id": "io.dbx.gated",
-                "name": "Gated",
-                "version": "1.0.0",
-                "publisher": "example",
-                "engines": { "dbx": ">=999.0.0", "host_api": "^1.0" },
-                "entrypoints": { "ui": { "root": "ui", "entry": "ui/index.html" } },
-                "permissions": ["host.events"]
-            }"#,
-        )
-        .unwrap();
-        let storage = Storage::open(&database_path).await.unwrap();
-        drop(storage);
-
-        // The standalone host has no app version to compare against (#9595).
-        let backend = LocalBackend::open(&database_path).await.unwrap();
-        let installed = backend.state().plugins.list_installed().unwrap();
-        let plugin = installed.iter().find(|plugin| plugin.manifest.id == "io.dbx.gated").unwrap();
-        assert!(plugin.compatibility.compatible, "{:?}", plugin.compatibility.errors);
-
-        // A host that knows the app version keeps enforcing the requirement.
-        let backend = LocalBackend::open_with_app_version(&database_path, "0.6.16").await.unwrap();
-        let installed = backend.state().plugins.list_installed().unwrap();
-        let plugin = installed.iter().find(|plugin| plugin.manifest.id == "io.dbx.gated").unwrap();
-        assert!(!plugin.compatibility.compatible, "{:?}", plugin.compatibility.errors);
-    }
-
-    #[test]
-    fn local_plugin_directory_honors_desktop_storage_settings() {
-        let data_dir = Path::new("C:/Users/user/AppData/Roaming/com.dbx.app");
-        let explicit = DesktopSettings {
-            plugin_store_dir: Some("D:/DBX/plugins-custom".to_string()),
-            ..DesktopSettings::default()
-        };
-        let legacy =
-            DesktopSettings { driver_store_dir: Some("D:/DBX/drivers".to_string()), ..DesktopSettings::default() };
-
-        assert_eq!(local_plugin_dir(&explicit, data_dir), PathBuf::from("D:/DBX/plugins-custom"));
-        assert_eq!(local_plugin_dir(&legacy, data_dir), PathBuf::from("D:/DBX/drivers/plugins"));
-    }
-
-    #[test]
-    fn local_agent_directory_honors_desktop_storage_settings() {
-        let data_dir = Path::new("C:/Users/user/AppData/Roaming/com.dbx.app");
-        let explicit =
-            DesktopSettings { agent_store_dir: Some("D:/DBX/agents-custom".to_string()), ..DesktopSettings::default() };
-        let legacy = DesktopSettings { driver_store_dir: Some("D:/DBX/drivers".to_string()), ..Default::default() };
-
-        assert_eq!(local_agent_dir(&explicit, data_dir), PathBuf::from("D:/DBX/agents-custom"));
-        assert_eq!(local_agent_dir(&legacy, data_dir), PathBuf::from("D:/DBX/drivers/agents"));
-    }
-
     struct StubBackend;
 
     #[async_trait]
@@ -4737,28 +3005,5 @@ mod tests {
         async fn remove_connection_for_mcp(&self, _connection_id: &str) -> Result<bool, String> {
             Ok(false)
         }
-    }
-
-    #[tokio::test]
-    async fn collect_docs_snapshot_defaults_to_unsupported() {
-        let backend = StubBackend;
-        let connection = new_connection_config(
-            "c1".to_string(),
-            "local".to_string(),
-            DatabaseType::Postgres,
-            "127.0.0.1".to_string(),
-            5432,
-            "user".to_string(),
-            "password".to_string(),
-            None,
-            false,
-            None,
-        )
-        .unwrap();
-
-        let result = backend.collect_docs_snapshot(&connection, "shop", DocsSnapshotOptions::default()).await;
-
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("not supported"));
     }
 }

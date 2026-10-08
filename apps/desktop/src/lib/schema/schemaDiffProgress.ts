@@ -7,8 +7,8 @@ export type SchemaDiffProgressPhase = "loading-table-lists" | "loading-source-de
 export type SchemaDiffNextProgressStep = "nextSourceDetails" | "nextTargetDetails" | "nextExtraObjects" | "nextComparing" | "nextGenerating" | "nextComplete";
 
 export function isSchemaDiffPostgresLike(dbType: string | null | undefined): boolean {
-  const normalizedDbType = (dbType || "").toLowerCase();
-  return normalizedDbType === "postgres" || normalizedDbType === "opengauss";
+  (dbType || "").toLowerCase();
+  return false;
 }
 
 /** Extra objects that remain Postgres-catalog specific (sequences/rules/owners + PG function fast path). Routine compare for other DBs is gated separately via supportsSchemaDiffRoutines. */

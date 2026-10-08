@@ -176,34 +176,9 @@ export function useQueryEditorCompletionKeys(options: QueryEditorCompletionKeysO
 
   function acceptSqlServerCompletionOnSpace(view: EditorViewType): boolean {
     if (isEditorComposing(view)) return false;
-    if (props.databaseType !== "sqlserver" || !settingsStore.editorSettings.sqlServerSpaceConfirmsCompletion) return false;
-    if (codeMirrorRuntime.codeMirrorCompletionStatus?.(view.state) !== "active") return false;
-    // A non-empty selection belongs to block editing, not word completion.
-    if (!view.state.selection.main.empty) return false;
-    const selected = codeMirrorRuntime.codeMirrorSelectedCompletion?.(view.state) as QueryCompletionOption | null | undefined;
-    const completionType = selected?.type;
-    if (completionType !== "keyword" && completionType !== "table" && completionType !== "column") return false;
-    // Batch-selection rows own Space for checkbox toggling; this Prec.highest binding outranks their keymap.
-    if (selected?.dbxBatchColumnSelection || selected?.dbxBatchColumnSelectionAction) return false;
-    if (!(codeMirrorRuntime.codeMirrorAcceptCompletion?.(view) ?? false)) return false;
-
-    const selection = view.state.selection.main;
-    if (!selection.empty) return true;
-    const cursor = selection.head;
-    const previousCharacter = cursor > 0 ? view.state.sliceDoc(cursor - 1, cursor) : "";
-    if (/\s/.test(previousCharacter)) return true;
-
-    const nextCharacter = view.state.sliceDoc(cursor, cursor + 1);
-    if (/\s/.test(nextCharacter)) {
-      view.dispatch({ selection: { anchor: cursor + 1 }, scrollIntoView: true });
-    } else {
-      view.dispatch({
-        changes: { from: cursor, insert: " " },
-        selection: { anchor: cursor + 1 },
-        scrollIntoView: true,
-      });
+    {
+      return false;
     }
-    return true;
   }
 
   function handleSpace(view: EditorViewType): boolean {

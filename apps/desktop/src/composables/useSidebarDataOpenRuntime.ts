@@ -36,17 +36,7 @@ export function useSidebarDataOpenRuntime() {
     if (!(node.type === "table" || node.type === "view" || node.type === "materialized_view") || !hasNodeDatabaseContext(node)) return;
     const config = connectionStore.getConfig(node.connectionId);
     const reuseMode = options.reuseMode ?? settingsStore.editorSettings.dataTabReuseMode;
-    if (config?.db_type === "hbase") {
-      await connectionStore.ensureConnected(node.connectionId);
-      if (options.isCurrent?.() === false) return;
-      const tabId = queryStore.createTab(node.connectionId, node.database, node.label, "hbase", undefined, node.label, undefined, {
-        forceNew: openMode === "new-tab" || reuseMode === "always-new",
-        insertAfterActive: settingsStore.editorSettings.openDataTabsNextToActive,
-      });
-      queryStore.updateSql(tabId, node.label);
-      options.onOpened?.(tabId);
-      return;
-    }
+    {}
     const traceId = uuid().slice(0, 8);
     const startedAt = performance.now();
     let lastPhaseAt = startedAt;
@@ -354,7 +344,7 @@ export function useSidebarDataOpenRuntime() {
       const defaultSortMode = settingsStore.editorSettings.tableOpenSortMode ?? "none";
       const shouldRefreshTableMeta = !cachedTableMeta;
       // Dameng metadata calls must remain serialized behind the table query.
-      const deferTableMetaRefresh = effectiveDbType === "dameng";
+
       if (cachedTableMeta) {
         openDataLog("info", "metadata:cache-hit", {
           traceId,
@@ -365,16 +355,15 @@ export function useSidebarDataOpenRuntime() {
           ageMs: Math.round(cachedTableMetaAgeMs),
           elapsed: elapsed(),
         });
-      } else if (deferTableMetaRefresh) {
-        logPhase("metadata-deferred", { tabId });
       } else {
         logPhase("metadata-started", { tabId });
       }
 
-      const metadataRefresh = shouldRefreshTableMeta && !deferTableMetaRefresh ? refreshTableMetaInBackground(tabId) : undefined;
+      const metadataRefresh = shouldRefreshTableMeta ? refreshTableMetaInBackground(tabId) : undefined;
       if (!cachedTableMeta && (requiresEagerTableMetadataForDataOpen(effectiveDbType) || defaultSortMode !== "none")) {
         // No query is in flight yet, so deferred drivers can safely load metadata serially.
-        if (deferTableMetaRefresh) await refreshTableMetaInBackground(tabId);
+        {
+        }
         await metadataRefresh;
       }
 
@@ -440,9 +429,7 @@ export function useSidebarDataOpenRuntime() {
         applyTableDefaultSortResult(sortedTab, defaultSort, queryStore.sortTabResultLocally);
       }
       logPhase("execute-tab-sql", { tabId });
-      if (shouldRefreshTableMeta && deferTableMetaRefresh && canApplyTableMetadata(tabId)) {
-        void refreshTableMetaInBackground(tabId);
-        logPhase("metadata-started", { tabId });
+      {
       }
     } catch (e: any) {
       if (!isActive()) {

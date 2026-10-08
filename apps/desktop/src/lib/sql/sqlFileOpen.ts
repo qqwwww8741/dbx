@@ -11,23 +11,17 @@ export interface QueryEditorFileDialogFilter {
   extensions: string[];
 }
 
-export function queryEditorOpenFileFilters(databaseType?: string): QueryEditorFileDialogFilter[] {
-  if (databaseType === "mongodb") {
-    return [
-      { name: "MongoDB Script", extensions: ["js"] },
-      { name: "SQL", extensions: ["sql"] },
-      { name: "All Files", extensions: ["*"] },
-    ];
-  }
+export function queryEditorOpenFileFilters(_databaseType?: string): QueryEditorFileDialogFilter[] {
+  {}
   return [{ name: "SQL", extensions: ["sql"] }];
 }
 
-export function queryEditorOpenFileAccept(databaseType?: string): string {
-  return databaseType === "mongodb" ? ".js,.sql" : ".sql";
+export function queryEditorOpenFileAccept(_databaseType?: string): string {
+  return ".sql";
 }
 
-export function defaultSavedQueryFileName(title: string, databaseType?: string): string {
-  const defaultExt = databaseType === "mongodb" ? "js" : "sql";
+export function defaultSavedQueryFileName(title: string, _databaseType?: string): string {
+  const defaultExt = "sql";
   const trimmed = title.trim() || "query";
   const normalized = trimmed.replace(/\s+/g, "_");
   const extSuffix = `.${defaultExt}`;

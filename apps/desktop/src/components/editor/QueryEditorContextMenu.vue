@@ -35,7 +35,7 @@ import {
   WandSparkles,
 } from "@lucide/vue";
 import CustomContextMenu, { type ContextMenuItem } from "@/components/ui/CustomContextMenu.vue";
-import { canFormatSqlForDatabaseType } from "@/lib/sql/sqlFormatter";
+
 import { supportsQueryEditorBlockComments } from "@/lib/database/databaseFeatureSupport";
 import { normalizeShortcutSettings, type ShortcutSettings } from "@/lib/editor/shortcutRegistry";
 import { queryContextObjectActions, type QueryContextObjectAction } from "@/lib/sql/queryCursorTableTarget";
@@ -220,7 +220,7 @@ const contextMenuItems = computed<ContextMenuItem[]>(() => {
     {
       label: canCopySelectedSql ? t("editor.contextMenu.formatSelectionSql") : t("toolbar.formatSql"),
       action: () => void actions.formatCurrentSql(),
-      disabled: state.readOnly || (!canCopySelectedSql && !canExecuteContextSql && !state.hasContent) || !canFormatSqlForDatabaseType(state.databaseType),
+      disabled: state.readOnly || (!canCopySelectedSql && !canExecuteContextSql && !state.hasContent),
       icon: AlignLeft,
       shortcut: shortcuts.formatSql,
     },

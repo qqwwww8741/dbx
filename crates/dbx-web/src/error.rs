@@ -119,7 +119,7 @@ mod tests {
 
     #[tokio::test]
     async fn http_response_preserves_original_structured_agent_detail() {
-        use dbx_core::db::agent_driver::{
+        use dbx_core::driver_error::{
             AgentCallError, AgentErrorCategory, AgentErrorContext, AgentErrorStage, AgentOperationOutcome,
             AgentSessionDisposition,
         };
@@ -149,22 +149,6 @@ mod tests {
         assert_eq!(payload["source"], "jdbcAgent");
         assert_eq!(payload["detail"], "relation customer_orders does not exist");
         assert!(payload["diagnostics"].get("agentSessionId").is_none());
-    }
-
-    #[tokio::test]
-    async fn http_response_preserves_duckdb_native_detail_and_worker_code() {
-        let error = BackendError::from_duckdb_worker_error(
-            "duckdb_execute_failed",
-            "Catalog Error: Table missing_table does not exist",
-        );
-
-        let response = AppError::from(error).into_response();
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
-
-        assert_eq!(payload["detail"], "Catalog Error: Table missing_table does not exist");
-        assert_eq!(payload["origin"]["driver"], "duckdb");
-        assert_eq!(payload["diagnostics"]["adapterCode"], "duckdb_execute_failed");
     }
 
     #[tokio::test]

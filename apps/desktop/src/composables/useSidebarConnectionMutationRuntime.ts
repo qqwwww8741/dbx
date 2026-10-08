@@ -201,7 +201,7 @@ export function useSidebarConnectionMutationRuntime(options: SidebarConnectionMu
       const { save } = await import("@tauri-apps/plugin-dialog");
       const destinationPath = await save({
         defaultPath: defaultSqliteBackupFileName(config),
-        filters: [{ name: "SQLite", extensions: ["db", "sqlite", "sqlite3"] }],
+        filters: [{ name: "SQLite", extensions: ["db", "sqlite3"] }],
       });
       if (!destinationPath) return;
 
@@ -238,7 +238,7 @@ export function useSidebarConnectionMutationRuntime(options: SidebarConnectionMu
     const { open } = await import("@tauri-apps/plugin-dialog");
     const sourcePath = await open({
       multiple: false,
-      filters: [{ name: "SQLite", extensions: ["db", "sqlite", "sqlite3", "bak"] }],
+      filters: [{ name: "SQLite", extensions: ["db", "sqlite3", "bak"] }],
     });
     if (typeof sourcePath !== "string" || !sourcePath) return;
     try {
@@ -333,13 +333,7 @@ export function useSidebarConnectionMutationRuntime(options: SidebarConnectionMu
   }
 
   const isPinned = computed(() => activeNode.value.pinned || connectionStore.isTreeNodePinned(activeNode.value));
-  const isNodeDefaultDatabase = computed(
-    () =>
-      (activeNode.value.type === "database" || activeNode.value.type === "redis-db" || activeNode.value.type === "mongo-db" || activeNode.value.type === "vector-database") &&
-      !!activeNode.value.connectionId &&
-      !!activeNode.value.database &&
-      connectionStore.isDefaultDatabase(activeNode.value.connectionId, activeNode.value.database),
-  );
+  const isNodeDefaultDatabase = computed(() => activeNode.value.type === "database" && !!activeNode.value.connectionId && !!activeNode.value.database && connectionStore.isDefaultDatabase(activeNode.value.connectionId, activeNode.value.database));
   const isNodeDefaultSchema = computed(() => activeNode.value.type === "schema" && !!activeNode.value.connectionId && !!activeNode.value.schema && connectionStore.isDefaultSchema(activeNode.value.connectionId, activeNode.value.schema));
   const isConnected = computed(() => activeNode.value.type === "connection" && !!activeNode.value.connectionId && connectionStore.connectedIds.has(activeNode.value.connectionId));
   const isConnecting = computed(() => activeNode.value.type === "connection" && !!activeNode.value.connectionId && connectionStore.connectingIds.has(activeNode.value.connectionId));

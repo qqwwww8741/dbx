@@ -1,9 +1,7 @@
 import type { JdbcMavenBundleInfo, JdbcPluginStatus } from "@/types/database";
-import { PHOENIX_MANAGED_JDBC_DRIVER } from "@/lib/database/phoenixBuiltinDriver";
-import { PRESTOSQL_MANAGED_JDBC_DRIVER } from "@/lib/database/prestoSqlBuiltinDriver";
 import { createManagedJdbcDriverRegistry, installManagedJdbcDriver, managedJdbcDriverRow, uninstallManagedJdbcDriver, type ManagedJdbcDriverApi, type ManagedJdbcDriverDefinition, type ManagedJdbcDriverMutationResult } from "@/lib/database/managedJdbcDriver";
 
-export const MANAGED_JDBC_DRIVERS = [PRESTOSQL_MANAGED_JDBC_DRIVER, PHOENIX_MANAGED_JDBC_DRIVER] as const satisfies readonly ManagedJdbcDriverDefinition[];
+export const MANAGED_JDBC_DRIVERS: readonly ManagedJdbcDriverDefinition[] = [];
 
 const managedJdbcDriverRegistry = createManagedJdbcDriverRegistry(MANAGED_JDBC_DRIVERS);
 

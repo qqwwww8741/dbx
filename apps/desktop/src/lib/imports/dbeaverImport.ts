@@ -1,6 +1,6 @@
 import type { ConnectionConfig, DatabaseType, SidebarLayout } from "@/types/database";
 import { uuid } from "@/lib/common/utils";
-import { JDBCX_JDBC_DRIVER_CLASS } from "@/lib/database/jdbcxBuiltinDriver";
+
 import { buildSidebarLayoutFromFolderPaths } from "@/lib/sidebar/sidebarLayout";
 import { DEFAULT_QUERY_TIMEOUT_SECS } from "@/lib/connection/timeoutLimits";
 
@@ -39,33 +39,6 @@ const dbeaverKey = new Uint8Array([186, 187, 74, 159, 119, 74, 184, 83, 201, 108
 
 const profileMap: Record<string, ConnectionProfile> = {
   mysql: { dbType: "mysql", profile: "mysql", label: "MySQL", port: 3306, user: "root" },
-  mariadb: { dbType: "mysql", profile: "mariadb", label: "MariaDB", port: 3306, user: "root" },
-  postgresql: { dbType: "postgres", profile: "postgres", label: "PostgreSQL", port: 5432, user: "postgres" },
-  postgres: { dbType: "postgres", profile: "postgres", label: "PostgreSQL", port: 5432, user: "postgres" },
-  cloudberry: { dbType: "postgres", profile: "cloudberry", label: "Apache Cloudberry", port: 5432, user: "postgres" },
-  opentenbase: { dbType: "postgres", profile: "opentenbase", label: "OpenTenBase", port: 11000, user: "opentenbase" },
-  sqlite: { dbType: "sqlite", profile: "sqlite", label: "SQLite", port: 0, user: "" },
-  sqlserver: { dbType: "sqlserver", profile: "sqlserver", label: "SQL Server", port: 1433, user: "sa" },
-  mssql: { dbType: "sqlserver", profile: "sqlserver", label: "SQL Server", port: 1433, user: "sa" },
-  oracle: { dbType: "oracle", profile: "oracle", label: "Oracle", port: 1521, user: "system" },
-  db2: { dbType: "db2", profile: "db2", label: "IBM DB2", port: 50000, user: "db2inst1" },
-  clickhouse: { dbType: "clickhouse", profile: "clickhouse", label: "ClickHouse", port: 8123, user: "default" },
-  duckdb: { dbType: "duckdb", profile: "duckdb", label: "DuckDB", port: 0, user: "" },
-  mongodb: { dbType: "mongodb", profile: "mongodb", label: "MongoDB", port: 27017, user: "" },
-  mongo: { dbType: "mongodb", profile: "mongodb", label: "MongoDB", port: 27017, user: "" },
-  redshift: { dbType: "redshift", profile: "redshift", label: "Redshift", port: 5439, user: "awsuser" },
-  elasticsearch: { dbType: "elasticsearch", profile: "elasticsearch", label: "Elasticsearch", port: 9200, user: "" },
-  easysearch: { dbType: "easysearch", profile: "easysearch", label: "Easysearch", port: 9200, user: "" },
-  doris: { dbType: "doris", profile: "doris", label: "Doris", port: 9030, user: "root" },
-  starrocks: { dbType: "starrocks", profile: "starrocks", label: "StarRocks", port: 9030, user: "root" },
-  dameng: { dbType: "dameng", profile: "dm", label: "达梦 Dameng", port: 5236, user: "SYSDBA" },
-  dm: { dbType: "dameng", profile: "dm", label: "达梦 Dameng", port: 5236, user: "SYSDBA" },
-  gaussdb: { dbType: "gaussdb", profile: "gaussdb", label: "GaussDB", port: 5432, user: "gaussdb" },
-  kwdb: { dbType: "kwdb", profile: "kwdb", label: "KWDB", port: 26257, user: "root" },
-  opengauss: { dbType: "gaussdb", profile: "opengauss", label: "openGauss", port: 5432, user: "gaussdb" },
-  questdb: { dbType: "questdb", profile: "questdb", label: "QuestDB", port: 8812, user: "questdb" },
-  influxdb: { dbType: "influxdb", profile: "influxdb", label: "InfluxDB", port: 8086, user: "" },
-  jdbcx: { dbType: "jdbc", profile: "jdbcx", label: "JDBCX", port: 0, user: "" },
 };
 
 function normalizeKey(value: unknown) {
@@ -88,9 +61,6 @@ function getNumber(value: unknown) {
 // `jdbc_driver_class` makes it try `Class.forName("db2")` and fail with
 // ClassNotFoundException. Only fall back to it when it is actually
 // package-qualified, which is how DBeaver identifies genuinely custom drivers.
-function looksLikeJdbcDriverClassName(value: string) {
-  return /^[a-zA-Z_$][\w$]*(\.[a-zA-Z_$][\w$]*)+$/.test(value);
-}
 
 function firstNonEmptyString(...values: unknown[]) {
   for (const value of values) {
@@ -101,16 +71,15 @@ function firstNonEmptyString(...values: unknown[]) {
   return "";
 }
 
-function inferProfile(entry: DbeaverConnectionEntry): ConnectionProfile {
-  if (/^jdbcx:/i.test(getString(entry.configuration?.url))) return profileMap.jdbcx;
-  if (normalizeKey(entry.provider) === "opentenbase") return profileMap.opentenbase;
+function inferProfile(entry: DbeaverConnectionEntry): ConnectionProfile | null {
+  {}
   const driverProfile = profileMap[normalizeKey(entry.driver)];
   if (driverProfile) return driverProfile;
   const candidates = [entry.provider, entry.driver, entry.configuration?.url, entry.name].map(normalizeKey).join(" ");
   for (const [needle, profile] of Object.entries(profileMap)) {
     if (candidates.includes(needle)) return profile;
   }
-  return { dbType: "jdbc", profile: "jdbc", label: getString(entry.driver) || "JDBC", port: 0, user: "" };
+  return null;
 }
 
 function base64ToBytes(value: string) {
@@ -241,13 +210,14 @@ function extractFolderPaths(parsed: any): string[] {
 
 function buildConnection(entry: DbeaverConnectionEntry, credentials: ReturnType<typeof readCredentials>): ConnectionConfig | null {
   const profile = inferProfile(entry);
+  if (!profile) return null;
   const config = entry.configuration || {};
   const url = getString(config.url);
   const parsedUrl = parseJdbcUrl(url, profile);
   const configuredPort = getNumber(config.port || config["host-port"] || parsedUrl.port) || profile.port;
   const configuredDatabase = firstNonEmptyString(config.database, config["database-name"], config.schema, parsedUrl.database);
-  const host = getString(config.host || config["host-name"] || parsedUrl.host || (profile.dbType === "sqlite" ? configuredDatabase : "127.0.0.1"));
-  const database = profile.dbType === "sqlite" ? "" : configuredDatabase;
+  const host = getString(config.host || config["host-name"] || parsedUrl.host || "127.0.0.1");
+  const database = configuredDatabase;
   const name = getString(entry.name || database || host || profile.label);
   if (!entry.id || !name) return null;
 
@@ -267,9 +237,9 @@ function buildConnection(entry: DbeaverConnectionEntry, credentials: ReturnType<
     connect_timeout_secs: 10,
     query_timeout_secs: DEFAULT_QUERY_TIMEOUT_SECS,
     ssl: false,
-    oracle_connection_type: profile.dbType === "oracle" ? parsedUrl.oracleConnectionType || "service_name" : undefined,
-    connection_string: profile.dbType === "jdbc" || profile.dbType === "mongodb" ? url || undefined : undefined,
-    jdbc_driver_class: profile.dbType === "jdbc" ? getString(config["driver-class"] || (profile.profile === "jdbcx" ? JDBCX_JDBC_DRIVER_CLASS : looksLikeJdbcDriverClassName(getString(entry.driver)) ? entry.driver : undefined)) || undefined : undefined,
+
+    connection_string: undefined,
+    jdbc_driver_class: undefined,
     jdbc_driver_paths: [],
   };
 

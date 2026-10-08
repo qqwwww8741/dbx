@@ -1,4 +1,3 @@
-import { isSchemaAware, isSingleDatabase } from "@/lib/database/databaseFeatureSupport";
 import { matchTable, splitQualifiedIdentifier } from "@/lib/sql/sqlNavigation";
 import type { DatabaseType } from "@/types/database";
 
@@ -60,7 +59,7 @@ export function resolveHoverTableLookupTarget(input: ResolveHoverTableLookupTarg
       schema = parts[parts.length - 2];
       schemaFromQualifier = true;
     } else {
-      if (input.databaseType && !isSchemaAware(input.databaseType) && !isSingleDatabase(input.databaseType)) {
+      if (input.databaseType) {
         database = parts[0]!;
         schema = undefined;
       } else {

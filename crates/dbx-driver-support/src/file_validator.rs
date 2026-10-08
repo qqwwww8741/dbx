@@ -94,7 +94,7 @@ mod tests {
     fn test_tilde_expands_to_home() {
         let home = std::env::var("HOME").unwrap_or_default();
         if home.is_empty() {
-            return; // skip if no HOME
+            return;
         }
         let result = validate_file_path(&format!("{}/.bashrc", home), is_network_path_test);
         // $HOME/.bashrc may or may not exist, but the path shouldn't contain literal ~

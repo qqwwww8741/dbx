@@ -4,7 +4,7 @@ import type { SqlSemanticConfidence, SqlSemanticCursorKind, SqlSemanticStatement
 export interface SqlSemanticFixture {
   name: string;
   sql: string;
-  databaseType?: "postgres" | "mysql" | "sqlserver" | "sqlite" | "duckdb" | "oracle";
+  databaseType?: "mysql";
   expected: {
     statementKind: SqlSemanticStatementKind;
     cursorKind: SqlSemanticCursorKind;
@@ -73,47 +73,7 @@ export const SQL_SEMANTIC_BASELINE_FIXTURES: SqlSemanticFixture[] = [
       completionLabels: ["id", "user_name"],
     },
   },
-  {
-    name: "insert target columns",
-    sql: "INSERT INTO dbo.Users (|",
-    databaseType: "sqlserver",
-    expected: {
-      statementKind: "insert",
-      cursorKind: "insert_column",
-      completionScope: "columns",
-      prefix: "",
-      qualifierParts: [],
-      confidence: "medium",
-      rowSources: [{ name: "Users", kind: "mutation_target" }],
-    },
-  },
-  {
-    name: "update set columns",
-    sql: "UPDATE dbo.Users SET |",
-    databaseType: "sqlserver",
-    expected: {
-      statementKind: "update",
-      cursorKind: "update_column",
-      completionScope: "columns",
-      prefix: "",
-      qualifierParts: [],
-      confidence: "medium",
-      rowSources: [{ name: "Users", kind: "mutation_target" }],
-    },
-  },
-  {
-    name: "call routine",
-    sql: "CALL app.refresh_|",
-    databaseType: "postgres",
-    expected: {
-      statementKind: "call",
-      cursorKind: "routine",
-      completionScope: "routine",
-      prefix: "refresh_",
-      qualifierParts: ["app"],
-      confidence: "high",
-    },
-  },
+
   {
     name: "delete target",
     sql: "DELETE FROM audit_events ae WHERE ae.|",
@@ -127,33 +87,7 @@ export const SQL_SEMANTIC_BASELINE_FIXTURES: SqlSemanticFixture[] = [
       rowSources: [{ name: "audit_events", alias: "ae", kind: "mutation_target" }],
     },
   },
-  {
-    name: "table function alias",
-    sql: "SELECT * FROM JSON_TABLE(payload, '$' COLUMNS(id INT PATH '$.id')) jt WHERE jt.|",
-    databaseType: "oracle",
-    expected: {
-      statementKind: "select",
-      cursorKind: "alias_column",
-      completionScope: "columns",
-      prefix: "",
-      qualifierParts: ["JT"],
-      confidence: "high",
-      rowSources: [{ name: "JT", alias: "JT", kind: "table_function" }],
-    },
-  },
-  {
-    name: "schema qualified table",
-    sql: "SELECT * FROM reporting.|",
-    databaseType: "postgres",
-    expected: {
-      statementKind: "select",
-      cursorKind: "table",
-      completionScope: "table",
-      prefix: "",
-      qualifierParts: ["reporting"],
-      confidence: "medium",
-    },
-  },
+
   {
     name: "comment suppressed",
     sql: "SELECT * FROM users -- u.|",

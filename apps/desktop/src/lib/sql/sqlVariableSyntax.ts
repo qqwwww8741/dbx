@@ -18,7 +18,7 @@ export interface SqlVariableSyntaxToggles {
   named: boolean; // :name
   shell: boolean; // ${name}
   mybatis: boolean; // #{name}
-  sqlserver: boolean; // @name
+  // @name
   atSet: boolean; // @set name = value;  (expandSqlVariables)
 }
 
@@ -27,12 +27,12 @@ export const DEFAULT_SQL_VARIABLE_SYNTAX_TOGGLES: SqlVariableSyntaxToggles = {
   named: true,
   shell: true,
   mybatis: true,
-  sqlserver: true,
+
   atSet: true,
 };
 
 // Fixed order for iterating the toggles in the settings UI.
-export const SQL_VARIABLE_SYNTAX_KEYS = ["positional", "named", "shell", "mybatis", "sqlserver", "atSet"] as const satisfies readonly (keyof SqlVariableSyntaxToggles)[];
+export const SQL_VARIABLE_SYNTAX_KEYS = ["positional", "named", "shell", "mybatis", "atSet"] as const satisfies readonly (keyof SqlVariableSyntaxToggles)[];
 
 // Display tokens (code symbols, not translated) shown next to each toggle.
 export const SQL_VARIABLE_SYNTAX_TOKENS: Record<keyof SqlVariableSyntaxToggles, string> = {
@@ -40,12 +40,12 @@ export const SQL_VARIABLE_SYNTAX_TOKENS: Record<keyof SqlVariableSyntaxToggles, 
   named: ":name",
   shell: "${name}",
   mybatis: "#{name}",
-  sqlserver: "@name",
+
   atSet: "@set …;",
 };
 
 // The first five toggles map one-to-one onto placeholder parameter syntaxes.
-const PARAMETER_SYNTAX_KEYS = ["positional", "named", "shell", "mybatis", "sqlserver"] as const satisfies readonly SqlParameterSyntax[];
+const PARAMETER_SYNTAX_KEYS = ["positional", "named", "shell", "mybatis"] as const satisfies readonly SqlParameterSyntax[];
 
 export type SqlVariableSyntaxOverrides = Partial<Record<DatabaseType, Partial<SqlVariableSyntaxToggles>>>;
 
@@ -65,17 +65,17 @@ export function resolveSqlVariableSyntaxToggles(overrides: SqlVariableSyntaxOver
       named: false,
       shell: false,
       mybatis: false,
-      sqlserver: false,
+
       atSet: false,
     };
   }
   const partial = dbType ? overrides?.[dbType] : undefined;
   return {
     positional: partial?.positional ?? true,
-    named: dbType === "neo4j" || dbType === "nebula" ? false : (partial?.named ?? true),
+    named: partial?.named ?? true,
     shell: partial?.shell ?? true,
     mybatis: partial?.mybatis ?? true,
-    sqlserver: partial?.sqlserver ?? true,
+
     atSet: partial?.atSet ?? true,
   };
 }

@@ -1,9 +1,0 @@
-{
-  "bundle": {
-    "windows": {
-      "nsis": {
-        "compression": "zlib"
-      }
-    }
-  }
-}

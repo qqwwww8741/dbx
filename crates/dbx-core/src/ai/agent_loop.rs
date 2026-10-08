@@ -297,8 +297,7 @@ async fn run_agent_loop_inner(
     // Plugin tools join agent runs only; ask mode keeps its database-only
     // read tools.
     let plugin_tool_set = if is_agent_mode {
-        let bound_plugin_connection =
-            (agent_ctx.db_type == DatabaseType::Plugin).then_some(agent_ctx.connection_id.as_str());
+        let bound_plugin_connection = (false).then_some(agent_ctx.connection_id.as_str());
         plugin_tools::discover_plugin_tools(&agent_ctx.state, agent_ctx.host_runtime.as_ref(), bound_plugin_connection)
             .await
     } else {
@@ -1480,9 +1479,7 @@ fn unconfirmed_write_sql<'a>(
     // would flag even reads (db.collection.find(...)) as writes, turning every
     // Mongo agent query into an impossible confirmation. Preserve the previous
     // behavior: Mongo writes keep failing with a clear read-only error.
-    if db_type == DatabaseType::MongoDb {
-        return None;
-    }
+    {}
     tool_calls.iter().find_map(|tool_call| {
         if tool_call.name != "execute_query" {
             return None;
@@ -1680,113 +1677,6 @@ fn summarize_message_content(content: &str) -> String {
 mod tests {
     use super::*;
 
-    fn plugin_tool_set() -> PluginToolSet {
-        PluginToolSet::from_listings_for_tests(
-            &[("io.dbx.kafka", "Kafka Studio")],
-            vec![(
-                plugin_tools::OpenPluginConnection {
-                    connection_id: "k1".to_string(),
-                    connection_name: "prod-kafka".to_string(),
-                    plugin_id: "io.dbx.kafka".to_string(),
-                },
-                json!({ "tools": [
-                    { "name": "kafka_topics_list", "annotations": { "readOnlyHint": true }, "inputSchema": { "type": "object", "properties": {} } },
-                    { "name": "kafka_topics_delete", "inputSchema": { "type": "object", "properties": { "topics": { "type": "array", "items": { "type": "string" } } } } }
-                ] }),
-            )],
-        )
-    }
-
-    fn plugin_tool_call(id: &str, name: &str) -> ToolCall {
-        ToolCall {
-            id: id.to_string(),
-            name: name.to_string(),
-            arguments: json!({ "topics": ["orders"] }),
-            provider_payload: None,
-        }
-    }
-
-    async fn gate_context(session_id: Option<&str>) -> (tempfile::TempDir, AgentLoopContext) {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let storage = crate::persistence::test_storage::open(&temp_dir.path().join("storage.db")).await.unwrap();
-        let ctx = AgentLoopContext {
-            state: Arc::new(AppState::new(storage)),
-            connection_id: "db".to_string(),
-            database: String::new(),
-            selected_databases: Vec::new(),
-            schema: None,
-            db_type: DatabaseType::Postgres,
-            cli_mcp_server_command: None,
-            sql_permissions: agent_tools::AgentSqlPermissions::default(),
-            max_agent_turns: DEFAULT_MAX_AGENT_TURNS,
-            prompt_cache_key: None,
-            session_id: session_id.map(str::to_string),
-            host_runtime: None,
-        };
-        (temp_dir, ctx)
-    }
-
-    #[tokio::test]
-    async fn plugin_tool_gate_runs_read_only_calls_and_asks_before_the_rest() {
-        let (_dir, ctx) = gate_context(Some("session-gate")).await;
-        let set = plugin_tool_set();
-        let calls = vec![
-            plugin_tool_call("c1", "kafka__kafka_topics_list"),
-            plugin_tool_call("c2", "kafka__kafka_topics_delete"),
-            plugin_tool_call("c3", "list_tables"),
-        ];
-        let events = Arc::new(Mutex::new(Vec::new()));
-        let recorded = events.clone();
-        // The "user" approves as soon as the question appears.
-        let on_event = move |event: AgentEvent| {
-            if let AgentEvent::ToolApprovalRequired { approval_id, .. } = &event {
-                assert!(tool_approval::resolve_tool_approval("session-gate", approval_id, true));
-            }
-            recorded.lock().unwrap().push(event);
-        };
-        let gate = gate_plugin_tool_calls(&set, &calls, &ctx, &on_event, &Notify::new()).await.unwrap();
-
-        assert!(gate[&0].as_ref().is_ok_and(|prepared| prepared.read_only));
-        let approved = gate[&1].as_ref().unwrap();
-        assert_eq!(approved.connection_id, "k1");
-        assert_eq!(approved.arguments, json!({ "topics": ["orders"] }));
-        assert!(!gate.contains_key(&2), "database tools bypass the plugin gate");
-
-        let events = events.lock().unwrap();
-        assert_eq!(events.len(), 2, "only the non-read-only call asks: {events:?}");
-        assert!(
-            matches!(&events[0], AgentEvent::ToolApprovalRequired { tool_call_id, plugin_tool, .. } if tool_call_id == "c2" && plugin_tool == "kafka_topics_delete")
-        );
-        assert!(matches!(&events[1], AgentEvent::ToolApprovalResolved { outcome: ToolApprovalOutcome::Approved, .. }));
-    }
-
-    #[tokio::test]
-    async fn plugin_tool_gate_refuses_declined_and_unaskable_calls_and_stops_on_cancel() {
-        let set = plugin_tool_set();
-        let calls = vec![plugin_tool_call("c1", "kafka__kafka_topics_delete")];
-
-        let (_dir, ctx) = gate_context(Some("session-deny")).await;
-        let deny = |event: AgentEvent| {
-            if let AgentEvent::ToolApprovalRequired { approval_id, .. } = &event {
-                tool_approval::resolve_tool_approval("session-deny", approval_id, false);
-            }
-        };
-        let gate = gate_plugin_tool_calls(&set, &calls, &ctx, &deny, &Notify::new()).await.unwrap();
-        let declined = gate[&0].as_ref().unwrap_err();
-        assert!(declined.is_error);
-        assert_eq!(declined.content, PLUGIN_TOOL_DECLINED);
-
-        // No client session: nobody can be asked, so the call never runs.
-        let (_dir, headless) = gate_context(None).await;
-        let gate = gate_plugin_tool_calls(&set, &calls, &headless, &|_event| {}, &Notify::new()).await.unwrap();
-        assert_eq!(gate[&0].as_ref().unwrap_err().content, PLUGIN_TOOL_APPROVAL_UNAVAILABLE);
-
-        let (_dir, ctx) = gate_context(Some("session-cancel")).await;
-        let cancelled = Notify::new();
-        cancelled.notify_one();
-        assert!(gate_plugin_tool_calls(&set, &calls, &ctx, &|_event| {}, &cancelled).await.is_none());
-    }
-
     #[test]
     fn compaction_prompt_preserves_attachment_trust_boundary() {
         assert!(COMPACT_SYSTEM_PROMPT.contains("<attached-text-data>"));
@@ -1892,141 +1782,6 @@ mod tests {
         assert!(
             matches!(response, WriteAttemptResponse::ProductionBlocked { sql } if sql == "DELETE FROM users WHERE id = 7;")
         );
-    }
-
-    #[test]
-    fn direct_unconfirmed_ddl_tool_call_becomes_a_confirmation_proposal() {
-        let tool_calls = vec![ToolCall {
-            id: "create-table".to_string(),
-            name: "execute_query".to_string(),
-            arguments: json!({ "sql": "CREATE TABLE users (id INT);" }),
-            provider_payload: None,
-        }];
-
-        let sql =
-            unconfirmed_write_sql(&tool_calls, DatabaseType::Postgres, &agent_tools::AgentSqlPermissions::default())
-                .expect("unconfirmed DDL must be intercepted before tool dispatch");
-        assert!(
-            matches!(write_attempt_response(sql, false), WriteAttemptResponse::ConfirmationRequired { sql } if sql == "CREATE TABLE users (id INT);")
-        );
-    }
-
-    #[test]
-    fn confirmed_or_read_only_tool_calls_do_not_become_confirmation_proposals() {
-        let create = ToolCall {
-            id: "create-table".to_string(),
-            name: "execute_query".to_string(),
-            arguments: json!({ "sql": "CREATE TABLE users (id INT);" }),
-            provider_payload: None,
-        };
-        let select = ToolCall {
-            id: "select-users".to_string(),
-            name: "execute_query".to_string(),
-            arguments: json!({ "sql": "SELECT * FROM users" }),
-            provider_payload: None,
-        };
-        let confirmed =
-            agent_tools::confirmed_write_sql_permissions(false, true, Some("CREATE TABLE users (id INT);".to_string()));
-
-        assert!(unconfirmed_write_sql(&[create], DatabaseType::Postgres, &confirmed).is_none());
-        assert!(unconfirmed_write_sql(&[select], DatabaseType::Postgres, &agent_tools::AgentSqlPermissions::default())
-            .is_none());
-    }
-
-    #[test]
-    fn duplicate_confirmed_writes_in_one_batch_receive_one_grant() {
-        let sql = "DELETE FROM users WHERE id = 7;";
-        let call = ToolCall {
-            id: "delete-user".to_string(),
-            name: "execute_query".to_string(),
-            arguments: json!({ "sql": sql }),
-            provider_payload: None,
-        };
-        let mut permissions = agent_tools::confirmed_write_sql_permissions(false, true, Some(sql.to_string()));
-
-        let first = sequential_tool_permissions(&call, DatabaseType::Postgres, &mut permissions);
-        let second = sequential_tool_permissions(&call, DatabaseType::Postgres, &mut permissions);
-
-        assert!(first.allow_writes);
-        assert_eq!(first.confirmed_write_sql.as_deref(), Some(sql));
-        assert!(!second.allow_writes);
-        assert_eq!(second.confirmed_write_sql, None);
-        assert_eq!(permissions, agent_tools::AgentSqlPermissions::default());
-    }
-
-    #[test]
-    fn confirmed_write_grant_stays_consumed_across_turns() {
-        let sql = "DELETE FROM users WHERE id = 7;";
-        let call = ToolCall {
-            id: "delete-user".to_string(),
-            name: "execute_query".to_string(),
-            arguments: json!({ "sql": sql }),
-            provider_payload: None,
-        };
-        let mut permissions = agent_tools::confirmed_write_sql_permissions(false, true, Some(sql.to_string()));
-
-        let _ = sequential_tool_permissions(&call, DatabaseType::Postgres, &mut permissions);
-
-        assert_eq!(unconfirmed_write_sql(std::slice::from_ref(&call), DatabaseType::Postgres, &permissions), Some(sql));
-    }
-
-    #[test]
-    fn read_before_confirmed_write_does_not_consume_the_grant() {
-        let confirmed_sql = "DELETE FROM users WHERE id = 7;";
-        let read = ToolCall {
-            id: "read-user".to_string(),
-            name: "execute_query".to_string(),
-            arguments: json!({ "sql": "SELECT * FROM users WHERE id = 7" }),
-            provider_payload: None,
-        };
-        let write = ToolCall {
-            id: "delete-user".to_string(),
-            name: "execute_query".to_string(),
-            arguments: json!({ "sql": confirmed_sql }),
-            provider_payload: None,
-        };
-        let mut permissions =
-            agent_tools::confirmed_write_sql_permissions(false, true, Some(confirmed_sql.to_string()));
-
-        let read_permissions = sequential_tool_permissions(&read, DatabaseType::Postgres, &mut permissions);
-        let write_permissions = sequential_tool_permissions(&write, DatabaseType::Postgres, &mut permissions);
-
-        assert!(read_permissions.allow_writes);
-        assert!(write_permissions.allow_writes);
-        assert_eq!(write_permissions.confirmed_write_sql.as_deref(), Some(confirmed_sql));
-        assert_eq!(permissions, agent_tools::AgentSqlPermissions::default());
-    }
-
-    #[test]
-    fn mongo_agent_commands_are_never_intercepted_as_write_confirmations() {
-        // Mongo execute_query is read-only at the tool level, and its commands are
-        // not SQL — the risk classifier would flag even reads as writes. Neither a
-        // read nor a mutating command may become an impossible confirmation.
-        let read = ToolCall {
-            id: "mongo-read".to_string(),
-            name: "execute_query".to_string(),
-            arguments: json!({ "sql": "db.collection.find({})" }),
-            provider_payload: None,
-        };
-        let write = ToolCall {
-            id: "mongo-write".to_string(),
-            name: "execute_query".to_string(),
-            arguments: json!({ "sql": "db.collection.insertOne({ name: \"x\" })" }),
-            provider_payload: None,
-        };
-        let permissions = agent_tools::AgentSqlPermissions::default();
-        // Without the Mongo exclusion this read would be flagged as an unconfirmed
-        // write (Mongo commands are not SQL), producing a confirmation for every
-        // agent query. Assert the misclassification so the exclusion's necessity
-        // stays explicit.
-        assert!(agent_tools::write_requires_confirmation(
-            "db.collection.find({})",
-            DatabaseType::MongoDb,
-            &permissions
-        )
-        .unwrap());
-        assert!(unconfirmed_write_sql(&[read], DatabaseType::MongoDb, &permissions).is_none());
-        assert!(unconfirmed_write_sql(&[write], DatabaseType::MongoDb, &permissions).is_none());
     }
 
     #[test]

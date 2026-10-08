@@ -174,10 +174,8 @@ export const DEFAULT_MYSQL_OPTIONS: SchemaDiffCompareOptions = {
   fieldMappings: [],
 };
 
-export function getDefaultOptionsForDbType(dbType: string): SchemaDiffCompareOptions {
-  if (dbType === "postgres" || dbType === "opengauss") {
-    return { ...DEFAULT_POSTGRES_OPTIONS };
-  }
+export function getDefaultOptionsForDbType(_dbType: string): SchemaDiffCompareOptions {
+  {}
   return { ...DEFAULT_MYSQL_OPTIONS };
 }
 

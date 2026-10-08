@@ -2,7 +2,7 @@
 import { ref } from "vue";
 import { OPTION_HELP_PANEL_CLASS } from "./optionHelpPanel";
 
-const props = withDefaults(
+withDefaults(
   defineProps<{
     content: string;
     offsetTop?: number;

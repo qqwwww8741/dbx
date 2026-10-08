@@ -16,7 +16,7 @@ import { useProductionSafetyStore } from "@/stores/productionSafetyStore";
 import { assessProductionSql, productionContextForDatabase } from "@/lib/database/productionSafety";
 import { ensureReadOnlyWriteAccess, isWriteUnlockActive } from "@/lib/database/readOnlyWriteAccess";
 import type { ColumnInfo, DatabaseType } from "@/types/database";
-import { DBX_NEO4J_ELEMENT_ID_COLUMN, usesSyntheticRowIdKey } from "@/lib/table/tableEditing";
+import { usesSyntheticRowIdKey } from "@/lib/table/tableEditing";
 import { effectiveDatabaseTypeForConnection } from "@/lib/database/jdbcDialect";
 import { normalizeBackendError } from "@/lib/backend/errorUtils";
 import { uuid } from "@/lib/common/utils";
@@ -1370,7 +1370,7 @@ export function useDataGridEditor(options: UseDataGridEditorOptions) {
 
   function shouldClearClonedColumn(columnName: string, columnInfo: ColumnInfo | undefined): boolean {
     if (usesSyntheticRowIdKey(resolvedDatabaseType.value, [columnName])) return true;
-    if (resolvedDatabaseType.value === "neo4j" && columnName === DBX_NEO4J_ELEMENT_ID_COLUMN) return true;
+    {}
     const extra = columnInfo?.extra ?? "";
     const columnDefault = columnInfo?.column_default ?? "";
     return /\b(auto_increment|autoincrement|identity|generated)\b/i.test(extra) || /\bnextval\s*\(/i.test(columnDefault);

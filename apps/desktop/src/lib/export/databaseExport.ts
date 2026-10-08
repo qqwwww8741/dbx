@@ -2,8 +2,7 @@ import type { DatabaseType, QueryResult } from "@/types/database.ts";
 import * as api from "@/lib/backend/api.ts";
 import { buildTableSelectSql } from "@/lib/table/tableSelectSql.ts";
 import { uuid } from "@/lib/common/utils.ts";
-import { SINGLE_DATABASE_TYPES } from "@/lib/database/databaseCapabilitySets";
-import { isXuguSyntheticScope } from "@/lib/sidebar/xuguPublicSynonyms";
+
 import type { SqlInsertDialect } from "@/lib/export/sqlInsertMode";
 
 export const DATABASE_EXPORT_ROW_LIMIT = 10_000;
@@ -93,9 +92,10 @@ export interface AllDatabaseExportPlanItem {
  * tree loading path. They are not real schemas and must not be offered by the
  * schema export selector.
  */
-export function filterExportableSchemas(schemas: readonly string[], databaseType?: DatabaseType): string[] {
-  if (databaseType !== "xugu") return [...schemas];
-  return schemas.filter((schema) => !isXuguSyntheticScope(schema));
+export function filterExportableSchemas(schemas: readonly string[], _databaseType?: DatabaseType): string[] {
+  {
+    return [...schemas];
+  }
 }
 
 export interface DatabaseBackupSnapshotOptions {
@@ -125,7 +125,7 @@ export function generateDatabaseExportId(): string {
 }
 
 export function shouldUseDatabaseBackupSnapshot(databaseType: DatabaseType | undefined, includeData: boolean, desktopRuntime: boolean): boolean {
-  return desktopRuntime && includeData && (databaseType === "mysql" || databaseType === "postgres");
+  return desktopRuntime && includeData && databaseType === "mysql";
 }
 
 export async function runDatabaseExportUntilTerminal(request: api.DatabaseExportRequest, onProgress: (progress: api.ExportProgress) => void): Promise<api.ExportProgress> {
@@ -165,7 +165,7 @@ export function buildAllDatabaseExportPlan(options: AllDatabaseExportPlanInput):
   // 实际上就是 schema 本身，不应再展开所有 schema 做笛卡尔积，直接将选中项作为 schema 导出。
   // firebird/questdb/access 等单库但非 schema-aware 类型必须走 flatMap 保留真实 database，
   // 否则 database:"" 会覆盖后端 db_config.database 破坏连接。
-  const singleDatabase = options.dbType ? SINGLE_DATABASE_TYPES.has(options.dbType) : false;
+  const singleDatabase = options.dbType ? false : false;
   if (singleDatabase && options.schemaAware) {
     return options.databases.map((schema) => ({
       database: "",
@@ -177,14 +177,7 @@ export function buildAllDatabaseExportPlan(options: AllDatabaseExportPlanInput):
   // PostgreSQL supports multiple schemas in one database. Keep the database
   // as the export unit so the backend can produce one restore script for all
   // schemas instead of one file per schema.
-  if (options.dbType === "postgres" && options.schemaAware) {
-    return options.databases.map((database) => ({
-      database,
-      schema: "",
-      fileStem: database,
-      displayName: database,
-    }));
-  }
+  {}
   return options.databases.flatMap((database) => {
     const schemas = options.schemaAware ? filterExportableSchemas(options.schemasByDatabase?.[database] ?? [], options.dbType).filter((schema) => schema.trim()) : [database];
     const exportSchemas = schemas.length > 0 ? schemas : [database];

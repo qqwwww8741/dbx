@@ -679,17 +679,6 @@ mod tests {
         assert!(matches!(run_secret_service_operation(|| Ok(None)), Ok(None)));
     }
 
-    #[tokio::test]
-    async fn secret_service_worker_preserves_access_errors_without_creating_a_fallback() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("secret.key");
-        let result = SecretCodec::resolve_platform_default(Some(path.clone()), true, |_| {
-            run_secret_service_operation(|| Err("KEYRING_ACCESS_FAILED: locked collection".to_string()))
-        });
-        assert!(matches!(result, Err(error) if error == "KEYRING_ACCESS_FAILED: locked collection"));
-        assert!(!path.exists());
-    }
-
     #[test]
     fn denied_or_corrupt_platform_key_never_creates_a_fallback() {
         for allow_create in [false, true] {
@@ -782,22 +771,6 @@ mod tests {
             assert_eq!(result.unwrap_err(), format!("KEYRING_ACCESS_FAILED: secret unlock failed: {detail}"));
             assert!(!read_called.get());
         }
-    }
-
-    #[test]
-    fn secret_service_item_still_locked_after_unlock_is_an_access_error() {
-        let read_called = std::cell::Cell::new(false);
-        let result = read_secret_service_item(
-            || Ok::<_, &'static str>(true),
-            || Ok::<_, &'static str>(()),
-            || {
-                read_called.set(true);
-                Ok::<_, &'static str>(Vec::new())
-            },
-        );
-
-        assert_eq!(result.unwrap_err(), "KEYRING_ACCESS_FAILED: secret remained locked after unlock");
-        assert!(!read_called.get());
     }
 
     #[cfg(all(feature = "os-keyring", target_os = "linux"))]

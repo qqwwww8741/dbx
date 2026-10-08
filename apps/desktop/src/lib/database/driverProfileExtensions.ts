@@ -1,4 +1,3 @@
-import { DOLT_DRIVER_PROFILE_EXTENSION } from "@/lib/database/doltProfile";
 import type { SqlCompletionObject, SqlCompletionTable, SqlStatementKind } from "@/lib/sql/sqlCompletion";
 import type { ConnectionConfig, QueryTab, TableNameFilter, TreeNodeType } from "@/types/database";
 
@@ -52,7 +51,7 @@ export type DriverProfileExtensionDefinition = {
   databaseWorkspace?: DriverProfileDatabaseWorkspace;
 };
 
-export const DRIVER_PROFILE_EXTENSIONS = [DOLT_DRIVER_PROFILE_EXTENSION] as const satisfies readonly DriverProfileExtensionDefinition[];
+export const DRIVER_PROFILE_EXTENSIONS: readonly DriverProfileExtensionDefinition[] = [];
 
 export function driverProfileExtension(driverProfile?: string): DriverProfileExtensionDefinition | undefined {
   const normalized = driverProfile?.trim().toLowerCase();

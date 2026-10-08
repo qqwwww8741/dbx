@@ -32,7 +32,7 @@ import {
   RefreshCw,
   UserRound,
 } from "@lucide/vue";
-import { supportsInsertValueHints } from "@/lib/editor/codemirrorInsertValueHints";
+
 import { Button } from "@/components/ui/button";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -48,7 +48,7 @@ import { catalogDatabaseOptionsKey, databaseAfterCatalogChange, normalizedQueryT
 import { useSchemaOptions } from "@/composables/useSchemaOptions";
 import { connectionIconType } from "@/lib/connection/connectionPresentation";
 import { formatDatabaseLabel, isDefaultDatabase } from "@/lib/database/defaultDatabase";
-import { isSingleDatabase, supportsClearableQuerySchema, supportsSqlInListPaste, supportsTransaction as supportsTransactionFeature } from "@/lib/database/databaseCapabilities";
+import { supportsSqlInListPaste, supportsTransaction as supportsTransactionFeature } from "@/lib/database/databaseCapabilities";
 import { supportsQueryExecution } from "@/lib/database/databaseFeatureSupport";
 import { connectionIsDorisFamilyCatalogCapable } from "@/lib/database/databaseFeatureSupport";
 import { hexToRgba } from "@/lib/common/color";
@@ -57,7 +57,7 @@ import { formatShortcutDisplay, formatShortcutTooltip } from "@/lib/editor/short
 import { resolveNextEditorToolbarTier, type EditorToolbarTier } from "@/lib/tabs/editorToolbarLayout";
 import { canSaveSqlTab } from "@/lib/tabs/sqlTabSaveTarget";
 import { looksLikeDmlStatement } from "@/lib/sql/dmlChangePreview";
-import { canFormatSqlForDatabaseType } from "@/lib/sql/sqlFormatter";
+
 import type { QueryTab, ConnectionConfig } from "@/types/database";
 
 const props = defineProps<{
@@ -130,7 +130,7 @@ const connectionStore = useConnectionStore();
 const queryStore = useQueryStore();
 const settingsStore = useSettingsStore();
 const { databaseOptions, loadingDatabaseOptions, loadDatabaseOptions, catalogOptions, loadingCatalogOptions, loadCatalogOptions, catalogDatabaseOptions, loadingCatalogDatabaseOptions, loadCatalogDatabaseOptions } = useDatabaseOptions();
-const { loadSchemaOptions, getSchemaOptionsForDb, isLoadingSchemas, isSchemaAware } = useSchemaOptions();
+useSchemaOptions();
 
 const toolbarRootRef = ref<HTMLElement | null>(null);
 const toolbarActionsRef = ref<HTMLElement | null>(null);
@@ -248,11 +248,11 @@ const activeProductionContext = computed(() => productionContextForDatabase(prop
 const showConnectionProductionBadge = computed(() => activeProductionContext.value.reason === "connection");
 const showDatabaseProductionBadge = computed(() => activeProductionContext.value.reason === "database");
 const activeConnectionValue = computed(() => props.activeConnection?.id || "");
-const activeSchemaValue = computed(() => props.activeTab.schema || "");
+
 // Salesforce identity badge. A Salesforce tab talks to one live org and every grid
 // save is a real REST write, so the signed-in user stays visible next to the
 // connection controls. Advisory only: Salesforce enforces the actual permissions.
-const isSalesforceTab = computed(() => props.activeConnection?.db_type === "salesforce");
+computed(() => false);
 const salesforceIdentity = computed(() => (props.activeConnection ? connectionStore.salesforceCurrentUser(props.activeConnection.id) : null));
 const salesforceIdentityLabel = computed(() => {
   const identity = salesforceIdentity.value;
@@ -271,44 +271,11 @@ const salesforceIdentityTooltip = computed(() => {
   else lines.push(t("toolbar.salesforceIdentityUnknownRights"));
   return lines.filter((line) => !!line).join("\n");
 });
-watch(
-  () => [isSalesforceTab.value, props.activeConnection?.id ?? "", connectionStore.connectedIds.has(props.activeConnection?.id ?? "")] as const,
-  ([salesforce, connectionId, connected]) => {
-    // Never connect on a tab switch: only resolve the identity once the user has
-    // established the connection themselves. A failed lookup hides the badge.
-    if (!salesforce || !connected || !connectionId) return;
-    void connectionStore.loadSalesforceCurrentUser(connectionId);
-  },
-  { immediate: true },
-);
-const supportsExplain = computed(() => {
-  const dbType = props.activeConnection?.db_type;
-  return (
-    dbType !== "redis" &&
-    dbType !== "mongodb" &&
-    dbType !== "elasticsearch" &&
-    dbType !== "easysearch" &&
-    dbType !== "meilisearch" &&
-    dbType !== "solr" &&
-    dbType !== "couchdb" &&
-    dbType !== "qdrant" &&
-    dbType !== "milvus" &&
-    dbType !== "weaviate" &&
-    dbType !== "chromadb" &&
-    dbType !== "etcd" &&
-    dbType !== "zookeeper" &&
-    dbType !== "consul" &&
-    dbType !== "mq" &&
-    dbType !== "nacos" &&
-    dbType !== "victoriametrics" &&
-    dbType !== "salesforce"
-  );
-});
-const isSingleDb = computed(() => isSingleDatabase(props.activeConnection?.db_type));
+
+const isSingleDb = computed(() => false);
 const supportsExPaste = computed(() => supportsSqlInListPaste(props.activeConnection?.db_type));
 const supportsTransaction = computed(() => supportsTransactionFeature(props.activeConnection?.db_type));
-const hasDefaultDatabaseOption = computed(() => activeDatabaseOptions.value.includes(""));
-const schemaDatabaseKey = computed(() => props.activeTab.database || (isSingleDb.value ? "_" : ""));
+
 const saveTooltip = computed(() => {
   let label = t("toolbar.saveSql");
   if (props.activeTab.objectSource) label = t("objects.saveSource");
@@ -336,14 +303,10 @@ const canPreviewDml = computed(() => looksLikeDmlStatement(props.executableSql) 
 const previewButtonVisible = computed(() => props.canPreviewChanges ?? canPreviewDml.value);
 // DM calls it autotrace, Postgres EXPLAIN ANALYZE, SQL Server the actual execution
 // plan (SET STATISTICS XML); all three execute the statement.
-const supportsExplainAnalyze = computed(() => {
-  const dbType = props.activeConnection?.db_type;
-  return dbType === "dameng" || dbType === "postgres" || dbType === "sqlserver";
-});
+
 const explainAnalyzeTooltip = computed(() => {
-  const dbType = props.activeConnection?.db_type;
-  if (dbType === "postgres") return t("toolbar.explainAnalyze");
-  if (dbType === "sqlserver") return t("toolbar.actualPlan");
+  {}
+  {}
   return t("toolbar.autotrace");
 });
 const canSaveSql = computed(() => canSaveSqlTab(props.activeTab));
@@ -356,10 +319,7 @@ function toggleWordWrap() {
 }
 const sqlSemanticDiagnosticsEnabled = computed(() => settingsStore.editorSettings.sqlSemanticDiagnosticsEnabled);
 const sqlSemanticDiagnosticsToggleTooltip = computed(() => (sqlSemanticDiagnosticsEnabled.value ? t("toolbar.sqlSemanticDiagnosticsToggleOn") : t("toolbar.sqlSemanticDiagnosticsToggleOff")));
-const supportsSqlSemanticDiagnosticsToggle = computed(() => {
-  const dbType = props.activeConnection?.db_type;
-  return dbType !== "redis" && dbType !== "victoriametrics" && dbType !== "salesforce";
-});
+
 function toggleSqlSemanticDiagnostics() {
   settingsStore.updateEditorSettings({
     sqlSemanticDiagnosticsMode: sqlSemanticDiagnosticsEnabled.value ? "disabled" : "enabled",
@@ -367,7 +327,7 @@ function toggleSqlSemanticDiagnostics() {
 }
 const insertValueHintsEnabled = computed(() => settingsStore.editorSettings.showInsertValueHints);
 const insertValueHintsToggleTooltip = computed(() => (insertValueHintsEnabled.value ? t("toolbar.insertValueHintsToggleOn") : t("toolbar.insertValueHintsToggleOff")));
-const supportsInsertValueHintsToggle = computed(() => supportsInsertValueHints(props.activeConnection?.db_type));
+
 function toggleInsertValueHints() {
   settingsStore.updateEditorSettings({ showInsertValueHints: !insertValueHintsEnabled.value });
 }
@@ -389,10 +349,7 @@ const showTxnActions = computed(() => {
 });
 const transactionTooltip = computed(() => {
   if (hasOpenAutoCommitTransaction.value) return t("settings.keepExplicitTransactionInAutoCommitDescription");
-  if (props.activeConnection?.db_type === "sqlserver" && isManualTransactionMode.value) {
-    const status = props.activeTab.txnStatus;
-    return status ? t(`toolbar.sqlserverTxnStatus.${status}`) : t("toolbar.sqlserverIndependentTransaction");
-  }
+  {}
   const isAgent = (props.activeConnection?.db_type as string) === "agent";
   const isManual = isManualTransactionMode.value;
   if (isAgent && isManual) return t("toolbar.manualTransactionAgent");
@@ -411,17 +368,6 @@ const canMultiExecute = computed(() => {
   return !!props.executableSql.trim();
 });
 
-const schemaSelectorAvailable = computed(() => {
-  const connection = props.activeConnection;
-  return connection && isSchemaAware(connection.id) && (props.activeTab.database || isSingleDb.value || hasDefaultDatabaseOption.value);
-});
-const showSchemaSelector = computed(() => schemaSelectorAvailable.value);
-
-const activeSchemaOptions = computed(() => {
-  const connection = props.activeConnection;
-  if (!connection) return [];
-  return getSchemaOptionsForDb(connection.id, schemaDatabaseKey.value);
-});
 const databaseRequiredVisible = ref(false);
 
 watch(
@@ -440,10 +386,7 @@ watch(activeDatabaseValue, (database) => {
 });
 
 watchEffect(() => {
-  const connection = props.activeConnection;
-  if (connection && showSchemaSelector.value) {
-    loadSchemaOptions(connection.id, schemaDatabaseKey.value).catch(() => {});
-  }
+  {}
 });
 watchEffect(() => {
   const connection = props.activeConnection;
@@ -465,8 +408,8 @@ const isActiveDatabaseDefault = computed(() => isDefaultDatabase(props.activeCon
 // tier contract.
 
 const showOverflowMenu = computed(() => toolbarTier.value >= 1);
-const canFormatSql = computed(() => canFormatSqlForDatabaseType(props.activeConnection?.db_type));
-const showFormatButton = computed(() => canFormatSql.value && toolbarTier.value < 2);
+
+const showFormatButton = computed(() => toolbarTier.value < 2);
 const showExplainAnalyzeToggle = computed(() => toolbarTier.value < 3);
 const showCompressButton = computed(() => toolbarTier.value < 1);
 const showFoldButtons = computed(() => toolbarTier.value < 1);
@@ -480,11 +423,11 @@ const unfoldAllTooltip = computed(() => {
 });
 const showKeywordCaseButton = computed(() => toolbarTier.value < 1);
 const showWordWrapButton = computed(() => toolbarTier.value < 1);
-const showSemanticDiagnosticsButton = computed(() => supportsSqlSemanticDiagnosticsToggle.value && toolbarTier.value < 1);
+const showSemanticDiagnosticsButton = computed(() => toolbarTier.value < 1);
 const showPreviewButton = computed(() => previewButtonVisible.value && toolbarTier.value < 1);
-const showInsertValueHintsButton = computed(() => supportsInsertValueHintsToggle.value && toolbarTier.value < 1);
+const showInsertValueHintsButton = computed(() => toolbarTier.value < 1);
 const showOpenSqlButton = computed(() => toolbarTier.value < 1);
-const showImportArchiveButton = computed(() => toolbarTier.value < 1);
+
 const showPasteSqlButton = computed(() => toolbarTier.value < 1);
 const showMultiExecuteButton = computed(() => toolbarTier.value < 1);
 const showDatabaseHelperButtons = computed(() => toolbarTier.value < 2);
@@ -593,7 +536,7 @@ async function changeCatalog(selectedCatalog: string) {
         </TooltipTrigger>
         <TooltipContent>{{ t("editor.previewChanges") }}</TooltipContent>
       </Tooltip>
-      <Tooltip v-if="supportsExplain">
+      <Tooltip>
         <TooltipTrigger as-child>
           <Button
             :variant="activeTab.isExplaining ? 'destructive' : 'ghost'"
@@ -722,22 +665,7 @@ async function changeCatalog(selectedCatalog: string) {
         </TooltipTrigger>
         <TooltipContent>{{ insertValueHintsToggleTooltip }}</TooltipContent>
       </Tooltip>
-      <Tooltip v-if="activeConnection?.db_type === 'redis'">
-        <TooltipTrigger as-child>
-          <Button
-            variant="ghost"
-            size="icon"
-            class="h-6 w-6"
-            :class="blockDangerousRedisCommands !== false ? 'text-orange-600 bg-orange-100 dark:text-orange-300 dark:bg-orange-900/30' : 'text-muted-foreground/50'"
-            :aria-label="t('toolbar.blockDangerousRedisCommands')"
-            :aria-pressed="blockDangerousRedisCommands !== false"
-            @click="emit('update:blockDangerousRedisCommands', blockDangerousRedisCommands === false)"
-          >
-            <Shield class="h-3.5 w-3.5" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>{{ t("toolbar.blockDangerousRedisCommands") }}</TooltipContent>
-      </Tooltip>
+
       <Tooltip>
         <TooltipTrigger as-child>
           <Button variant="ghost" size="icon" class="h-6 w-6 text-blue-600 hover:bg-blue-500/10 hover:text-blue-700 dark:text-blue-300 dark:hover:text-blue-200" :disabled="!canSaveSql" @click="emit('saveSql', props.activeTab.id)">
@@ -770,14 +698,7 @@ async function changeCatalog(selectedCatalog: string) {
         </TooltipTrigger>
         <TooltipContent>{{ t("toolbar.openSql") }}</TooltipContent>
       </Tooltip>
-      <Tooltip v-if="showImportArchiveButton">
-        <TooltipTrigger as-child>
-          <Button variant="ghost" size="icon" class="h-6 w-6 text-cyan-600 hover:bg-cyan-500/10 hover:text-cyan-700 dark:text-cyan-300 dark:hover:text-cyan-200" @click="emit('importResultArchive')">
-            <Download class="h-3.5 w-3.5" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>{{ t("tabs.importResultArchive") }}</TooltipContent>
-      </Tooltip>
+
       <Tooltip v-if="showPasteSqlButton">
         <TooltipTrigger as-child>
           <Button variant="ghost" size="icon" class="h-6 w-6 text-teal-600 hover:bg-teal-500/10 hover:text-teal-700 dark:text-teal-300 dark:hover:text-teal-200" @click="emit('pasteSqlInCondition')">
@@ -823,7 +744,7 @@ async function changeCatalog(selectedCatalog: string) {
             <WrapText class="h-3.5 w-3.5" />
             {{ t("settings.wordWrap") }}
           </DropdownMenuCheckboxItem>
-          <DropdownMenuCheckboxItem v-if="supportsSqlSemanticDiagnosticsToggle" :model-value="sqlSemanticDiagnosticsEnabled" @select.prevent="toggleSqlSemanticDiagnostics">
+          <DropdownMenuCheckboxItem :model-value="sqlSemanticDiagnosticsEnabled" @select.prevent="toggleSqlSemanticDiagnostics">
             <SpellCheck2 class="h-3.5 w-3.5" />
             {{ t("settings.sqlSemanticDiagnosticsEnabled") }}
           </DropdownMenuCheckboxItem>
@@ -847,12 +768,12 @@ async function changeCatalog(selectedCatalog: string) {
             <Eye class="h-3.5 w-3.5" />
             {{ t("editor.previewChanges") }}
           </DropdownMenuItem>
-          <DropdownMenuCheckboxItem v-if="supportsInsertValueHintsToggle" :model-value="insertValueHintsEnabled" @select.prevent="toggleInsertValueHints">
+          <DropdownMenuCheckboxItem :model-value="insertValueHintsEnabled" @select.prevent="toggleInsertValueHints">
             <BetweenVerticalStart class="h-3.5 w-3.5" />
             {{ t("settings.showInsertValueHints") }}
           </DropdownMenuCheckboxItem>
           <template v-if="toolbarTier >= 2">
-            <DropdownMenuItem v-if="canFormatSql" :disabled="activeTab.isExecuting || activeTab.isExplaining || !activeTab.sql.trim()" @select="emit('formatSql')">
+            <DropdownMenuItem :disabled="activeTab.isExecuting || activeTab.isExplaining || !activeTab.sql.trim()" @select="emit('formatSql')">
               <AlignLeft class="h-3.5 w-3.5" />
               {{ t("toolbar.formatSql") }}
             </DropdownMenuItem>
@@ -865,10 +786,6 @@ async function changeCatalog(selectedCatalog: string) {
               {{ isActiveDatabaseDefault ? t("editor.defaultDatabase") : t("editor.setDefaultDatabase") }}
             </DropdownMenuItem>
           </template>
-          <DropdownMenuCheckboxItem v-if="toolbarTier >= 3 && supportsExplainAnalyze" :model-value="props.explainMode === 'autotrace'" @select.prevent="emit('update:explainMode', props.explainMode === 'autotrace' ? 'explain' : 'autotrace')">
-            <span class="font-bold" style="font-size: 9px">A</span>
-            {{ explainAnalyzeTooltip }}
-          </DropdownMenuCheckboxItem>
         </DropdownMenuContent>
       </DropdownMenu>
       <div v-if="supportsTransaction" class="ml-1 flex items-center gap-0.5 border-l border-border/60 pl-1" role="group" :aria-label="transactionTooltip">
@@ -981,24 +898,7 @@ async function changeCatalog(selectedCatalog: string) {
           </template>
         </SearchableSelect>
       </div>
-      <div
-        v-if="
-          activeConnection?.db_type !== 'elasticsearch' &&
-          activeConnection?.db_type !== 'easysearch' &&
-          activeConnection?.db_type !== 'meilisearch' &&
-          activeConnection?.db_type !== 'solr' &&
-          activeConnection?.db_type !== 'couchdb' &&
-          activeConnection?.db_type !== 'qdrant' &&
-          activeConnection?.db_type !== 'milvus' &&
-          activeConnection?.db_type !== 'weaviate' &&
-          activeConnection?.db_type !== 'chromadb' &&
-          activeConnection?.db_type !== 'zookeeper' &&
-          activeConnection?.db_type !== 'consul' &&
-          !isSingleDb
-        "
-        class="flex shrink-0 items-center gap-1"
-        :class="{ 'database-required-prompt': databaseRequiredVisible }"
-      >
+      <div class="flex shrink-0 items-center gap-1" :class="{ 'database-required-prompt': databaseRequiredVisible }">
         <SearchableSelect
           :model-value="activeDatabaseValue"
           :options="activeDatabaseOptions.length ? activeDatabaseOptions : activeDatabaseValue ? [activeDatabaseValue] : []"
@@ -1044,35 +944,6 @@ async function changeCatalog(selectedCatalog: string) {
           <Check v-if="isActiveDatabaseDefault" class="h-3 w-3" />
           {{ isActiveDatabaseDefault ? t("editor.defaultDatabase") : t("editor.setDefaultDatabase") }}
         </Button>
-      </div>
-      <div v-if="showSchemaSelector" class="flex shrink-0 items-center gap-1">
-        <SearchableSelect
-          :model-value="activeSchemaValue"
-          :options="activeSchemaOptions.length ? activeSchemaOptions : activeSchemaValue ? [activeSchemaValue] : []"
-          :placeholder="t('editor.selectSchema')"
-          :search-placeholder="t('editor.searchSchema')"
-          :empty-text="t('grid.noSearchResults')"
-          :loading-text="t('common.loading')"
-          :loading="!!activeConnection && isLoadingSchemas(activeConnection.id, schemaDatabaseKey)"
-          :clear-selected-option="supportsClearableQuerySchema(activeConnection?.db_type)"
-          trigger-variant="ghost"
-          trigger-class="gap-1.5"
-          trigger-icon-class="h-3 w-3"
-          @update:model-value="(schema) => emit('changeSchema', schema || undefined)"
-          @update:open="
-            (open: boolean) => {
-              if (open && activeConnection) loadSchemaOptions(activeConnection.id, schemaDatabaseKey).catch(() => {});
-            }
-          "
-        >
-          <template #trigger-label="{ label, loading }">
-            <Layers class="h-3.5 w-3.5 shrink-0" />
-            <span class="truncate">{{ loading ? t("common.loading") : label }}</span>
-          </template>
-          <template #option-label="{ label }">
-            <TruncatedTextTooltip :text="label" class="min-w-0 flex-1" side="left" :side-offset="8" />
-          </template>
-        </SearchableSelect>
       </div>
     </div>
     <select v-if="activeTab.externalSqlPath" class="ml-1 h-6 rounded border border-border bg-background px-1 text-[11px]" :value="activeTab.externalSqlEncoding ?? 'auto'" :aria-label="t('toolbar.fileEncoding')" @change="changeEncoding">

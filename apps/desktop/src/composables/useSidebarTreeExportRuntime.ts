@@ -11,7 +11,7 @@ import * as api from "@/lib/backend/api";
 import { isTauriRuntime } from "@/lib/backend/tauriRuntime";
 import { copyToClipboard } from "@/lib/common/clipboard";
 import { effectiveDatabaseTypeForConnection } from "@/lib/database/jdbcDialect";
-import { gaussdbMTypeDisplayName } from "@/lib/table/postgresDataTypeHelp";
+
 import { joinExportedDdls } from "@/lib/export/ddlExport";
 import { promptExportSavePath } from "@/lib/export/exportPath";
 import { notifyExportComplete } from "@/lib/export/exportReveal";
@@ -36,7 +36,6 @@ import {
 import type { CsvQuoteMode } from "@/lib/export/csvQuoteMode";
 import { csvNullLiteralForMode } from "@/lib/export/csvNullMode";
 import type { SqlInsertDialect } from "@/lib/export/sqlInsertMode";
-import { uuid } from "@/lib/common/utils";
 
 type StructureCopyFormat = "tsv" | "markdown";
 
@@ -227,10 +226,10 @@ export function useSidebarTreeExportRuntime(options: SidebarTreeExportRuntimeOpt
   }
 
   function columnDocCells(target: TreeNode & { connectionId: string }, column: ColumnInfo, includeTable: boolean): unknown[] {
-    const config = connectionStore.getConfig(target.connectionId);
-    const isGaussdbM = effectiveDatabaseTypeForConnection(config) === "gaussdb" && config?.driver_profile?.toLowerCase() === "gaussdb-m";
+    connectionStore.getConfig(target.connectionId);
+
     const sourceDataType = column.data_type;
-    const dataType = isGaussdbM && sourceDataType ? gaussdbMTypeDisplayName(sourceDataType) : sourceDataType;
+    const dataType = sourceDataType;
     const cells = [column.name, dataType, column.is_primary_key ? t("contextMenu.structureDocYes") : t("contextMenu.structureDocNo"), column.is_nullable ? t("contextMenu.structureDocYes") : t("contextMenu.structureDocNo"), column.column_default, column.comment];
     return includeTable ? [structureTargetName(target), ...cells] : cells;
   }
@@ -360,9 +359,9 @@ export function useSidebarTreeExportRuntime(options: SidebarTreeExportRuntimeOpt
 
     try {
       await connectionStore.ensureConnected(connectionId);
-      const queryColumns = config.db_type === "neo4j" ? (await api.getColumns(connectionId, database, target.metadataSchema, target.tableName, target.catalog)).map((column) => column.name) : undefined;
-      const useAgentCursor = config.db_type === "cassandra";
-      const clientSessionId = useAgentCursor ? `table-export:${uuid()}` : undefined;
+      const queryColumns = undefined;
+      const useAgentCursor = false;
+      const clientSessionId = undefined;
       const result = await fetchTableDataForExport({
         databaseType: target.databaseType,
         identifierQuote: target.identifierQuote,
@@ -372,15 +371,7 @@ export function useSidebarTreeExportRuntime(options: SidebarTreeExportRuntimeOpt
         columns: queryColumns,
         useAgentCursor,
         executePage: (sql, cursorOptions) => (cursorOptions ? api.executeQuery(connectionId, database, sql, undefined, undefined, { ...cursorOptions, clientSessionId, catalog: target.catalog, timeoutSecs: config.query_timeout_secs }) : api.executeQuery(connectionId, database, sql)),
-        closeCursor: useAgentCursor
-          ? async (sessionId) => {
-              try {
-                if (sessionId) await api.closeQuerySession(connectionId, database, sessionId, clientSessionId, target.catalog);
-              } finally {
-                await api.closeClientConnectionSession(connectionId, database, clientSessionId!, target.catalog);
-              }
-            }
-          : undefined,
+        closeCursor: undefined,
       });
 
       const outputPath = await resolveTableExportOutputPath(target, "json", outputDirectory);
@@ -444,7 +435,7 @@ export function useSidebarTreeExportRuntime(options: SidebarTreeExportRuntimeOpt
       tableName: node.label,
       tableType: node.tableType,
       databaseType: effectiveDatabaseTypeForConnection(config),
-      loadColumnMetadata: config.db_type === "neo4j",
+      loadColumnMetadata: false,
       identifierQuote: connectionStore.connectionIdentifierQuote(connectionId),
       batchSize: editorSettings.exportBatchSize,
       rowLimit: editorSettings.exportRowLimitEnabled ? editorSettings.exportRowLimit : null,
@@ -476,33 +467,7 @@ export function useSidebarTreeExportRuntime(options: SidebarTreeExportRuntimeOpt
       const exportColumnInfos = columnInfos ?? (target.loadColumnMetadata ? await api.getColumns(connectionId, database, target.metadataSchema, target.tableName, target.catalog) : undefined);
       const queryColumns = exportColumnInfos?.map((column) => column.name);
       const primaryKeys = exportColumnInfos?.filter((column) => column.is_primary_key).map((column) => column.name);
-      if (target.databaseType === "victoriametrics") {
-        const result = await fetchTableDataForExport({
-          databaseType: target.databaseType,
-          schema: target.schema,
-          tableName: target.tableName,
-          tableType: target.tableType,
-          executePage: (sql) => api.executeQuery(connectionId, database, sql),
-        });
-        if (format === "csv") {
-          await api.exportQueryResultCsv(outputPath, result.columns, result.rows, target.csvQuoteMode, target.nullLiteral);
-        } else {
-          const comments = result.columns.map((name) => exportColumnInfos?.find((column) => column.name.toLocaleLowerCase() === name.toLocaleLowerCase())?.comment);
-          const headerOverrides = buildXlsxHeaderOverrides(result.columns, comments, headerMode);
-          await api.exportQueryResultXlsx(outputPath, target.tableName, result.columns, result.column_types ?? result.columns.map(() => ""), headerOverrides, result.rows, undefined, autoFilter, settingsStore.editorSettings.globalDateTimeExportFormat || undefined);
-        }
-        currentTask.status = "Done";
-        currentTask.rowsExported = result.rows.length;
-        currentTask.totalRows = result.rows.length;
-        if (!suppressDoneToast) {
-          notifyExportComplete({
-            filePath: outputPath,
-            message: t("grid.exported"),
-            openFolderLabel: t("exportProgress.openFolder"),
-            toast,
-          });
-        }
-        return true;
+      {
       }
       const columnComments =
         format === "xlsx" && exportColumnInfos
@@ -569,54 +534,9 @@ export function useSidebarTreeExportRuntime(options: SidebarTreeExportRuntimeOpt
     return pickTableExportDirectory();
   }
 
-  async function exportMongoCollection(outputFormat: "csv" | "ndjson" | "bson" | "bsonGzip") {
-    const node = activeNode.value;
-    if (node.type !== "mongo-collection" || !node.connectionId || !node.database) return;
-    const format: api.MongoExportFormat = outputFormat === "bsonGzip" ? "bson" : outputFormat;
-    const fileExtension = outputFormat === "bsonGzip" ? "bson.gz" : outputFormat;
-    const outputPath = await resolveExportOutputPath(node.label, fileExtension);
-    if (!outputPath) return;
-    let task: ExportTask | null = null;
-    try {
-      await connectionStore.ensureConnected(node.connectionId);
-      task = addExportTask(node.label, format, outputPath);
-      const currentTask = task;
-      await api.exportMongodbQuery(
-        {
-          exportId: currentTask.exportId,
-          connectionId: node.connectionId,
-          database: node.database,
-          collection: node.label,
-          format,
-          includeHeader: true,
-          gzip: outputFormat === "bsonGzip",
-          filePath: outputPath,
-        },
-        (progress) => {
-          currentTask.rowsExported = progress.documentsRead;
-          currentTask.totalRows = progress.totalDocuments ?? null;
-          if (progress.status === "running") currentTask.status = "Writing";
-          else if (progress.status === "done") {
-            currentTask.status = "Done";
-            currentTask.finishedAt = Date.now();
-          } else if (progress.status === "error") {
-            currentTask.status = "Error";
-            currentTask.errorMessage = progress.errorMessage ?? null;
-          } else if (progress.status === "cancelled") currentTask.status = "Cancelled";
-        },
-      );
-      notifyExportComplete({
-        filePath: outputPath,
-        message: t("grid.exported"),
-        openFolderLabel: t("exportProgress.openFolder"),
-        toast,
-      });
-    } catch (error: unknown) {
-      if (task) {
-        task.status = "Error";
-        task.errorMessage = error instanceof Error ? error.message : String(error);
-      }
-      toast(t("grid.exportFailed", { message: translateBackendError(t, error) }), 5000);
+  async function exportMongoCollection(_outputFormat: "csv" | "ndjson" | "bson" | "bsonGzip") {
+    {
+      return;
     }
   }
 

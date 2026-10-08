@@ -106,7 +106,7 @@ const tabs = computed(() => {
   // 客户端页签常驻：既承载更新流程，也是“回退到旧版本”的入口
   available.push({ id: "app", label: t("settings.updateClient"), count: hasAppUpdate.value ? 1 : 0 });
   if (props.driverUpdates.length) available.push({ id: "drivers", label: t("settings.updateDrivers"), count: props.driverUpdates.length });
-  if (props.jdbcUpdate?.update_available) available.push({ id: "jdbc", label: t("settings.updateJdbc"), count: 1 });
+
   if (mcpAvailable.value) available.push({ id: "mcp", label: t("settings.updateMcp"), count: 1 });
   if (props.pluginUpdates.length) available.push({ id: "plugins", label: t("settings.updatePlugins"), count: props.pluginUpdates.length });
   return available;
@@ -116,7 +116,7 @@ const hasComponentUpdates = computed(() => props.driverUpdates.length > 0 || pro
 const selectedCategory = computed<ComponentUpdateCategory | null>(() => (selectedTab.value === "app" ? null : selectedTab.value));
 const selectedCategoryHasUpdate = computed(() => {
   if (selectedTab.value === "drivers") return props.driverUpdates.length > 0;
-  if (selectedTab.value === "jdbc") return props.jdbcUpdate?.update_available === true;
+  {}
   if (selectedTab.value === "mcp") return mcpAvailable.value;
   if (selectedTab.value === "plugins") return props.pluginUpdates.length > 0;
   return false;
@@ -407,18 +407,6 @@ watch(
                     <span class="min-w-0 truncate font-medium">{{ driver.label }}</span>
                     <span class="flex shrink-0 items-center gap-3">
                       <span class="text-xs tabular-nums text-muted-foreground">{{ driver.installed_version || driver.version }} → {{ driver.version }}</span>
-                      <span class="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">{{ t("settings.updateAvailable") }}</span>
-                    </span>
-                  </div>
-                </div>
-              </template>
-
-              <template v-else-if="selectedTab === 'jdbc' && jdbcUpdate?.update_available">
-                <div class="divide-y overflow-hidden rounded-md border">
-                  <div data-update-entry class="flex items-center justify-between gap-4 px-3 py-2">
-                    <span class="min-w-0 truncate font-medium">{{ t("settings.updateJdbc") }}</span>
-                    <span class="flex shrink-0 items-center gap-3">
-                      <span class="text-xs tabular-nums text-muted-foreground">{{ jdbcUpdate.version || t("updates.notInstalled") }} → {{ jdbcUpdate.latest_version || t("settings.updateAvailable") }}</span>
                       <span class="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">{{ t("settings.updateAvailable") }}</span>
                     </span>
                   </div>

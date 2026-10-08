@@ -13,7 +13,6 @@ import { buildDatabaseSearchSql, buildSearchResultWhere, findMatchedSearchColumn
 import { databaseSearchBatchRange, databaseSearchNextBatchSize } from "@/lib/database/databaseSearchBatch";
 import type { DatabaseSearchResultItem, DatabaseSearchTableTask, DatabaseSearchTabState, DatabaseType, TableInfo } from "@/types/database";
 import type { NavigationTarget } from "@/composables/useNavigationTargets";
-import { isSchemaAware } from "@/lib/database/databaseCapabilities";
 
 const props = withDefaults(
   defineProps<{
@@ -38,8 +37,6 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 const connectionStore = useConnectionStore();
-
-const SYSTEM_SCHEMAS = new Set(["information_schema", "pg_catalog", "sys", "system", "mysql", "performance_schema", "xdb", "outln", "dbsnmp"]);
 
 const keywordInputRef = ref<any>(null);
 
@@ -133,10 +130,6 @@ function isSearchableTable(table: TableInfo): boolean {
   return type.includes("TABLE") && !type.includes("VIEW");
 }
 
-function filterSearchSchemas(schemas: string[]): string[] {
-  return schemas.filter((schema) => !SYSTEM_SCHEMAS.has(schema.toLowerCase()));
-}
-
 function makeExecutionId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return `database-search-${uuid()}`;
   return `database-search-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -167,8 +160,8 @@ function rowPreview(columns: string[], row: unknown[], matchedColumns: string[])
 
 async function listSearchTables(): Promise<DatabaseSearchTableTask[]> {
   if (!connection.value || !props.connectionId || !props.database) return [];
-  const databaseType = connection.value.db_type;
-  const schemaNames = props.schema ? [props.schema] : isSchemaAware(databaseType) ? filterSearchSchemas(await api.listSchemas(props.connectionId, props.database)) : [props.database];
+
+  const schemaNames = props.schema ? [props.schema] : [props.database];
 
   const tasks: DatabaseSearchTableTask[] = [];
   for (const schema of schemaNames) {

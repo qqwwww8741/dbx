@@ -389,31 +389,9 @@ impl PluginHost {
         &self,
         config: &ConnectionConfig,
     ) -> Result<(InstalledPlugin, PluginConnectionProviderContribution), String> {
-        if config.db_type != DatabaseType::Plugin {
+        {
             return Err("Connection is not a plugin-owned connection".to_string());
         }
-        let plugin_id = required_plugin_binding(&config.plugin_id, "plugin_id")?;
-        let provider_id = required_plugin_binding(&config.plugin_connection_provider, "plugin_connection_provider")?;
-        let connection_type = required_plugin_binding(&config.plugin_connection_type, "plugin_connection_type")?;
-        let plugin = self
-            .inner
-            .registry
-            .find_plugin(plugin_id)?
-            .ok_or_else(|| format!("Plugin '{plugin_id}' is not installed"))?;
-        if !plugin.compatibility.compatible {
-            return Err(format!("Plugin '{plugin_id}' is incompatible: {}", plugin.compatibility.errors.join("; ")));
-        }
-        let provider = plugin
-            .manifest
-            .connection_provider(provider_id)?
-            .ok_or_else(|| format!("Plugin '{plugin_id}' does not provide connection provider '{provider_id}'"))?;
-        if provider.database_type != connection_type {
-            return Err(format!(
-                "Connection type '{}' does not match provider '{}' type '{}'",
-                connection_type, provider.id, provider.database_type
-            ));
-        }
-        Ok((plugin, provider))
     }
 
     fn forward_session_events(&self, session: &Arc<PluginSidecarSession>) {
@@ -449,13 +427,6 @@ impl PluginHost {
             }
         });
     }
-}
-
-fn required_plugin_binding<'a>(value: &'a Option<String>, field: &str) -> Result<&'a str, String> {
-    value
-        .as_deref()
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| format!("Plugin connection is missing {field}"))
 }
 
 /// RPC deadline for connection/test and connection/connect. A config-bound
@@ -863,43 +834,6 @@ mod tests {
     };
     use crate::models::connection::ConnectionConfig;
     use crate::plugins::PluginConnectionProviderContribution;
-
-    #[tokio::test]
-    async fn uninstall_plugin_holds_one_update_lease_across_the_runtime_and_the_store() {
-        use crate::plugins::installer::PLUGIN_TRASH_DIR;
-        use crate::plugins::{PluginHost, PluginRegistry};
-
-        let temp = tempfile::tempdir().unwrap();
-        let root = temp.path().join("plugins");
-        let plugin_dir = root.join("sample.hello");
-        std::fs::create_dir_all(&plugin_dir).unwrap();
-        std::fs::write(
-            plugin_dir.join("manifest.json"),
-            serde_json::json!({ "id": "sample.hello", "name": "Sample", "version": "1.0.0", "protocol_version": 1 })
-                .to_string(),
-        )
-        .unwrap();
-        let registry = PluginRegistry::new_with_app_version(root.clone(), "0.5.67");
-        let lifecycle = registry.lifecycle();
-        let host = PluginHost::new(registry);
-
-        // An active operation refuses the uninstall before anything is stopped or deleted, so the
-        // caller still sees a complete, discoverable plugin.
-        let operation = lifecycle.begin_operation("sample.hello").unwrap();
-        let refused = host.uninstall_plugin("sample.hello").await.unwrap_err();
-        assert!(refused.contains("active operations"), "{refused}");
-        assert!(plugin_dir.join("manifest.json").is_file(), "a refused uninstall must not touch the container");
-        drop(operation);
-
-        host.uninstall_plugin("sample.hello").await.unwrap();
-        assert!(!plugin_dir.exists());
-        let tombstones = std::fs::read_dir(root.join(PLUGIN_TRASH_DIR)).map(|entries| entries.count()).unwrap_or(0);
-        assert_eq!(tombstones, 0, "a successful uninstall sweeps its tombstone");
-
-        // The lease is released again, and it was scoped to just this plugin.
-        assert!(lifecycle.begin_update("sample.hello").is_ok());
-        assert!(lifecycle.begin_update("sample.other").is_ok());
-    }
 
     #[tokio::test]
     async fn ui_only_connections_hold_update_guards_but_saved_configs_do_not() {

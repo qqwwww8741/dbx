@@ -49,7 +49,7 @@ function binaryImagePreviewUrl(value: unknown, columnType?: string, databaseType
   return `data:${mimeType};base64,${bytesToBase64(bytes)}`;
 }
 
-function estimatedBinaryByteLength(value: unknown, columnType?: string, databaseType?: DatabaseType): number {
+function estimatedBinaryByteLength(value: unknown, columnType?: string, _databaseType?: DatabaseType): number {
   if (Array.isArray(value)) return value.length;
   if (value && typeof value === "object" && Array.isArray((value as { data?: unknown }).data)) {
     return (value as { data: unknown[] }).data.length;
@@ -60,7 +60,7 @@ function estimatedBinaryByteLength(value: unknown, columnType?: string, database
   const prefixed = trimmed.match(HEX_PREFIX_RE);
   if (prefixed) return prefixed[1].replace(/\s+/g, "").length / 2;
   if (HEX_ESCAPE_RE.test(trimmed)) return trimmed.replace(/\s+/g, "").replace(/\\x/gi, "").length / 2;
-  if (databaseType !== "tdengine" && isBinaryCellColumnType(columnType) && BARE_HEX_RE.test(trimmed)) {
+  if (isBinaryCellColumnType(columnType) && BARE_HEX_RE.test(trimmed)) {
     return trimmed.replace(/\s+/g, "").length / 2;
   }
   return 0;

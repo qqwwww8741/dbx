@@ -4,7 +4,7 @@ import { Label } from "@/components/ui/label";
 import { useI18n } from "vue-i18n";
 import type { GeneratorParams } from "@/lib/dataGrid/dataGenerate";
 
-const props = defineProps<{
+defineProps<{
   params: GeneratorParams;
   disableDefault?: boolean;
   disableNull?: boolean;

@@ -18,8 +18,6 @@ import type {
   PluginUiContribution,
   PluginWorkbenchContribution,
 } from "@/types/database";
-import { uuid } from "@/lib/common/utils";
-import { clonePluginData } from "./pluginData";
 
 const PLUGIN_CONNECTION_PROVIDER_OPTION_PREFIX = "plugin-provider:";
 
@@ -253,80 +251,6 @@ export function pluginConnectionFormValues(contribution: PluginConnectionProvide
     else if (isPluginFormFieldValue(value)) values[field.key] = value;
   }
   return values;
-}
-
-export function buildPluginConnectionConfig(pluginId: string, contribution: PluginConnectionProviderContribution, values: Record<string, PluginFormFieldValue>, existing?: ConnectionConfig): ConnectionConfig {
-  const externalConfig: Record<string, unknown> = isRecord(existing?.external_config) ? clonePluginData(existing.external_config) : {};
-  const connectionSecrets = { ...existing?.connection_secrets };
-  const config: ConnectionConfig = {
-    id: existing?.id || uuid(),
-    name: existing?.name || contribution.label,
-    note: existing?.note,
-    db_type: "plugin",
-    driver_profile: existing?.driver_profile || "plugin",
-    driver_label: contribution.label,
-    host: existing?.host || "",
-    port: existing?.port || 0,
-    username: existing?.username || "",
-    password: existing?.password || "",
-    database: existing?.database,
-    external_config: externalConfig,
-    plugin_id: pluginId,
-    plugin_connection_provider: contribution.id,
-    plugin_connection_type: contribution.database_type,
-    connection_secrets: connectionSecrets,
-    transport_layers: existing?.transport_layers || [],
-    connect_timeout_secs: existing?.connect_timeout_secs || pluginConnectionConnectTimeoutDefault(contribution) || 10,
-    query_timeout_secs: existing?.query_timeout_secs || 60,
-    idle_timeout_secs: existing?.idle_timeout_secs || 60,
-    keepalive_interval_secs: existing?.keepalive_interval_secs || 30,
-    read_only: existing?.read_only || false,
-    save_password: existing?.save_password !== false,
-    is_production: existing?.is_production || false,
-    production_databases: existing?.production_databases || [],
-  };
-  for (const field of contribution.fields) {
-    // A `null` coming from the form (or from a host that hydrated absent
-    // defaults as `null`) means "unset": fall back to the declared default and
-    // otherwise clear the stored value instead of persisting a null.
-    const raw = values[field.key];
-    const value = raw === null ? undefined : (raw ?? field.default ?? undefined);
-    const binding = effectiveFieldBinding(field);
-    if (binding === "config") {
-      if (value === undefined) delete externalConfig[field.key];
-      else externalConfig[field.key] = value;
-    } else if (binding === "secret") {
-      // A plugin may migrate a formerly config-bound field to secret binding.
-      // Load its legacy value above, then remove the plaintext copy on save.
-      delete externalConfig[field.key];
-      if (value === undefined || value === "") delete connectionSecrets[field.key];
-      else connectionSecrets[field.key] = String(value);
-    } else if (binding === "name") {
-      config.name = String(value || contribution.label);
-    } else if (binding === "host") {
-      config.host = String(value || "");
-    } else if (binding === "port") {
-      config.port = typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.min(65535, Math.trunc(value))) : 0;
-    } else if (binding === "username") {
-      config.username = String(value || "");
-    } else if (binding === "password") {
-      config.password = String(value || "");
-    } else if (binding === "database") {
-      config.database = value === undefined || value === "" ? undefined : String(value);
-    }
-  }
-  // A config-bound connect_timeout_secs field is the plugin's own handshake
-  // timeout (the SSH plugin lets advanced users tune it). Mirror the resolved
-  // value into the typed field so the host RPC deadline never fires before the
-  // plugin's own timeout. Only applies while the provider declares the field —
-  // a stale external_config key from an older manifest must not leak through.
-  if (pluginConnectionConnectTimeoutDefault(contribution) !== undefined) {
-    const pluginConnectTimeout = externalConfig[PLUGIN_CONNECT_TIMEOUT_FIELD_KEY];
-    if (typeof pluginConnectTimeout === "number" && Number.isFinite(pluginConnectTimeout) && pluginConnectTimeout > 0) {
-      config.connect_timeout_secs = Math.min(300, Math.max(1, Math.trunc(pluginConnectTimeout)));
-    }
-  }
-  return config;
 }
 
 function effectiveFieldBinding(field: PluginFormField): NonNullable<PluginFormField["binding"]> {

@@ -74,9 +74,6 @@ interface UseDataGridExtractorOptions {
   copyText: (text: string, gridCopy?: { rows: readonly (readonly unknown[])[]; header?: readonly unknown[] }) => Promise<boolean>;
   externalCellValue?: (value: unknown, columnIndex: number) => unknown;
   canCopySqlInsert: (request: DataGridExtractRequest) => boolean;
-  buildMongoInsert: (extractorOptions: DataGridExtractorOptions, rowLimit?: number) => Promise<string | undefined>;
-  buildMongoUpdate?: (request: DataGridExtractRequest, rowLimit?: number) => Promise<string | undefined>;
-  canBuildMongoUpdate?: (request: DataGridExtractRequest) => boolean;
 }
 
 export function useDataGridExtractor(options: UseDataGridExtractorOptions) {
@@ -157,7 +154,7 @@ export function useDataGridExtractor(options: UseDataGridExtractorOptions) {
     // INSERT and UPDATE need the complete record to retain key columns and
     // writable values. Other extractors should respect the actual cell range
     // that a right-click creates, just like keyboard copy does.
-    const requiresFullRowContext = extractor === "sql-inserts" || (extractor === "sql-updates" && options.databaseType.value !== "mongodb");
+    const requiresFullRowContext = extractor === "sql-inserts" || extractor === "sql-updates";
 
     if (contextPredicateCell) {
       const item = fullItemsById.get(contextPredicateCell.rowId);
@@ -337,9 +334,7 @@ export function useDataGridExtractor(options: UseDataGridExtractorOptions) {
     }
     if (extractor === "sql-updates") {
       // Mongo has a dedicated updateOne path that doesn't need SQL primary keys.
-      if (options.databaseType.value === "mongodb") {
-        const request = buildRequest(extractor, extractorOptions);
-        return request !== null && (options.canBuildMongoUpdate?.(request) ?? false);
+      {
       }
       return canBuildSqlUpdateRequest();
     }
@@ -385,20 +380,13 @@ export function useDataGridExtractor(options: UseDataGridExtractorOptions) {
     return resolveDataGridCopyPreference(preference, request.rows.length * request.selectedColumnIndexes.length);
   }
 
-  async function resolveMongoExtractorResult(extractor: DataGridCopyExtractorId, request: DataGridExtractRequest, rowLimit?: number) {
-    if (options.databaseType.value !== "mongodb") return undefined;
-    if (extractor !== "sql-inserts" && extractor !== "sql-updates") return undefined;
-    const text = extractor === "sql-inserts" ? ((await options.buildMongoInsert(request.options, rowLimit)) ?? "") : ((await options.buildMongoUpdate?.(request, rowLimit)) ?? "");
-    return { text, mimeType: "application/javascript", fileExtension: "js", rowCount: rowLimit ?? request.rows.length, columnCount: request.selectedColumnIndexes.length, warnings: undefined, omittedColumns: undefined };
-  }
-
   async function extractWithExtractor(extractor: DataGridCopyExtractorId, extractorOptions: DataGridExtractorOptions = options.extractorOptions?.value ?? DEFAULT_DATA_GRID_EXTRACTOR_OPTIONS, maxRows?: number): Promise<ResolvedDataGridExtraction | null> {
     const initialRequest = buildRequest(extractor, extractorOptions);
     if (!initialRequest) return null;
     const rowLimit = maxRows === undefined ? undefined : Math.min(initialRequest.rows.length, maxRows);
     const request = await resolveRequestSourceValues(initialRequest, rowLimit);
-    const mongoResult = await resolveMongoExtractorResult(extractor, request, rowLimit);
-    const result = mongoResult ?? (await api.extractDataGridSelection(request));
+
+    const result = await api.extractDataGridSelection(request);
     if (!result.text && !extractorAllowsEmptyOutput(extractor)) return null;
     return { initialRequest, request, result };
   }

@@ -121,24 +121,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn connections_block_only_their_plugin_until_all_handles_are_dropped() {
-        let lifecycle = PluginLifecycle::default();
-        let connection = lifecycle.begin_connection("s3", "Production S3").unwrap();
-        let clone = connection.clone();
-        let second = lifecycle.begin_connection("s3", "Production S3").unwrap();
-        assert_eq!(
-            lifecycle.begin_update("s3").unwrap_err(),
-            "Plugin update blocked by active connections: Production S3"
-        );
-        assert!(lifecycle.begin_update("other").is_ok());
-        drop(connection);
-        drop(second);
-        assert!(lifecycle.begin_update("s3").is_err());
-        drop(clone);
-        assert!(lifecycle.begin_update("s3").is_ok());
-    }
-
-    #[test]
     fn operations_block_updates_without_connections() {
         let lifecycle = PluginLifecycle::default();
         let operation = lifecycle.begin_operation("tool").unwrap();

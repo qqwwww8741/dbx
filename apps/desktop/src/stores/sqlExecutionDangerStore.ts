@@ -4,7 +4,7 @@ import type { DatabaseType } from "@/types/database";
 
 export interface SqlExecutionDangerRequest {
   sql: string;
-  kind: "sql" | "redis";
+  kind: "sql";
   connectionName?: string;
   database?: string;
   targetLabel?: string;

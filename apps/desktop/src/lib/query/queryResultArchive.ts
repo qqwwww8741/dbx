@@ -1,6 +1,6 @@
 import { decode, encode } from "@msgpack/msgpack";
 import type { QueryTab } from "@/types/database";
-import { decodeTabResultSnapshot, encodeTabResultSnapshot, type TabResultSnapshot } from "@/lib/tabs/tabResultCache";
+import { encodeTabResultSnapshot, type TabResultSnapshot } from "@/lib/tabs/tabResultCache";
 
 const ARCHIVE_MAGIC = "DBX_QUERY_RESULT_ARCHIVE";
 const ARCHIVE_VERSION = 1;
@@ -64,17 +64,6 @@ function archiveTabMetadata(tab: QueryTab): QueryResultArchiveTab {
   });
 }
 
-function isArchiveTab(value: unknown): value is QueryResultArchiveTab {
-  if (!isRecord(value)) return false;
-  return typeof value.title === "string" && typeof value.connectionId === "string" && typeof value.database === "string" && typeof value.sql === "string";
-}
-
-function binaryPayload(value: unknown): Uint8Array | undefined {
-  if (value instanceof Uint8Array) return value;
-  if (value instanceof ArrayBuffer) return new Uint8Array(value);
-  return undefined;
-}
-
 async function transformBytes(bytes: Uint8Array, stream: CompressionStream | DecompressionStream): Promise<Uint8Array> {
   const output = new Response(stream.readable).arrayBuffer();
   const writer = stream.writable.getWriter();
@@ -124,16 +113,9 @@ export async function decodeQueryResultArchive(bytes: Uint8Array | ArrayBuffer):
     const decoded = decode(await gunzipBytes(rawBytes));
     if (!isRecord(decoded)) return undefined;
     if (decoded.magic !== ARCHIVE_MAGIC || decoded.version !== ARCHIVE_VERSION || decoded.codec !== ARCHIVE_CODEC) return undefined;
-    if (!isArchiveTab(decoded.tab)) return undefined;
-    const snapshotBytes = binaryPayload(decoded.snapshot);
-    if (!snapshotBytes) return undefined;
-    const snapshot = decodeTabResultSnapshot(snapshotBytes);
-    if (!snapshot) return undefined;
-    return {
-      createdAt: typeof decoded.createdAt === "number" ? decoded.createdAt : Date.now(),
-      tab: decoded.tab,
-      snapshot,
-    };
+    {
+      return undefined;
+    }
   } catch {
     return undefined;
   }

@@ -2,8 +2,6 @@ import { splitSqlStatementRanges } from "@/lib/sql/sqlStatementRanges";
 import { supportsCreateDatabaseCharset } from "@/lib/database/createDatabaseSql";
 import type { ConnectionConfig, DatabaseType } from "@/types/database";
 
-const MYSQL_BOOTSTRAP_EXTRA_PROFILES = new Set(["selectdb", "goldendb"]);
-
 type BootstrapConnection = Pick<ConnectionConfig, "db_type" | "driver_profile">;
 type ParsedIdentifier = { identifier: string; rest: string };
 
@@ -185,7 +183,7 @@ function isAllowedBootstrapPrelude(statement: string): boolean {
 export function supportsConnectionLevelSqlExecution(connection: BootstrapConnection | undefined): boolean {
   if (!connection) return false;
   if (supportsCreateDatabaseCharset(connection.db_type, connection.driver_profile)) return true;
-  return !!connection.driver_profile && MYSQL_BOOTSTRAP_EXTRA_PROFILES.has(connection.driver_profile.toLowerCase());
+  return false;
 }
 
 export function supportsConnectionLevelDatabaseBootstrap(connection: BootstrapConnection | undefined): boolean {

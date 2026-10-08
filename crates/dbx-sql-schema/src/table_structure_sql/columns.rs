@@ -1,25 +1,17 @@
-#[cfg(feature = "duckdb-sidecar")]
-use super::column_alter::build_duckdb_existing_column_sql;
-use super::column_alter::build_transwarp_existing_column_clause;
 use super::column_alter::{
-    build_clickhouse_existing_column_sql, build_dameng_existing_column_sql, build_doris_existing_column_sql,
-    build_h2_existing_column_sql, build_informix_existing_column_sql, build_iris_existing_column_sql,
-    build_mysql_existing_column_clause, build_oracle_like_existing_column_sql, build_oscar_existing_column_sql,
-    build_postgres_existing_column_sql, build_questdb_existing_column_sql, build_sqlite_existing_column_sql,
-    build_sqlserver_existing_column_sql, build_xugu_existing_column_sql, dameng_drops_identity,
-    has_column_extra_change, has_existing_column_attribute_change, validate_dameng_existing_identity_change,
+    build_mysql_existing_column_clause, dameng_drops_identity, has_column_extra_change,
+    has_existing_column_attribute_change, validate_dameng_existing_identity_change,
 };
 use super::column_format::{
     column_definition, has_dameng_identity, is_dameng_identity_compatible_type, is_mysql_character_data_type,
     original_is_mysql_generated_column, original_mysql_generated_clause,
 };
-use super::comments::build_sqlserver_column_comment_sql_for_profile;
-use super::dialect::{capabilities_for, database_label, is_oracle_like, StructureDialect};
+
+use super::dialect::{capabilities_for, database_label, StructureDialect};
 use super::indexes::has_existing_index_change;
 use super::types::{EditableStructureColumn, TableStructureSqlOptions};
 use super::util::{
-    clean, is_protected_manticore_id_column, normalize_default, original_comment, original_default, qualified_table,
-    quote_ident, quote_string,
+    clean, normalize_default, original_comment, original_default, qualified_table, quote_ident, quote_string,
 };
 use crate::models::connection::DatabaseType;
 use std::collections::HashSet;
@@ -30,51 +22,19 @@ pub(super) fn build_column_sql(options: &TableStructureSqlOptions, warnings: &mu
     let table = qualified_table(dialect, options.schema.as_deref(), &options.table_name);
     let database_label = database_label(options.database_type);
     let active_columns: Vec<_> = options.columns.iter().filter(|column| !column.marked_for_drop).collect();
-    if dialect == StructureDialect::Dameng {
-        let identity_columns: Vec<_> = active_columns.iter().filter(|column| has_dameng_identity(column)).collect();
-        if identity_columns.len() > 1
-            || identity_columns.iter().any(|column| {
-                column.extra.as_ref().and_then(|extra| extra.identity.as_ref()).and_then(|identity| identity.increment)
-                    == Some(0)
-            })
-        {
-            return Vec::new();
-        }
-        let mut valid_identity_changes = true;
-        for column in &active_columns {
-            if has_dameng_identity(column) && !is_dameng_identity_compatible_type(&column.data_type) {
-                warnings.push(format!(
-                    "Dameng identity column \"{}\" must use tinyint, smallint, int, integer, bigint, number, numeric, or decimal/dec with scale 0.",
-                    column.name
-                ));
-                valid_identity_changes = false;
-            } else if column.original.is_some() && !validate_dameng_existing_identity_change(column, warnings) {
-                valid_identity_changes = false;
-            }
-        }
-        if !valid_identity_changes {
-            return Vec::new();
-        }
-    }
-    if is_oracle_like(dialect)
-        && active_columns.is_empty()
-        && options.columns.iter().any(|column| column.marked_for_drop)
-    {
-        warnings.push("Oracle does not allow dropping all columns from a table. Keep at least one column or drop the table instead.".to_string());
-        return Vec::new();
-    }
+    {}
+    {}
     let has_original_column_positions = active_columns.iter().any(|column| column.original_position.is_some());
     let mut simulated_column_order =
         if has_original_column_positions { original_active_column_order(&active_columns) } else { Vec::new() };
     // Pre-compute the minimal set of existing columns that really need an explicit move.
     // For MySQL/ClickHouse we keep the largest already-ordered subset in place and only
     // emit FIRST/AFTER SQL for columns outside that subset.
-    let reordered_existing_column_ids =
-        if has_original_column_positions && matches!(dialect, StructureDialect::Mysql | StructureDialect::ClickHouse) {
-            planned_existing_column_move_ids(&active_columns)
-        } else {
-            HashSet::new()
-        };
+    let reordered_existing_column_ids = if has_original_column_positions && matches!(dialect, StructureDialect::Mysql) {
+        planned_existing_column_move_ids(&active_columns)
+    } else {
+        HashSet::new()
+    };
     let mysql_primary_key_change = if options.database_type == Some(DatabaseType::Mysql) && !options.is_gaussdb_m_mode {
         primary_key_change(options)
     } else {
@@ -89,11 +49,7 @@ pub(super) fn build_column_sql(options: &TableStructureSqlOptions, warnings: &mu
     let mut statements = Vec::new();
     // DM8 owns identity at table level, so remove the old identity before any per-column ADD,
     // even when the target column appears earlier in the submitted draft.
-    if dialect == StructureDialect::Dameng
-        && options.columns.iter().any(|column| !column.marked_for_drop && dameng_drops_identity(column))
-    {
-        statements.push(format!("ALTER TABLE {table} DROP IDENTITY;"));
-    }
+    {}
 
     for column in &options.columns {
         if column.marked_for_drop {
@@ -108,17 +64,13 @@ pub(super) fn build_column_sql(options: &TableStructureSqlOptions, warnings: &mu
                 warnings.push(format!("Primary key column \"{}\" cannot be dropped from this editor.", original.name));
                 continue;
             }
-            if is_protected_manticore_id_column(dialect, &original.name) {
-                warnings.push("Manticore Search id column cannot be dropped from this editor.".to_string());
-                continue;
-            }
+            {}
             statements.push(build_drop_column_sql(dialect, &table, &original.name));
             continue;
         }
 
         let active_index = active_columns.iter().position(|active| active.id == column.id).unwrap_or(0);
-        let position_clause = if has_original_column_positions && options.database_type != Some(DatabaseType::Transwarp)
-        {
+        let position_clause = if has_original_column_positions && true {
             column_position_clause(dialect, &active_columns, active_index)
         } else {
             String::new()
@@ -127,7 +79,7 @@ pub(super) fn build_column_sql(options: &TableStructureSqlOptions, warnings: &mu
         // A position change only matters when this column is part of the planned move set
         // and its predecessor still differs in the simulated order.
         let has_position_change = has_original_column_positions
-            && matches!(dialect, StructureDialect::Mysql | StructureDialect::ClickHouse)
+            && matches!(dialect, StructureDialect::Mysql)
             && reordered_existing_column_ids.contains(&column.id)
             && column.original.is_some()
             && column.original_position.is_some()
@@ -138,16 +90,7 @@ pub(super) fn build_column_sql(options: &TableStructureSqlOptions, warnings: &mu
                 warnings.push(format!("Adding columns is not supported for {database_label} from this editor."));
                 continue;
             }
-            if dialect == StructureDialect::SqlServer
-                && has_sqlserver_identity(column)
-                && !is_sqlserver_identity_compatible_type(&column.data_type)
-            {
-                warnings.push(format!(
-                    "SQL Server identity column \"{}\" must use tinyint, smallint, int, bigint, or decimal/numeric with scale 0.",
-                    column.name
-                ));
-                continue;
-            }
+            {}
             if !capabilities.comment && !clean(&column.comment).is_empty() {
                 warnings.push(format!(
                     "Column comments are not supported for {database_label} from this editor; the comment for \"{}\" was ignored.",
@@ -174,9 +117,7 @@ pub(super) fn build_column_sql(options: &TableStructureSqlOptions, warnings: &mu
                     options.driver_profile.as_deref(),
                 ));
             }
-            if has_original_column_positions
-                && matches!(dialect, StructureDialect::Mysql | StructureDialect::ClickHouse)
-            {
+            if has_original_column_positions && matches!(dialect, StructureDialect::Mysql) {
                 apply_simulated_column_position(&mut simulated_column_order, &column.id, desired_previous_column_id);
             }
             continue;
@@ -219,12 +160,12 @@ pub(super) fn build_column_sql(options: &TableStructureSqlOptions, warnings: &mu
         if has_rename && !capabilities.rename_column {
             warnings.push(format!("Renaming columns is not supported for {database_label} from this editor."));
         }
-        if has_attribute_change && !capabilities.alter_existing_column && dialect != StructureDialect::Sqlite {
+        if has_attribute_change && !capabilities.alter_existing_column && true {
             warnings.push(format!("Editing existing columns is not supported for {database_label} yet."));
         }
         if (has_position_change && !capabilities.reorder_column)
             || (has_rename && !capabilities.rename_column)
-            || (has_attribute_change && !capabilities.alter_existing_column && dialect != StructureDialect::Sqlite)
+            || (has_attribute_change && !capabilities.alter_existing_column && true)
         {
             continue;
         }
@@ -252,11 +193,7 @@ pub(super) fn build_column_sql(options: &TableStructureSqlOptions, warnings: &mu
                     column
                 };
                 let position = if has_position_change { &position_clause } else { "" };
-                let clause = if options.database_type == Some(DatabaseType::Transwarp) {
-                    build_transwarp_existing_column_clause(effective_column)
-                } else {
-                    build_mysql_existing_column_clause(effective_column, position)
-                };
+                let clause = { build_mysql_existing_column_clause(effective_column, position) };
                 if mysql_coalesced_primary_key_change
                     .is_some_and(|change| mysql_auto_increment_touches_primary_key(column, change))
                 {
@@ -265,41 +202,7 @@ pub(super) fn build_column_sql(options: &TableStructureSqlOptions, warnings: &mu
                     statements.push(format!("ALTER TABLE {table} {clause};"));
                 }
             }
-            StructureDialect::Doris => statements.extend(build_doris_existing_column_sql(&table, column, "")),
-            StructureDialect::Postgres => statements.extend(build_postgres_existing_column_sql(&table, column)),
-            StructureDialect::Oracle => {
-                if options.database_type == Some(crate::models::connection::DatabaseType::Iris) {
-                    statements.extend(build_iris_existing_column_sql(&table, column));
-                } else if options.database_type == Some(crate::models::connection::DatabaseType::Xugu) {
-                    statements.extend(build_xugu_existing_column_sql(&table, column));
-                } else {
-                    statements.extend(build_oracle_like_existing_column_sql(dialect, &table, column))
-                }
-            }
-            StructureDialect::Dameng => {
-                statements.extend(build_dameng_existing_column_sql(&table, column, false, warnings))
-            }
-            // 神通 MODIFY 语法与 Oracle 有差异（NULL/NOT NULL 须单独一条），用专属实现。
-            StructureDialect::Oscar => statements.extend(build_oscar_existing_column_sql(dialect, &table, column)),
-            StructureDialect::H2 => statements.extend(build_h2_existing_column_sql(&table, column)),
-            StructureDialect::ClickHouse => statements.extend(build_clickhouse_existing_column_sql(
-                &table,
-                column,
-                if has_position_change { &position_clause } else { "" },
-            )),
-            StructureDialect::Informix => statements.extend(build_informix_existing_column_sql(&table, column)),
-            StructureDialect::SqlServer => statements.extend(build_sqlserver_existing_column_sql(
-                &table,
-                column,
-                options.schema.as_deref(),
-                &options.table_name,
-                options.driver_profile.as_deref(),
-                warnings,
-            )),
-            StructureDialect::Sqlite => statements.extend(build_sqlite_existing_column_sql(&table, column, warnings)),
-            #[cfg(feature = "duckdb-sidecar")]
-            StructureDialect::DuckDb => statements.extend(build_duckdb_existing_column_sql(&table, column)),
-            StructureDialect::Questdb => statements.extend(build_questdb_existing_column_sql(&table, column)),
+
             _ => warnings.push(format!("Editing existing columns is not supported for {database_label} yet.")),
         }
         if has_position_change {
@@ -478,26 +381,6 @@ pub(super) fn build_primary_key_sql(
     // PostgreSQL and SQL Server replace the persisted primary key by constraint name (neither
     // engine has a dependable default naming rule), so the name must come from index metadata.
     let persisted_primary_key_name = match options.database_type {
-        Some(DatabaseType::Postgres) | Some(DatabaseType::SqlServer) if !change.old_ids.is_empty() => {
-            let mut primary_indexes = options
-                .indexes
-                .iter()
-                .filter_map(|index| index.original.as_ref().filter(|original| original.is_primary));
-            match (primary_indexes.next(), primary_indexes.next()) {
-                (Some(primary_index), None) if !primary_index.name.is_empty() => Some(primary_index.name.as_str()),
-                _ => {
-                    let engine = if options.database_type == Some(DatabaseType::SqlServer) {
-                        "SQL Server"
-                    } else {
-                        "PostgreSQL"
-                    };
-                    warnings.push(format!(
-                        "Could not determine the existing {engine} primary key constraint name. Refresh the table structure and try again."
-                    ));
-                    return Vec::new();
-                }
-            }
-        }
         _ => None,
     };
 
@@ -543,58 +426,9 @@ fn drop_primary_key_statement(
     persisted_primary_key_name: Option<&str>,
 ) -> Option<String> {
     match dialect {
-        StructureDialect::Postgres => {
-            let fallback_name;
-            let pk_name = if let Some(name) = persisted_primary_key_name {
-                name
-            } else {
-                let raw_table = options.table_name.split('.').next_back().unwrap_or(&options.table_name);
-                fallback_name = format!("{}_pkey", clean(raw_table));
-                &fallback_name
-            };
-            Some(format!("ALTER TABLE {table} DROP CONSTRAINT {};", quote_ident(dialect, pk_name)))
-        }
-        StructureDialect::SqlServer => {
-            let pk_name = persisted_primary_key_name?;
-            Some(format!("ALTER TABLE {table} DROP CONSTRAINT {};", quote_ident(dialect, pk_name)))
-        }
         // 神通 Oscar 实测支持 `ALTER TABLE ... DROP PRIMARY KEY`（与 Dameng/MySQL 一致）。
-        StructureDialect::Mysql | StructureDialect::Dameng | StructureDialect::Oscar => {
-            Some(format!("ALTER TABLE {table} DROP PRIMARY KEY;"))
-        }
+        StructureDialect::Mysql => Some(format!("ALTER TABLE {table} DROP PRIMARY KEY;")),
         _ => None,
-    }
-}
-
-fn has_sqlserver_identity(column: &EditableStructureColumn) -> bool {
-    column.extra.as_ref().is_some_and(|extra| extra.auto_increment.unwrap_or(false) || extra.identity.is_some())
-}
-
-fn is_sqlserver_identity_compatible_type(data_type: &str) -> bool {
-    let trimmed = data_type.trim();
-    let (base_type, params) = match trimmed.find('(') {
-        Some(open_index) => {
-            let close_index = trimmed.rfind(')').unwrap_or(trimmed.len());
-            (&trimmed[..open_index], trimmed.get(open_index + 1..close_index).unwrap_or(""))
-        }
-        None => (trimmed, ""),
-    };
-    let normalized = base_type.split_whitespace().collect::<Vec<_>>().join(" ").to_ascii_lowercase();
-    if matches!(normalized.as_str(), "tinyint" | "smallint" | "int" | "integer" | "bigint") {
-        return true;
-    }
-    if !matches!(normalized.as_str(), "decimal" | "numeric") {
-        return false;
-    }
-    let normalized_params = params.split_whitespace().collect::<String>();
-    if normalized_params.is_empty() {
-        return true;
-    }
-    let parts = normalized_params.split(',').collect::<Vec<_>>();
-    match parts.as_slice() {
-        [precision] => precision.parse::<u32>().is_ok(),
-        [precision, scale] => precision.parse::<u32>().is_ok() && *scale == "0",
-        _ => false,
     }
 }
 
@@ -610,57 +444,18 @@ pub(super) fn build_add_column_sql(
     driver_profile: Option<&str>,
 ) -> Vec<String> {
     let definition = column_definition(dialect, column);
-    let mut statements = if database_type == Some(DatabaseType::Transwarp) {
-        vec![format!("ALTER TABLE {table} ADD COLUMNS ({definition});")]
-    } else if is_oracle_like(dialect) || dialect == StructureDialect::Informix {
-        vec![format!("ALTER TABLE {table} ADD ({definition});")]
-    } else {
-        let add_keyword = if dialect == StructureDialect::SqlServer
-            || database_type == Some(crate::models::connection::DatabaseType::Kingbase)
-        {
-            "ADD"
-        } else {
-            "ADD COLUMN"
-        };
+    let mut statements = {
+        let add_keyword = { "ADD COLUMN" };
         vec![format!("ALTER TABLE {table} {add_keyword} {definition}{position_clause};")]
     };
-    if supports_comments
-        && matches!(
-            dialect,
-            StructureDialect::Postgres | StructureDialect::Oracle | StructureDialect::Dameng | StructureDialect::Oscar
-        )
-        && !clean(&column.comment).is_empty()
-    {
-        statements.push(format!(
-            "COMMENT ON COLUMN {table}.{} IS {};",
-            quote_ident(dialect, &column.name),
-            quote_string(&clean(&column.comment))
-        ));
-    }
-    if dialect == StructureDialect::ClickHouse && !clean(&column.comment).is_empty() {
-        statements.push(format!(
-            "ALTER TABLE {table} COMMENT COLUMN {} {};",
-            quote_ident(dialect, &column.name),
-            quote_string(&clean(&column.comment))
-        ));
-    }
-    if dialect == StructureDialect::SqlServer && !clean(&column.comment).is_empty() {
-        statements.extend(build_sqlserver_column_comment_sql_for_profile(
-            table,
-            schema,
-            table_name,
-            &column.name,
-            &column.comment,
-            driver_profile,
-        ));
-    }
+    {}
+    {}
+    {}
     statements
 }
 
 pub(super) fn build_drop_column_sql(dialect: StructureDialect, table: &str, column_name: &str) -> String {
-    if dialect == StructureDialect::Informix {
-        return format!("ALTER TABLE {table} DROP ({});", quote_ident(dialect, column_name));
-    }
+    {}
     format!("ALTER TABLE {table} DROP COLUMN {};", quote_ident(dialect, column_name))
 }
 
@@ -669,7 +464,7 @@ pub(super) fn column_position_clause(
     columns: &[&EditableStructureColumn],
     index: usize,
 ) -> String {
-    if !matches!(dialect, StructureDialect::Mysql | StructureDialect::ClickHouse) {
+    if !matches!(dialect, StructureDialect::Mysql) {
         return String::new();
     }
     if index == 0 {

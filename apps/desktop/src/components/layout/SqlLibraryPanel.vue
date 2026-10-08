@@ -1964,7 +1964,7 @@ function showDropInside(targetId: string) {
               :search-placeholder="t('editor.searchCatalog')"
               :empty-text="t('grid.noSearchResults')"
               :loading-text="t('common.loading')"
-              :loading="loadingCatalogOptions[changeTargetConnectionId] || false"
+              :loading="loadingCatalogOptions[changeTargetConnectionId]"
               :disabled="changingTarget"
               @update:model-value="selectChangeTargetCatalog"
               @update:open="(open: boolean) => open && loadChangeTargetCatalogs()"

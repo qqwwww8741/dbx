@@ -1,6 +1,6 @@
 import type { DatabaseType, ObjectSourceKind, TreeNode, TreeNodeType } from "@/types/database";
-import { customTypeCapabilities, supportsTypeObjectSource } from "@/lib/database/databaseObjectCapabilities";
-import { supportsConnectionQueryActions } from "@/lib/database/databaseFeatureSupport";
+import { customTypeCapabilities } from "@/lib/database/databaseObjectCapabilities";
+
 import { matchesShortcut, type ShortcutLikeEvent } from "@/lib/editor/keyboardShortcuts";
 
 export type TreeNodeRowAction = "open-data" | "open-source" | "open-extension-details" | "open-event-trigger-details" | "open-saved-sql" | "open-object-browser" | "open-object-browser-and-expand" | "locate-column" | "toggle" | "none";
@@ -22,53 +22,33 @@ export type SidebarSelectionCopyAction = "copy-name" | "none";
 export type SidebarActivation = "single" | "double";
 
 const dataNodeTypes = new Set<TreeNodeType>(["table", "view", "materialized_view"]);
-const documentBrowserNodeTypes = new Set<TreeNodeType>(["mongo-collection", "mongo-bucket", "dynamodb-table"]);
+const documentBrowserNodeTypes = new Set<TreeNodeType>(["dynamodb-table"]);
 const toggleLeafNodeTypes = new Set<TreeNodeType>([
-  "redis-db",
-  "mq-tenant",
-  "mqtt-topic",
-  "etcd-root",
-  "etcd-dashboard",
-  "etcd-access-control",
-  "nacos-namespace",
-  "nacos-access-control",
-  "zookeeper-root",
-  "consul-root",
-  "consul-overview",
-  "mongo-gridfs",
-  "mongo-collection",
-  "mongo-bucket",
   "dynamodb-table",
-  "vector-collection",
-  "elasticsearch-index",
-  "meilisearch-system",
+
   "user-admin",
-  "dameng-users",
-  "dameng-roles",
 ]);
 // These are application entry points rather than database objects. They should
 // always navigate on a single click, even when the user prefers double-click
 // activation for ordinary tree objects.
-const directNavigationTreeNodeTypes = new Set<TreeNodeType>(["consul-root", "consul-overview", "etcd-root", "etcd-dashboard", "etcd-access-control", "nacos-namespace", "nacos-access-control", "meilisearch-system"]);
-const repeatableNavigationTreeNodeTypes = new Set<TreeNodeType>(["etcd-root", "etcd-dashboard", "etcd-access-control", "nacos-namespace", "nacos-access-control"]);
 
-export function isDirectNavigationTreeNode(type: TreeNodeType): boolean {
-  return directNavigationTreeNodeTypes.has(type);
+export function isDirectNavigationTreeNode(_type: TreeNodeType): boolean {
+  return false;
 }
 
-export function isRepeatableNavigationTreeNode(type: TreeNodeType): boolean {
-  return repeatableNavigationTreeNodeTypes.has(type);
+export function isRepeatableNavigationTreeNode(_type: TreeNodeType): boolean {
+  return false;
 }
 
-export function shouldActivateTreeNodeOnSingleClick(type: TreeNodeType, activation: SidebarActivation = "single"): boolean {
-  return activation !== "double" || isDirectNavigationTreeNode(type);
+export function shouldActivateTreeNodeOnSingleClick(_type: TreeNodeType, activation: SidebarActivation = "single"): boolean {
+  return activation !== "double";
 }
-const databaseActivationNodeTypes = new Set<TreeNodeType>(["database", "schema", "mongo-db"]);
+const databaseActivationNodeTypes = new Set<TreeNodeType>(["database", "schema"]);
 
 export function shouldBrowseObjectsOnDatabaseActivation(type: TreeNodeType, enabled: boolean): boolean {
   return enabled && databaseActivationNodeTypes.has(type);
 }
-const queryOnActivationNodeTypes = new Set<TreeNodeType>(["connection", "database", "schema", "mongo-db"]);
+const queryOnActivationNodeTypes = new Set<TreeNodeType>(["connection", "database", "schema"]);
 
 /**
  * Whether activating this row should open (or focus) the connection's query
@@ -78,8 +58,8 @@ const queryOnActivationNodeTypes = new Set<TreeNodeType>(["connection", "databas
  * `supportsConnectionQueryActions` gate the context menu applies to its
  * "New Query" entry.
  */
-export function shouldOpenQueryOnTreeNodeActivation(node: Pick<TreeNode, "type" | "connectionId">, dbType: DatabaseType | undefined, enabled: boolean): boolean {
-  return enabled && !!node.connectionId && queryOnActivationNodeTypes.has(node.type) && supportsConnectionQueryActions(dbType);
+export function shouldOpenQueryOnTreeNodeActivation(node: Pick<TreeNode, "type" | "connectionId">, _dbType: DatabaseType | undefined, enabled: boolean): boolean {
+  return enabled && !!node.connectionId && queryOnActivationNodeTypes.has(node.type);
 }
 const sourceNodeTypes = new Set<TreeNodeType>(["materialized_view", "procedure", "function", "trigger", "event", "sequence", "synonym", "job", "package", "package-body", "type", "type-body"]);
 const savedSqlNodeTypes = new Set<TreeNodeType>(["saved-sql-file"]);
@@ -153,8 +133,8 @@ export function isDocumentBrowserTreeNode(type: TreeNodeType): boolean {
  * connection type. TYPE/TYPE_BODY only have a real source implementation on
  * Xugu; other databases list types without a DDL getter this cycle.
  */
-function canOpenTreeNodeSource(type: TreeNodeType, dbType?: DatabaseType): boolean {
-  if (type === "type" || type === "type-body") return supportsTypeObjectSource(dbType);
+function canOpenTreeNodeSource(type: TreeNodeType, _dbType?: DatabaseType): boolean {
+  if (type === "type" || type === "type-body") return false;
   return true;
 }
 

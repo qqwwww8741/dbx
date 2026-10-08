@@ -43,7 +43,7 @@ defineExpose<QueryEditorSurfaceHandle>({
   applyTableStructureChanges: () => contentAreaRef.value?.applyTableStructureChanges() ?? Promise.resolve(false),
   insertRedisCommand: (command: string, target: AiConversationBinding) => contentAreaRef.value?.insertRedisCommand(command, target) ?? Promise.resolve(false),
   executeRedisCommand: (command: string, target: AiConversationBinding) => contentAreaRef.value?.executeRedisCommand(command, target) ?? Promise.resolve(false),
-  isRedisConsoleReady: (target: AiConversationBinding) => contentAreaRef.value?.isRedisConsoleReady(target) ?? false,
+  isRedisConsoleReady: (_target: AiConversationBinding) => false,
   previewStatementRange: (range: StatementRange | null) => contentAreaRef.value?.previewStatementRange(range) ?? false,
   focusStatementRange: (range: StatementRange | null) => contentAreaRef.value?.focusStatementRange(range) ?? false,
   focusErrorPosition: (offset: number) => contentAreaRef.value?.focusErrorPosition(offset) ?? false,

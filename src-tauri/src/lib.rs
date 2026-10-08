@@ -1467,7 +1467,7 @@ mod tests {
 fn route_external_commands(
     main_handler: impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static,
 ) -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
-    dbx_tauri_consul::route(dbx_tauri_schema::route(main_handler))
+    dbx_tauri_schema::route(main_handler)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1541,7 +1541,6 @@ pub fn run() {
     let builder = builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(
             tauri_plugin_window_state::Builder::default()
@@ -1672,40 +1671,9 @@ pub fn run() {
             });
             eprintln!("[STARTUP] dialect hot-reload watcher started");
 
-            let default_agent_dir = data_dir_resolution.uses_custom_data_dir().then(|| data_dir.join("agents"));
-            let (plugin_dir, agent_dir) = commands::app_settings::resolve_driver_store_dirs_from_settings(
-                &desktop_settings,
-                &data_dir,
-                default_agent_dir,
-            );
-
-            let state = if let Some(agent_dir) = agent_dir {
-                AppState::new_with_plugin_and_agent_dir_and_app_version(
-                    storage,
-                    plugin_dir,
-                    agent_dir,
-                    env!("CARGO_PKG_VERSION"),
-                )
-            } else {
-                AppState::new_with_plugin_dir_and_app_version(storage, plugin_dir, env!("CARGO_PKG_VERSION"))
-            };
-            dbx_core::db::sqlite_worker::enable_sqlite_ssh_runtime(env!("CARGO_PKG_VERSION"));
-            state.set_duckdb_worker_process_isolation_enabled(desktop_settings.duckdb_worker_process_isolation);
-            state.set_duckdb_worker_max_processes(desktop_settings.duckdb_worker_max_processes);
-            let oidc_app_handle = app.handle().clone();
-            state.set_mongo_oidc_browser_opener(Arc::new(move |url| {
-                oidc_app_handle
-                    .opener()
-                    .open_url(url, None::<&str>)
-                    .map_err(|err| format!("Failed to open the system browser: {err}"))
-            }));
-            let sf_app_handle = app.handle().clone();
-            state.set_salesforce_browser_opener(Arc::new(move |url| {
-                sf_app_handle
-                    .opener()
-                    .open_url(url, None::<&str>)
-                    .map_err(|err| format!("Failed to open the system browser: {err}"))
-            }));
+            let plugin_dir =
+                commands::app_settings::resolve_plugin_store_dir_from_settings(&desktop_settings, &data_dir);
+            let state = AppState::new_with_plugin_dir_and_app_version(storage, plugin_dir, env!("CARGO_PKG_VERSION"));
             let state = Arc::new(state);
             app.manage(state.clone());
             commands::plugins::install_plugin_event_bridge(app.handle(), state.clone());
@@ -1730,7 +1698,7 @@ pub fn run() {
                 mcp_gate.wait().await;
                 commands::mcp_http_server::start_if_enabled(mcp_http_state, mcp_http_server).await;
             });
-            app.manage(commands::redis_pubsub_server::start_pubsub_server(state.clone()));
+
             app.manage(commands::saved_sql::SavedSqlStorageState { data_dir: data_dir.clone() });
             app.manage(commands::external_sql::ExternalSqlOpenState::default());
             app.manage(commands::external_db::ExternalDbOpenState::default());
@@ -1906,9 +1874,7 @@ pub fn run() {
             commands::app_settings::mark_frontend_ready,
             commands::app_settings::request_app_close_from_window_controls,
             commands::window_controls::set_macos_traffic_light_position,
-            commands::app_settings::set_driver_store_dir,
             commands::app_settings::set_plugin_store_dir,
-            commands::app_settings::set_agent_store_dir,
             commands::app_settings::get_driver_store_path,
             commands::app_settings::load_pinned_tree_node_ids,
             commands::app_settings::save_pinned_tree_node_ids,
@@ -1971,19 +1937,12 @@ pub fn run() {
             commands::connection::test_connection,
             commands::connection::test_connection_with_info,
             commands::connection::test_ssh_tunnel,
-            commands::salesforce_oauth::salesforce_oauth_browser_authorize,
-            commands::salesforce_oauth::salesforce_oauth_device_start,
-            commands::salesforce_oauth::salesforce_oauth_device_poll,
-            commands::salesforce_oauth::salesforce_oauth_refresh,
-            commands::salesforce_oauth::salesforce_oauth_password_login,
-            commands::salesforce_oauth::salesforce_current_user,
             commands::connection::connect_db,
             commands::connection::connection_final_proxy_port,
             commands::connection::disconnect_db,
             commands::connection::close_database_connection,
             commands::connection::session_credential_status,
             commands::connection::forget_session_credential,
-            commands::connection::replace_nacos_session_credential,
             commands::connection::clear_all_session_credentials,
             commands::connection::refresh_connections,
             commands::connection::check_connection_health,
@@ -2002,12 +1961,6 @@ pub fn run() {
             commands::connection::save_table_vgroups,
             commands::connection::load_table_vgroups,
             commands::connection::delete_table_vgroups_for_connection,
-            commands::plugin_file::plugin_file_open_dropped,
-            commands::plugin_file::plugin_file_pick_files,
-            commands::plugin_file::plugin_file_save_as,
-            commands::plugin_file::plugin_file_read,
-            commands::plugin_file::plugin_file_write,
-            commands::plugin_file::plugin_file_close,
             commands::plugin_media::plugin_media_open,
             commands::plugin_media::plugin_media_close,
             commands::plugin_storage::plugin_ui_storage_get,
@@ -2044,19 +1997,6 @@ pub fn run() {
             commands::plugins::read_plugin_ui_entry,
             commands::plugins::read_plugin_asset,
             commands::plugins::read_plugin_ui_asset,
-            commands::plugins::list_jdbc_drivers,
-            commands::plugins::list_jdbc_maven_bundles,
-            commands::plugins::list_jdbc_local_bundles,
-            commands::plugins::import_jdbc_drivers,
-            commands::plugins::install_jdbc_driver_from_maven,
-            commands::plugins::install_prestosql_jdbc_driver,
-            commands::plugins::delete_jdbc_driver,
-            commands::plugins::delete_jdbc_maven_bundle,
-            commands::plugins::delete_jdbc_local_bundle,
-            commands::plugins::jdbc_plugin_status,
-            commands::plugins::install_jdbc_plugin,
-            commands::plugins::install_jdbc_plugin_local,
-            commands::plugins::uninstall_jdbc_plugin,
             commands::schema_diff::prepare_schema_diff,
             commands::schema_diff::generate_schema_sync_sql,
             commands::schema_diff::generate_schema_sync_plan,
@@ -2090,13 +2030,11 @@ pub fn run() {
             commands::query::prepare_query_pagination_execution_plan,
             commands::query::build_sorted_query_sql,
             commands::query::build_explain_sql,
-            commands::query::get_explain_info,
             commands::query::get_plugin_plan_capabilities,
             commands::query::get_plugin_estimated_plan,
             commands::query::query_plugin_data,
             commands::query::get_plugin_data_grants,
             commands::query::set_plugin_data_grant,
-            commands::query::build_create_user_sql,
             commands::query::build_dropped_file_preview_sql,
             commands::query::build_table_select_sql,
             commands::query::build_database_search_sql,
@@ -2106,8 +2044,6 @@ pub fn run() {
             commands::query::build_rename_database_preflight_sql,
             commands::query::build_create_database_sql,
             #[cfg(feature = "duckdb-sidecar")]
-            commands::query::build_duckdb_attach_database_sql,
-            commands::query::build_sqlite_attach_database_sql,
             commands::query::build_drop_object_sql,
             commands::query::build_drop_table_sql,
             commands::query::build_drop_table_child_object_sql,
@@ -2128,8 +2064,6 @@ pub fn run() {
             commands::query::build_view_ddl_sql,
             commands::query::build_table_structure_change_sql,
             commands::query::build_table_owner_change_sql,
-            commands::query::preview_sqlite_table_structure_change,
-            commands::query::apply_sqlite_table_structure_change,
             commands::query::build_create_table_sql,
             commands::query::build_create_partitioned_table_sql,
             commands::query::build_table_partition_operation_sql,
@@ -2146,7 +2080,6 @@ pub fn run() {
             commands::query::build_data_grid_column_distinct_values_sql,
             commands::query::build_data_grid_count_sql,
             commands::query::build_data_grid_conditional_update_sql,
-            commands::query::build_hive_table_properties_sql,
             commands::query::build_export_insert_statements,
             commands::query::build_export_sql_insert,
             commands::query::build_database_sql_export,
@@ -2178,126 +2111,6 @@ pub fn run() {
             commands::table_import::preview_table_import_file,
             commands::table_import::import_table_file,
             commands::table_import::cancel_table_import,
-            commands::mongodb_import_export::preview_mongodb_import_file,
-            commands::mongodb_import_export::import_mongodb_file,
-            commands::mongodb_import_export::cancel_mongodb_import,
-            commands::mongodb_import_export::export_mongodb_query,
-            commands::mongodb_import_export::cancel_mongodb_export,
-            commands::mongodb_dump::inspect_mongodb_database_dump,
-            commands::mongodb_dump::prepare_mongodb_restore_source,
-            commands::mongodb_dump::release_mongodb_restore_source,
-            commands::mongodb_dump::dump_mongodb_database,
-            commands::mongodb_dump::restore_mongodb_database,
-            commands::mongodb_dump::cancel_mongodb_database_dump,
-            commands::redis_cmd::redis_list_databases,
-            commands::redis_cmd::redis_scan_keys,
-            commands::redis_cmd::redis_scan_keys_batch,
-            commands::redis_cmd::redis_scan_values,
-            commands::redis_cmd::redis_get_value,
-            commands::redis_cmd::redis_get_raw_value,
-            commands::redis_cmd::redis_get_ttl,
-            commands::redis_cmd::redis_get_stream_entries,
-            commands::redis_cmd::redis_get_stream_groups,
-            commands::redis_cmd::redis_get_stream_consumers,
-            commands::redis_cmd::redis_get_stream_pending,
-            commands::redis_cmd::redis_set_string,
-            commands::redis_cmd::redis_delete_key,
-            commands::redis_cmd::redis_rename_key,
-            commands::redis_cmd::redis_hash_set,
-            commands::redis_cmd::redis_hash_del,
-            commands::redis_cmd::redis_hash_field_update,
-            commands::redis_cmd::redis_hash_field_set_ttl,
-            commands::redis_cmd::redis_hash_field_set_expire_at,
-            commands::redis_cmd::redis_list_push,
-            commands::redis_cmd::redis_list_set,
-            commands::redis_cmd::redis_list_remove,
-            commands::redis_cmd::redis_set_add,
-            commands::redis_cmd::redis_set_remove,
-            commands::redis_cmd::redis_zadd,
-            commands::redis_cmd::redis_zrem,
-            commands::redis_cmd::redis_zset_update,
-            commands::redis_cmd::redis_stream_add,
-            commands::redis_cmd::redis_json_set,
-            commands::redis_cmd::redis_check_json_module,
-            commands::redis_cmd::redis_set_ttl,
-            commands::redis_cmd::redis_set_expire_at,
-            commands::redis_cmd::redis_set_keys_ttl,
-            commands::redis_cmd::redis_set_keys_expire_at,
-            commands::redis_cmd::redis_delete_keys,
-            commands::redis_cmd::redis_delete_keys_by_pattern,
-            commands::redis_cmd::redis_flush_db,
-            commands::redis_cmd::redis_execute_command,
-            commands::redis_cmd::redis_load_more,
-            commands::redis_cmd::redis_pubsub_publish,
-            commands::redis_pubsub_server::redis_pubsub_server_port,
-            commands::redis_cmd::redis_slowlog_get,
-            commands::redis_cmd::redis_cluster_master_nodes,
-            commands::etcd_cmd::etcd_supports_ttl,
-            commands::etcd_cmd::etcd_list_prefix,
-            commands::etcd_cmd::etcd_get,
-            commands::etcd_cmd::etcd_put,
-            commands::etcd_cmd::etcd_delete,
-            commands::etcd_cmd::etcd_rename,
-            commands::etcd_cmd::etcd_history,
-            commands::etcd_cmd::etcd_status,
-            commands::etcd_cmd::etcd_preflight,
-            commands::etcd_cmd::etcd_compact,
-            commands::etcd_cmd::etcd_defrag,
-            commands::etcd_cmd::etcd_watch_start,
-            commands::etcd_cmd::etcd_watch_poll,
-            commands::etcd_cmd::etcd_watch_stop,
-            commands::etcd_cmd::etcd_lease_list,
-            commands::etcd_cmd::etcd_lease_call,
-            commands::etcd_cmd::etcd_auth_call,
-            commands::zookeeper_cmd::zookeeper_list_prefix,
-            commands::zookeeper_cmd::zookeeper_get,
-            commands::zookeeper_cmd::zookeeper_put,
-            commands::zookeeper_cmd::zookeeper_delete,
-            commands::nacos_cmd::nacos_test_connection,
-            commands::nacos_cmd::nacos_list_namespaces,
-            commands::nacos_cmd::nacos_sidebar_snapshot,
-            commands::nacos_cmd::nacos_create_namespace,
-            commands::nacos_cmd::nacos_update_namespace,
-            commands::nacos_cmd::nacos_delete_namespace,
-            commands::nacos_cmd::nacos_list_configs,
-            commands::nacos_cmd::nacos_get_config,
-            commands::nacos_cmd::nacos_publish_config,
-            commands::nacos_cmd::nacos_delete_config,
-            commands::nacos_cmd::nacos_list_config_history,
-            commands::nacos_cmd::nacos_get_config_history,
-            commands::nacos_cmd::nacos_rollback_config,
-            commands::nacos_cmd::nacos_get_rnacos_console_captcha,
-            commands::nacos_cmd::nacos_login_rnacos_console,
-            commands::nacos_cmd::nacos_list_users,
-            commands::nacos_cmd::nacos_create_user,
-            commands::nacos_cmd::nacos_update_user,
-            commands::nacos_cmd::nacos_delete_user,
-            commands::nacos_cmd::nacos_list_role_bindings,
-            commands::nacos_cmd::nacos_assign_role,
-            commands::nacos_cmd::nacos_remove_role,
-            commands::nacos_cmd::nacos_access_snapshot,
-            commands::nacos_cmd::nacos_start_access_operation,
-            commands::nacos_cmd::nacos_get_access_operation,
-            commands::nacos_cmd::nacos_retry_access_operation,
-            commands::nacos_cmd::nacos_undo_access_operation,
-            commands::nacos_cmd::nacos_list_services,
-            commands::nacos_cmd::nacos_get_service,
-            commands::nacos_cmd::nacos_create_service,
-            commands::nacos_cmd::nacos_update_service,
-            commands::nacos_cmd::nacos_delete_service,
-            commands::nacos_cmd::nacos_list_instances,
-            commands::nacos_cmd::nacos_update_instance,
-            commands::nacos_cmd::nacos_register_instance,
-            commands::nacos_cmd::nacos_deregister_instance,
-            commands::nacos_cmd::nacos_get_dashboard,
-            commands::nacos_cmd::nacos_raw_request,
-            commands::nacos_cmd::nacos_search_config_content,
-            commands::nacos_cmd::nacos_cancel_operation,
-            commands::nacos_cmd::nacos_export_configs,
-            commands::nacos_cmd::nacos_preview_config_import,
-            commands::nacos_cmd::nacos_apply_config_import,
-            commands::nacos_cmd::nacos_preview_config_transfer,
-            commands::nacos_cmd::nacos_apply_config_transfer,
             commands::saved_sql::load_saved_sql_library,
             commands::saved_sql::load_saved_sql_files_for_sync,
             commands::saved_sql::load_saved_sql_file,
@@ -2309,272 +2122,101 @@ pub fn run() {
             commands::saved_sql::open_saved_sql_storage_dir,
             commands::saved_sql::sync_saved_sql_directory,
             commands::fs_open::reveal_path_in_file_manager,
-            commands::fs_open::is_sqlite_database_file,
             commands::fs_open::delete_database_backup_files,
             background_backup::database_backup_command,
             background_backup::database_backup_background,
-            commands::sqlite_backup::backup_sqlite_database,
-            commands::sqlite_backup::restore_sqlite_database,
-            commands::mongo_cmd::mongo_list_databases,
-            commands::mongo_cmd::mongo_list_collections,
-            commands::vector_cmd::vector_collection_detail,
-            commands::mongo_cmd::mongo_create_database,
-            commands::mongo_cmd::mongo_drop_database,
-            commands::mongo_cmd::mongo_drop_collection,
-            commands::vector_cmd::vector_drop_database,
-            commands::vector_cmd::vector_drop_collection,
-            commands::vector_cmd::vector_rename_collection,
-            commands::mongo_cmd::mongo_rename_collection,
-            commands::mongo_cmd::mongo_clone_collection,
             commands::docs::docs_collect_snapshot,
             commands::docs::docs_collect_snapshot_for_export,
             commands::docs::docs_load_annotations,
             commands::docs::docs_apply_annotations,
             commands::docs::docs_save_annotations,
             commands::docs::docs_export_html,
-            commands::document_cmd::document_list_databases,
-            commands::document_cmd::document_list_collections,
-            commands::document_cmd::document_find_documents,
-            commands::document_cmd::document_count_documents,
-            commands::document_cmd::dynamodb_describe_table,
-            commands::document_cmd::elasticsearch_count_documents,
-            commands::document_cmd::elasticsearch_get_index_metadata,
-            commands::document_cmd::elasticsearch_delete_all_documents,
-            commands::document_cmd::document_list_gridfs_buckets,
-            commands::document_cmd::document_create_gridfs_bucket,
-            commands::document_cmd::document_delete_gridfs_bucket,
-            commands::document_cmd::document_list_gridfs_files,
-            commands::document_cmd::document_download_gridfs_file,
-            commands::document_cmd::document_upload_gridfs_file,
-            commands::document_cmd::document_delete_gridfs_file,
-            commands::mongo_cmd::mongo_find_documents,
-            commands::mongo_cmd::mongo_parse_shell_command,
-            commands::mongo_cmd::mongo_find_one,
-            commands::mongo_cmd::mongo_explain_find,
-            commands::mongo_cmd::mongo_count_documents,
-            commands::mongo_cmd::mongo_server_version,
-            commands::mongo_cmd::mongo_collection_stats,
-            commands::mongo_cmd::mongo_aggregate_documents,
-            commands::mongo_cmd::mongo_distinct,
-            commands::mongo_cmd::mongo_list_index_specs,
-            commands::mongo_cmd::mongo_create_index,
-            commands::mongo_cmd::mongo_create_user,
-            commands::mongo_cmd::mongo_run_command,
-            commands::mongo_cmd::mongo_drop_indexes,
-            commands::document_cmd::document_insert_document,
-            commands::mongo_cmd::mongo_insert_document,
-            commands::mongo_cmd::mongo_insert_documents,
-            commands::document_cmd::document_update_document,
-            commands::mongo_cmd::mongo_update_document,
-            commands::mongo_cmd::mongo_update_documents,
-            commands::mongo_cmd::mongo_replace_document,
-            commands::mongo_cmd::mongo_bulk_write,
-            commands::document_cmd::document_delete_document,
-            commands::document_cmd::document_save_meilisearch_batch,
-            commands::document_cmd::meilisearch_search_documents,
-            commands::document_cmd::meilisearch_fetch_documents,
-            commands::document_cmd::meilisearch_get_document,
-            commands::document_cmd::meilisearch_get_index_settings,
-            commands::document_cmd::meilisearch_update_index_settings,
-            commands::document_cmd::meilisearch_get_index_stats,
-            commands::document_cmd::meilisearch_get_index_overview,
-            commands::document_cmd::meilisearch_create_index,
-            commands::document_cmd::meilisearch_delete_index,
-            commands::document_cmd::meilisearch_delete_all_documents,
-            commands::document_cmd::meilisearch_get_system_overview,
-            commands::document_cmd::meilisearch_list_keys,
-            commands::document_cmd::meilisearch_get_key,
-            commands::document_cmd::meilisearch_create_key,
-            commands::document_cmd::meilisearch_update_key,
-            commands::document_cmd::meilisearch_delete_key,
-            commands::document_cmd::meilisearch_get_tasks,
-            commands::document_cmd::meilisearch_get_task,
-            commands::document_cmd::meilisearch_cancel_tasks,
-            commands::document_cmd::meilisearch_delete_tasks,
-            commands::hbase_cmd::hbase_get_table_schema,
-            commands::hbase_cmd::hbase_scan_rows,
-            commands::hbase_cmd::hbase_get_row,
-            commands::hbase_cmd::hbase_put_row,
-            commands::hbase_cmd::hbase_delete_row,
-            commands::hbase_cmd::hbase_create_table,
-            commands::hbase_cmd::hbase_delete_table,
-            commands::mongo_cmd::mongo_delete_document,
-            commands::mongo_cmd::mongo_delete_documents,
-            commands::mongo_cmd::mongo_find_one_and_update,
-            commands::mongo_cmd::mongo_find_one_and_replace,
-            commands::mongo_cmd::mongo_find_one_and_delete,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_test_connection,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_list_tenants,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_get_tenant,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_create_tenant,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_update_tenant,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_delete_tenant,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_list_namespaces,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_create_namespace,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_delete_namespace,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_get_namespace_policies,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_list_topics,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_list_topics_page,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_create_topic,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_delete_topic,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_update_partitions,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_get_topic_stats,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_get_topic_internal_stats,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_list_exchanges,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_list_exchanges_page,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_create_exchange,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_delete_exchange,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_list_bindings,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_bind,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_unbind,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_list_subscriptions,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_enrich_subscriptions,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_get_kafka_consumer_group_snapshot,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_create_subscription,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_delete_subscription,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_skip_messages,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_reset_cursor,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_clear_backlog,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_get_consumer_group_config,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_alter_consumer_group_config,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_peek_messages,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_expire_messages,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_list_producers,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_list_consumers,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_unload_topic,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_list_client_connections,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_list_client_channels,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_close_client_connection,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_set_publish_rate,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_set_dispatch_rate,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_set_subscribe_rate,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_set_backlog_quota,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_set_retention,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_get_effective_policies,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_grant_permission,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_revoke_permission,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_list_permissions,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_list_users,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_create_user,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_delete_user,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_list_user_permissions,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_grant_user_permission,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_revoke_user_permission,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_list_policies,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_set_policy,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_delete_policy,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_get_overview,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_list_nodes,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_issue_token,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_list_token_records,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_get_backlog,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_get_cluster_info,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_get_topic_route,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_alter_topic_config,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_skip_topic_accumulation,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_view_message,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_query_messages_by_key,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_query_messages_by_topic,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_query_message_trace,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_raw_request,
             #[cfg(feature = "mq-admin")]
-            commands::mq_cmd::mq_send_message,
             #[cfg(feature = "mq-admin")]
-            commands::mqtt_cmd::mqtt_get_broker_info,
             #[cfg(feature = "mq-admin")]
-            commands::mqtt_cmd::mqtt_subscribe,
             #[cfg(feature = "mq-admin")]
-            commands::mqtt_cmd::mqtt_save_topic_config,
             #[cfg(feature = "mq-admin")]
-            commands::mqtt_cmd::mqtt_unsubscribe,
             #[cfg(feature = "mq-admin")]
-            commands::mqtt_cmd::mqtt_delete_topic_config,
             #[cfg(feature = "mq-admin")]
-            commands::mqtt_cmd::mqtt_publish,
             #[cfg(feature = "mq-admin")]
-            commands::mqtt_cmd::mqtt_list_topics,
             #[cfg(feature = "mq-admin")]
-            commands::mqtt_cmd::mqtt_list_saved_topic_configs,
             #[cfg(feature = "mq-admin")]
-            commands::mqtt_cmd::mqtt_get_topic_tree,
             #[cfg(feature = "mq-admin")]
-            commands::mqtt_cmd::mqtt_get_messages,
             #[cfg(feature = "mq-admin")]
-            commands::mqtt_cmd::mqtt_clear_messages,
             commands::history::save_history,
             commands::history::load_history,
             commands::history::search_history,
@@ -2584,10 +2226,6 @@ pub fn run() {
             commands::history::cleanup_mcp_history_retention,
             commands::history::delete_history_entry,
             commands::mcp::check_mcp_server_status,
-            commands::mcp::install_mcp_server,
-            commands::mcp::install_native_mcp_server,
-            commands::mcp::uninstall_mcp_server,
-            commands::mcp::uninstall_npm_mcp_server,
             commands::update::check_for_updates,
             commands::update::fetch_changelog,
             commands::update::get_system_proxy_url,
@@ -2618,31 +2256,6 @@ pub fn run() {
             commands::text_export::export_query_result_json,
             commands::text_export::export_query_result_markdown,
             commands::text_export::export_query_result_html,
-            commands::agents::list_installed_agents,
-            commands::agents::list_installed_agents_local,
-            commands::agents::is_agent_installed,
-            commands::agents::get_driver_store_usage,
-            commands::agents::clear_driver_download_cache,
-            commands::agents::get_driver_runtime_summary,
-            commands::agents::stop_driver_runtime,
-            commands::agents::restart_driver_runtime,
-            commands::agents::install_agent,
-            commands::agents::cancel_agent_install,
-            commands::agents::upgrade_all_agents,
-            commands::agents::cancel_agent_upgrade_all,
-            commands::agents::check_agent_update_blockers,
-            commands::agents::uninstall_agent,
-            commands::agents::check_jre_installed,
-            commands::agents::get_agent_java_runtime_config,
-            commands::agents::set_agent_java_runtime_config,
-            commands::agents::uninstall_jre,
-            commands::agents::reinstall_jre,
-            commands::agents::invalidate_agent_registry_cache,
-            commands::agents::import_agents_from_zip,
-            commands::agents::preview_agent_offline_export,
-            commands::agents::export_agents_offline,
-            commands::agents::import_agent_driver_cmd,
-            commands::agents::import_agent_jar_cmd,
             commands::system_fonts::list_system_fonts,
             commands::ssh_config::list_ssh_config_hosts,
             commands::ssh_keys::list_local_ssh_keys,
@@ -2688,10 +2301,7 @@ pub fn run() {
                         if let Some(backups) = app_handle.try_state::<background_backup::BackgroundBackup>() {
                             backups.shutdown().await;
                         }
-                        if let Some(server) = app_handle.try_state::<commands::redis_pubsub_server::PubSubServerState>()
-                        {
-                            server.shutdown(Duration::from_secs(1)).await;
-                        }
+                        {}
                         if let Some(state) = app_handle.try_state::<Arc<AppState>>() {
                             state.shutdown(Duration::from_secs(3)).await;
                         }

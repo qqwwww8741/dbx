@@ -1,7 +1,7 @@
 import { foldService, syntaxTree } from "@codemirror/language";
 import type { EditorState } from "@codemirror/state";
-import { elasticsearchRestRequestRanges } from "@/lib/sql/sqlStatementRanges";
-import { isElasticsearchCompatibleDatabaseType, isMeilisearchDatabaseType, isSolrDatabaseType, type DatabaseType } from "@/types/database";
+
+import { type DatabaseType } from "@/types/database";
 
 // `@lezer/common` is only a transitive dependency here (see sqlSyntaxTreeWindow.ts's comment on
 // the same pattern), so derive the node types structurally instead of importing them.
@@ -75,19 +75,6 @@ function gapIsWhitespaceOrComment(gap: string): boolean {
 // T-SQL transaction openers do not have a matching `END`, so they must not consume the closer
 // of an enclosing procedural `BEGIN...END` block. Match complete keyword tokens only: `TRAN` is
 // SQL Server's documented abbreviation, while similar identifiers such as `TRANS` remain blocks.
-const SQLSERVER_TRANSACTION_BEGIN_WORDS = new Set(["TRAN", "TRANSACTION"]);
-
-function isSqlServerTransactionBegin(state: EditorState, tokens: SyntaxNode[], index: number): boolean {
-  const next = tokens[index + 1];
-  if (!next || !gapIsWhitespaceOrComment(state.sliceDoc(tokens[index].to, next.from))) return false;
-
-  const nextText = state.sliceDoc(next.from, next.to).toUpperCase();
-  if (SQLSERVER_TRANSACTION_BEGIN_WORDS.has(nextText)) return true;
-  if (nextText !== "DISTRIBUTED") return false;
-
-  const transaction = tokens[index + 2];
-  return Boolean(transaction && gapIsWhitespaceOrComment(state.sliceDoc(next.to, transaction.from)) && state.sliceDoc(transaction.from, transaction.to).toUpperCase() === "TRANSACTION");
-}
 
 // Keyed by the `Tree` instance (not `Text`): the syntax tree is also invalidated when the SQL
 // dialect is reconfigured with the document unchanged (QueryEditor.vue's databaseType/dialect
@@ -96,10 +83,10 @@ function isSqlServerTransactionBegin(state: EditorState, tokens: SyntaxNode[], i
 // keep serving ranges computed from a stale or partial parse.
 const rangeCache = new WeakMap<Tree, Map<string, Map<number, FoldRange>>>();
 
-function addMultilineFoldRange(state: EditorState, ranges: Map<number, FoldRange>, openerPosition: number, endPosition: number, overwrite = false) {
+function addMultilineFoldRange(state: EditorState, ranges: Map<number, FoldRange>, openerPosition: number, endPosition: number, _overwrite = false) {
   const openerLine = state.doc.lineAt(openerPosition);
   const endLine = state.doc.lineAt(endPosition);
-  if (openerLine.number === endLine.number || endPosition <= openerLine.to || (!overwrite && ranges.has(openerLine.number))) return;
+  if (openerLine.number === endLine.number || endPosition <= openerLine.to) return;
   ranges.set(openerLine.number, { from: openerLine.to, to: endPosition });
 }
 
@@ -179,17 +166,6 @@ function addQueryStructureFoldRanges(state: EditorState, tree: Tree, ranges: Map
   }
 }
 
-function addRestRequestFoldRanges(state: EditorState, ranges: Map<number, FoldRange>, databaseType?: DatabaseType): boolean {
-  if (databaseType && !isElasticsearchCompatibleDatabaseType(databaseType) && !isMeilisearchDatabaseType(databaseType) && !isSolrDatabaseType(databaseType)) return false;
-  const requests = elasticsearchRestRequestRanges(state.doc.toString(), databaseType ?? "elasticsearch");
-  if (requests.length === 0) return false;
-
-  for (const request of requests) {
-    addMultilineFoldRange(state, ranges, request.from, request.to);
-  }
-  return true;
-}
-
 export function computeBlockFoldRanges(state: EditorState, databaseType?: DatabaseType, tree: Tree = syntaxTree(state)): Map<number, FoldRange> {
   const cacheByDatabaseType = rangeCache.get(tree);
   const cacheKey = databaseType ?? "auto-detect";
@@ -197,13 +173,6 @@ export function computeBlockFoldRanges(state: EditorState, databaseType?: Databa
   if (cached) return cached;
 
   const byOpenerLine = new Map<number, FoldRange>();
-  const isRestDocument = addRestRequestFoldRanges(state, byOpenerLine, databaseType);
-  if (isRestDocument) {
-    const nextCacheByDatabaseType = cacheByDatabaseType ?? new Map<string, Map<number, FoldRange>>();
-    nextCacheByDatabaseType.set(cacheKey, byOpenerLine);
-    rangeCache.set(tree, nextCacheByDatabaseType);
-    return byOpenerLine;
-  }
 
   const tokens: SyntaxNode[] = [];
   tree.iterate({
@@ -235,7 +204,7 @@ export function computeBlockFoldRanges(state: EditorState, databaseType?: Databa
           addMultilineFoldRange(state, byOpenerLine, opener.from, token.from, true);
         }
       }
-    } else if (BLOCK_OPENERS.has(text) && (text !== "BEGIN" || !isSqlServerTransactionBegin(state, tokens, i))) {
+    } else if (BLOCK_OPENERS.has(text)) {
       stack.push(token);
     }
   }

@@ -1,14 +1,10 @@
 import type { DatabaseType } from "@/types/database";
-import { supportsOracleDatabaseLinks, type OracleDatabaseLink } from "@/lib/database/oracleDatabaseLinks";
-import { isSqlCompletionSuppressedContext } from "@/lib/sql/sqlCompletion";
+import { type OracleDatabaseLink } from "@/lib/database/oracleDatabaseLinks";
 
-export function oracleDatabaseLinkCompletionContext(sql: string, cursor: number, databaseType?: DatabaseType) {
-  if (!supportsOracleDatabaseLinks(databaseType) || isSqlCompletionSuppressedContext(sql, cursor, { databaseType })) return null;
-  const before = sql.slice(0, cursor);
-  const match = /(?:[A-Za-z0-9_$#]|"(?:[^"]|"")+"|\))@([A-Za-z0-9_$#.]*)$/.exec(before);
-  if (!match) return null;
-  const prefix = match[1];
-  return { prefix, from: cursor - prefix.length, to: cursor + (/^[A-Za-z0-9_$#.]*/.exec(sql.slice(cursor))?.[0].length ?? 0) };
+export function oracleDatabaseLinkCompletionContext(_sql: string, _cursor: number, _databaseType?: DatabaseType) {
+  {
+    return null;
+  }
 }
 
 export function oracleDatabaseLinkCompletionItems(links: readonly OracleDatabaseLink[], prefix: string) {

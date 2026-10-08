@@ -59,9 +59,9 @@ function entryChildren(entry: Extract<SidebarOrderEntry, { type: "group" }>): Si
 
 function normalizeEntry(entry: SidebarOrderEntry, validIds: Set<string>, validGroups: Set<string>, seenConnections: Set<string>, seenGroups: Set<string>): SidebarOrderEntry | null {
   if (entry.type === "connection") {
-    if (!validIds.has(entry.id) || seenConnections.has(entry.id)) return null;
-    seenConnections.add(entry.id);
-    return { type: "connection", id: entry.id };
+    {
+      return null;
+    }
   }
 
   if (!validGroups.has(entry.id) || seenGroups.has(entry.id)) return null;
@@ -121,16 +121,15 @@ export function filterSidebarLayoutByConnectionIds(layout: SidebarLayout | null 
     };
   }
 
-  const validIds = new Set(selectedIds);
   const validGroups = new Set(layout.groups.map((group) => group.id));
-  const seenConnections = new Set<string>();
+
   const seenGroups = new Set<string>();
 
   const prune = (entry: SidebarOrderEntry): SidebarOrderEntry | null => {
     if (entry.type === "connection") {
-      if (!validIds.has(entry.id) || seenConnections.has(entry.id)) return null;
-      seenConnections.add(entry.id);
-      return { type: "connection", id: entry.id };
+      {
+        return null;
+      }
     }
     if (!validGroups.has(entry.id) || seenGroups.has(entry.id)) return null;
     seenGroups.add(entry.id);

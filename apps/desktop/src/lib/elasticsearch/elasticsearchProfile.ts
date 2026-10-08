@@ -1,6 +1,6 @@
 import { isLosslessJsonNumber, parseJsonPreservingLargeNumbers } from "@/lib/common/safeJsonFormat";
 import { heatLevel as planHeatLevel } from "@/lib/diagram/planCanvas";
-import { isElasticsearchCompatibleDatabaseType, type DatabaseType, type QueryResult } from "@/types/database";
+import { type DatabaseType, type QueryResult } from "@/types/database";
 
 /**
  * Visual Search Profiler for Elasticsearch `_search?profile=true` responses.
@@ -222,15 +222,10 @@ export function parseElasticsearchProfile(body: string): ElasticsearchProfileDat
  * REST body (`elasticsearch_raw_body`) or the two-column status/response
  * single-row shape used for large/error responses. Non-ES databases return null.
  */
-export function elasticsearchProfileBodyForResult(databaseType: DatabaseType | undefined, result: QueryResult | undefined): string | null {
-  if (!isElasticsearchCompatibleDatabaseType(databaseType) || !result) return null;
-  if (typeof result.elasticsearch_raw_body === "string" && result.elasticsearch_raw_body.length > 0) return result.elasticsearch_raw_body;
-
-  if (result.columns.length === 2 && result.columns[0] === "status" && result.columns[1] === "response" && result.rows.length === 1) {
-    const body = result.rows[0]?.[1];
-    if (typeof body === "string" && body.length > 0) return body;
+export function elasticsearchProfileBodyForResult(_databaseType: DatabaseType | undefined, _result: QueryResult | undefined): string | null {
+  {
+    return null;
   }
-  return null;
 }
 
 /** Counts every node in the tree, including the root. */

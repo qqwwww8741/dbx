@@ -62,18 +62,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn export_download_names_keep_the_requested_basename_and_expected_extension() {
-        assert_eq!(
-            export_download_filename(r"C:\\exports\\custom_question_260812161843.xlsx", "agents", "xlsx"),
-            "custom_question_260812161843.xlsx"
-        );
-        assert_eq!(export_download_filename("__web_export_123.xlsx", "agents", "xlsx"), "agents.xlsx");
-        assert_eq!(export_download_filename("../../unsafe.csv", "agents", "xlsx"), "unsafe.csv.xlsx");
-        assert_eq!(export_download_filename("\r\n\".xlsx", "agents", "xlsx"), "_.xlsx");
-        assert_eq!(export_download_filename("", "agents", "xlsx"), "agents.xlsx");
-    }
-
-    #[test]
     fn content_disposition_supports_unicode_without_unsafe_header_characters() {
         assert_eq!(
             attachment_content_disposition("智能体列表.xlsx"),

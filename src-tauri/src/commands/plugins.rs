@@ -5,10 +5,6 @@ use base64::Engine;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
-use dbx_core::agent_service::AgentProgressEvent;
-use dbx_core::jdbc::{
-    self, JdbcDriverInfo, JdbcLocalBundleInfo, JdbcMavenBundleInfo, JdbcMavenInstallRequest, JdbcPluginStatus,
-};
 use dbx_core::models::connection::ConnectionConfig;
 use dbx_core::plugins::{
     ActivePluginSession, InstalledPlugin, InstalledPluginInfo, PluginConnectionActionResult,
@@ -263,10 +259,7 @@ pub async fn uninstall_plugin(
         .load_connections()
         .await?
         .into_iter()
-        .filter(|connection| {
-            connection.db_type == dbx_core::models::connection::DatabaseType::Plugin
-                && connection.plugin_id.as_deref() == Some(plugin_id.as_str())
-        })
+        .filter(|connection| false)
         .map(|connection| connection.name)
         .collect::<Vec<_>>();
     if !dependent_connections.is_empty() {
@@ -277,9 +270,7 @@ pub async fn uninstall_plugin(
     }
     let plugin = state.plugins.find_plugin(&plugin_id)?;
     state.remove_plugin_connection_pools(&plugin_id).await;
-    if let Some(plugin) = &plugin {
-        stop_external_driver_pools(&state, plugin).await;
-    }
+
     // Stops the runtime and uninstalls the store under one lifecycle update lease, so a plugin
     // call cannot re-activate the sidecar (and re-lock its container) in between.
     state.plugin_host.uninstall_plugin(&plugin_id).await?;
@@ -535,132 +526,6 @@ fn emit_plugin_runtime_replaced(app: &AppHandle, plugin: &InstalledPlugin) {
 
 async fn stop_replaced_plugin_runtime(state: &Arc<AppState>, plugin: &InstalledPlugin) -> Result<(), String> {
     state.remove_plugin_connection_pools(&plugin.manifest.id).await;
-    stop_external_driver_pools(state, plugin).await;
+
     state.plugin_host.stop(&plugin.manifest.id).await
-}
-
-async fn stop_external_driver_pools(state: &Arc<AppState>, plugin: &InstalledPlugin) {
-    for driver in &plugin.manifest.drivers {
-        let driver_id = driver.database_type.as_deref().unwrap_or(&driver.id);
-        state.remove_external_driver_pools(driver_id).await;
-    }
-}
-
-#[tauri::command]
-pub async fn jdbc_plugin_status(state: State<'_, Arc<AppState>>) -> Result<JdbcPluginStatus, String> {
-    jdbc::get_jdbc_plugin_status(state.plugins.root_dir()).await
-}
-
-#[tauri::command]
-pub async fn install_jdbc_plugin(
-    app: tauri::AppHandle,
-    state: State<'_, Arc<AppState>>,
-) -> Result<JdbcPluginStatus, String> {
-    let app_handle = app.clone();
-    state.remove_external_driver_pools("jdbc").await;
-    jdbc::install_jdbc_plugin_with_progress(state.plugins.root_dir(), move |event| {
-        emit_agent_progress(&app_handle, event);
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn install_jdbc_plugin_local(
-    state: State<'_, Arc<AppState>>,
-    path: String,
-) -> Result<JdbcPluginStatus, String> {
-    state.remove_external_driver_pools("jdbc").await;
-    jdbc::install_jdbc_plugin_from_file(state.plugins.root_dir(), &path).await
-}
-
-#[tauri::command]
-pub async fn uninstall_jdbc_plugin(state: State<'_, Arc<AppState>>) -> Result<JdbcPluginStatus, String> {
-    state.remove_external_driver_pools("jdbc").await;
-    let root_dir = state.plugins.root_dir().to_path_buf();
-    tauri::async_runtime::spawn_blocking(move || jdbc::uninstall_jdbc_plugin(&root_dir))
-        .await
-        .map_err(|err| err.to_string())?
-}
-
-#[tauri::command]
-pub async fn list_jdbc_drivers(state: State<'_, Arc<AppState>>) -> Result<Vec<JdbcDriverInfo>, String> {
-    let root_dir = state.plugins.root_dir().to_path_buf();
-    tauri::async_runtime::spawn_blocking(move || jdbc::list_jdbc_drivers(&root_dir))
-        .await
-        .map_err(|err| err.to_string())?
-}
-
-#[tauri::command]
-pub async fn list_jdbc_maven_bundles(state: State<'_, Arc<AppState>>) -> Result<Vec<JdbcMavenBundleInfo>, String> {
-    let root_dir = state.plugins.root_dir().to_path_buf();
-    tauri::async_runtime::spawn_blocking(move || jdbc::list_jdbc_maven_bundles(&root_dir))
-        .await
-        .map_err(|err| err.to_string())?
-}
-
-#[tauri::command]
-pub async fn list_jdbc_local_bundles(state: State<'_, Arc<AppState>>) -> Result<Vec<JdbcLocalBundleInfo>, String> {
-    let root_dir = state.plugins.root_dir().to_path_buf();
-    tauri::async_runtime::spawn_blocking(move || jdbc::list_jdbc_local_bundles(&root_dir))
-        .await
-        .map_err(|err| err.to_string())?
-}
-
-#[tauri::command]
-pub async fn install_jdbc_driver_from_maven(
-    state: State<'_, Arc<AppState>>,
-    request: JdbcMavenInstallRequest,
-) -> Result<Vec<JdbcDriverInfo>, String> {
-    let env = state.external_driver_runtime_env("jdbc")?;
-    jdbc::install_jdbc_driver_from_maven(state.plugins.root_dir(), request, env).await
-}
-
-#[tauri::command]
-pub async fn install_prestosql_jdbc_driver(state: State<'_, Arc<AppState>>) -> Result<Vec<JdbcDriverInfo>, String> {
-    jdbc::install_prestosql_jdbc_driver(state.plugins.root_dir()).await
-}
-
-#[tauri::command]
-pub async fn import_jdbc_drivers(
-    state: State<'_, Arc<AppState>>,
-    paths: Vec<String>,
-) -> Result<Vec<JdbcDriverInfo>, String> {
-    let root_dir = state.plugins.root_dir().to_path_buf();
-    tauri::async_runtime::spawn_blocking(move || jdbc::import_jdbc_drivers(&root_dir, &paths))
-        .await
-        .map_err(|err| err.to_string())?
-}
-
-#[tauri::command]
-pub async fn delete_jdbc_driver(state: State<'_, Arc<AppState>>, path: String) -> Result<Vec<JdbcDriverInfo>, String> {
-    let root_dir = state.plugins.root_dir().to_path_buf();
-    tauri::async_runtime::spawn_blocking(move || jdbc::delete_jdbc_driver(&root_dir, &path))
-        .await
-        .map_err(|err| err.to_string())?
-}
-
-#[tauri::command]
-pub async fn delete_jdbc_maven_bundle(
-    state: State<'_, Arc<AppState>>,
-    bundle_id: String,
-) -> Result<Vec<JdbcDriverInfo>, String> {
-    let root_dir = state.plugins.root_dir().to_path_buf();
-    tauri::async_runtime::spawn_blocking(move || jdbc::delete_jdbc_maven_bundle(&root_dir, &bundle_id))
-        .await
-        .map_err(|err| err.to_string())?
-}
-
-#[tauri::command]
-pub async fn delete_jdbc_local_bundle(
-    state: State<'_, Arc<AppState>>,
-    bundle_id: String,
-) -> Result<Vec<JdbcDriverInfo>, String> {
-    let root_dir = state.plugins.root_dir().to_path_buf();
-    tauri::async_runtime::spawn_blocking(move || jdbc::delete_jdbc_local_bundle(&root_dir, &bundle_id))
-        .await
-        .map_err(|err| err.to_string())?
-}
-
-fn emit_agent_progress(app: &tauri::AppHandle, event: AgentProgressEvent) {
-    let _ = app.emit("agent-install-progress", event);
 }

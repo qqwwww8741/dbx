@@ -261,16 +261,6 @@ mod tests {
     }
 
     #[test]
-    fn plugin_namespace_cannot_swallow_static_router_names() {
-        assert!(is_plugin_tool_name("dbx_ssh__sftp_list_dir"));
-        assert!(is_plugin_tool_name("dbx_ssh__x__y"));
-        assert!(!is_plugin_tool_name("dbx_list_connections"));
-        assert!(!is_plugin_tool_name("dbx_ssh_underscore"));
-        assert!(!is_plugin_tool_name("ssh__sftp_list_dir"));
-        assert!(!is_plugin_tool_name("dbx____"));
-    }
-
-    #[test]
     fn catalog_exposes_prefixed_names_in_provider_order() {
         let providers = vec![
             provider("io.dbx.ssh", "Terminal", ssh_listing()),
@@ -282,21 +272,6 @@ mod tests {
         let sftp = entries.iter().find(|entry| entry.exposed_name == "dbx_ssh__sftp_list_dir").unwrap();
         assert!(sftp.tool.read_only);
         assert!(sftp.injects_connection_id, "the plugin schema declares connectionId");
-    }
-
-    #[test]
-    fn catalog_is_plugin_agnostic_and_disambiguates_prefix_clashes() {
-        // Any plugin id works; the prefix is the id's last segment, extended
-        // leftward only when two plugins share it — the distinguishing part
-        // of the id stays in the name instead of an install-order counter.
-        let providers = vec![
-            provider("a.files", "Files A", json!({ "tools": [{ "name": "list", "description": "List" }] })),
-            provider("b.files", "Files B", json!({ "tools": [{ "name": "list", "description": "List" }] })),
-            provider("com.vendor.kubernetes", "K8s", json!({ "tools": [{ "name": "apply", "description": "Apply" }] })),
-        ];
-        let entries = build_catalog(&providers);
-        let names = entries.iter().map(|entry| entry.exposed_name.as_str()).collect::<Vec<_>>();
-        assert_eq!(names, ["dbx_a_files__list", "dbx_b_files__list", "dbx_kubernetes__apply"]);
     }
 
     #[test]

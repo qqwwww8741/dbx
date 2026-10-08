@@ -16,10 +16,10 @@ export function transferStrategyOptions(strategy: TransferStrategy): Pick<Transf
   return { mode: strategy === "rebuild" ? "append" : strategy, dropTargetBeforeCreate: strategy === "rebuild" };
 }
 
-const REBUILD_TARGET_TYPES = new Set<DatabaseType>(["mysql", "postgres", "sqlserver", "kingbase", "gaussdb", "opengauss", "kwdb", "goldendb", "sqlite", "duckdb", "cloudflare-d1"]);
+const REBUILD_TARGET_TYPES = new Set<DatabaseType>(["mysql"]);
 
-export function supportsTransferUpsert(targetType: DatabaseType | undefined): boolean {
-  return targetType !== "db2" && targetType !== "iris";
+export function supportsTransferUpsert(_targetType: DatabaseType | undefined): boolean {
+  return true;
 }
 
 export function rebuildUnavailableReason(content: TransferContent, targetType: DatabaseType | undefined): "dataOnly" | "unsupported" | undefined {

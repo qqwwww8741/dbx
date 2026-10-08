@@ -9,6 +9,10 @@ use rmcp::ServiceExt;
 mod credentials;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::args_os().nth(1).is_some_and(|argument| argument == "--mysql-version") {
+        println!("dbx-mcp-mysql {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
     if std::env::args_os().nth(1).is_some_and(|argument| argument == "--version") {
         println!("dbx-mcp {}", env!("CARGO_PKG_VERSION"));
         return Ok(());

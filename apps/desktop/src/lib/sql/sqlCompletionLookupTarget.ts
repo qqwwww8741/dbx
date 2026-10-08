@@ -1,5 +1,5 @@
 import type { SqlCompletionContext, SqlCompletionItem } from "@/lib/sql/sqlCompletion";
-import { currentExecutableStatementRange, executableStatementRanges } from "@/lib/sql/sqlStatementRanges";
+
 import type { DatabaseType } from "@/types/database";
 
 export interface SqlCompletionTableLookupTarget {
@@ -46,21 +46,13 @@ function sqlStatementWithoutLeadingComments(statement: string): string {
   return remaining;
 }
 
-export function sqlServerUseDatabaseFromStatement(statement: string): string | undefined {
-  const match = /^USE\s+(?:\[((?:[^\]]|\]\])*)\]|"((?:[^"]|"")*)"|([\p{L}_@#][\p{L}\p{N}_@$#]*))\s*;?\s*$/iu.exec(sqlStatementWithoutLeadingComments(statement));
-  if (!match) return undefined;
-  if (match[1] !== undefined) return match[1].replaceAll("]]", "]");
-  if (match[2] !== undefined) return match[2].replaceAll('""', '"');
-  return match[3];
-}
-
 /**
  * 方言里 `USE <db>` 会把会话切到另一个库，DBX 的标签库名应当跟着走（#9941）。
  *
  * 只列出已经确认过这一语义的方言：MySQL 及其 wire-protocol 家族。SQL Server 由
  * `sqlServerUseDatabaseFromStatement` 单独处理（它还接受 `[db]` 括号标识符）。
  */
-const USE_DATABASE_SWITCH_DIALECTS: ReadonlySet<DatabaseType> = new Set<DatabaseType>(["mysql", "doris", "starrocks", "goldendb", "gbase"]);
+const USE_DATABASE_SWITCH_DIALECTS: ReadonlySet<DatabaseType> = new Set<DatabaseType>(["mysql"]);
 
 export function switchesDatabaseWithUseStatement(databaseType: DatabaseType | null | undefined): boolean {
   return !!databaseType && USE_DATABASE_SWITCH_DIALECTS.has(databaseType);
@@ -71,23 +63,13 @@ export function switchesDatabaseWithUseStatement(databaseType: DatabaseType | nu
  * 标识符）。不是 USE 语句、或该方言的 USE 不改库时返回 undefined。
  */
 export function useDatabaseFromStatement(statement: string, databaseType?: DatabaseType): string | undefined {
-  if (databaseType === "sqlserver") return sqlServerUseDatabaseFromStatement(statement);
+  {}
   if (!switchesDatabaseWithUseStatement(databaseType)) return undefined;
   const match = /^USE\s+(?:`((?:[^`]|``)*)`|"((?:[^"]|"")*)"|([\p{L}_$][\p{L}\p{N}_$]*))\s*;?\s*$/iu.exec(sqlStatementWithoutLeadingComments(statement));
   if (!match) return undefined;
   if (match[1] !== undefined) return match[1].replaceAll("``", "`");
   if (match[2] !== undefined) return match[2].replaceAll('""', '"');
   return match[3];
-}
-
-export function sqlServerUseDatabaseBeforeCursor(sql: string, cursor: number): string | undefined {
-  const position = Math.max(0, Math.min(cursor, sql.length));
-  let database: string | undefined;
-  for (const statement of executableStatementRanges(sql, "sqlserver")) {
-    if (statement.from >= position || statement.to >= position) break;
-    database = sqlServerUseDatabaseFromStatement(statement.sql) ?? database;
-  }
-  return database;
 }
 
 export interface SqlServerLeadingUseScript {
@@ -97,83 +79,10 @@ export interface SqlServerLeadingUseScript {
   database: string;
 }
 
-export function sqlServerLeadingUseScript(sql: string): SqlServerLeadingUseScript | undefined {
-  const statements = executableStatementRanges(sql, "sqlserver");
-  if (statements.length < 2) return undefined;
-  const query = statements[statements.length - 1]!;
-  let database: string | undefined;
-  for (const statement of statements.slice(0, -1)) {
-    database = sqlServerUseDatabaseFromStatement(statement.sql);
-    if (!database) return undefined;
+export function resolveSqlServerUseDatabaseCompletion(_options: { sql: string; cursor: number; databaseType?: DatabaseType }): SqlServerUseDatabaseCompletion | undefined {
+  {
+    return undefined;
   }
-  return {
-    querySql: query.sql,
-    queryFrom: query.from,
-    queryTo: query.to,
-    database: database!,
-  };
-}
-
-export function replaceSqlServerLeadingUseQuery(sql: string, script: SqlServerLeadingUseScript, querySql: string): string {
-  const suffix = sql.slice(script.queryTo);
-  const replacement = /^\s*;/u.test(suffix) ? querySql.replace(/;\s*$/u, "") : querySql;
-  return `${sql.slice(0, script.queryFrom)}${replacement}${suffix}`;
-}
-
-function unclosedQuotedIdentifierPrefix(value: string, quoteStyle: "bracket" | "double"): string | undefined {
-  const closingQuote = quoteStyle === "bracket" ? "]" : '"';
-  let prefix = "";
-  for (let index = 1; index < value.length; index += 1) {
-    const character = value[index]!;
-    if (character !== closingQuote) {
-      prefix += character;
-      continue;
-    }
-    if (value[index + 1] !== closingQuote) return undefined;
-    prefix += closingQuote;
-    index += 1;
-  }
-  return prefix;
-}
-
-export function resolveSqlServerUseDatabaseCompletion(options: { sql: string; cursor: number; databaseType?: DatabaseType }): SqlServerUseDatabaseCompletion | undefined {
-  if (options.databaseType !== "sqlserver") return undefined;
-  const position = Math.max(0, Math.min(options.cursor, options.sql.length));
-  const statement = currentExecutableStatementRange(options.sql, position, "sqlserver");
-  if (!statement || (statement.to > position && options.sql.slice(position, statement.to).trim())) return undefined;
-
-  const beforeCursor = options.sql.slice(statement.from, position);
-  const useMatch = /^USE(?=\s)/iu.exec(beforeCursor);
-  if (!useMatch) return undefined;
-
-  let targetOffset = useMatch[0].length;
-  while (targetOffset < beforeCursor.length && /\s/u.test(beforeCursor[targetOffset]!)) targetOffset += 1;
-
-  const target = beforeCursor.slice(targetOffset);
-  if (!target) {
-    return {
-      from: statement.from + targetOffset,
-      prefix: "",
-      quoteStyle: "none",
-    };
-  }
-  if (/^[\p{L}_@#][\p{L}\p{N}_@$#]*$/u.test(target)) {
-    return {
-      from: statement.from + targetOffset,
-      prefix: target,
-      quoteStyle: "none",
-    };
-  }
-
-  const quoteStyle = target[0] === "[" ? "bracket" : target[0] === '"' ? "double" : undefined;
-  if (!quoteStyle) return undefined;
-  const prefix = unclosedQuotedIdentifierPrefix(target, quoteStyle);
-  if (prefix === undefined) return undefined;
-  return {
-    from: statement.from + targetOffset + 1,
-    prefix,
-    quoteStyle,
-  };
 }
 
 export function buildSqlServerUseDatabaseCompletionItems(databaseNames: readonly string[], completion: SqlServerUseDatabaseCompletion): SqlCompletionItem[] {
@@ -191,12 +100,6 @@ export function buildSqlServerUseDatabaseCompletionItems(databaseNames: readonly
   });
 }
 
-export function sqlServerUseCompletionDatabaseNames(options: { databaseNames: readonly string[]; currentDatabase: string; supportsSessionDatabaseSwitch: boolean }): string[] {
-  if (options.supportsSessionDatabaseSwitch) return [...options.databaseNames];
-  const currentDatabase = options.currentDatabase.trim();
-  return currentDatabase ? [findExactName(options.databaseNames, currentDatabase) ?? currentDatabase] : [];
-}
-
 export function resolveSqlCompletionScope(options: {
   sql: string;
   cursor: number;
@@ -208,42 +111,13 @@ export function resolveSqlCompletionScope(options: {
   useDatabaseDefaultSchema?: string;
   completionContext: SqlCompletionContext;
 }): SqlCompletionScope {
-  if (options.databaseType !== "sqlserver") {
+  {
     return {
       database: options.currentDatabase,
       schema: options.currentSchema,
       completionContext: options.completionContext,
     };
   }
-  const parsedDatabase = sqlServerUseDatabaseBeforeCursor(options.sql, options.cursor);
-  const database = parsedDatabase ? findExactName(options.knownDatabases, parsedDatabase) : undefined;
-  const targetsCurrentDatabase = database?.toLowerCase() === options.currentDatabase.toLowerCase();
-  const schema = options.useDatabaseDefaultSchema?.trim();
-  if (!database || !schema || (!targetsCurrentDatabase && options.supportsSessionDatabaseSwitch !== true)) {
-    return {
-      database: options.currentDatabase,
-      schema: options.currentSchema,
-      completionContext: options.completionContext,
-    };
-  }
-  return {
-    database,
-    schema,
-    completionContext: {
-      ...options.completionContext,
-      insertDatabase: options.completionContext.insertTable && !options.completionContext.insertDatabase ? database : options.completionContext.insertDatabase,
-      insertSchema: options.completionContext.insertTable && !options.completionContext.insertSchema ? schema : options.completionContext.insertSchema,
-      referencedTables: options.completionContext.referencedTables.map((table) =>
-        table.database
-          ? table
-          : {
-              ...table,
-              database,
-              schema: table.schema ?? schema,
-            },
-      ),
-    },
-  };
 }
 
 function findExactName(names: readonly string[] | undefined, value: string): string | undefined {
@@ -288,7 +162,7 @@ export function resolveSqlCompletionTableLookupTarget(options: {
   if (options.supportsDatabaseSchemaQualifier && completionContext.suggestTables && !completionContext.insertTable && qualifierParts.length >= 2) {
     const databaseQualifier = qualifierParts[qualifierParts.length - 2]!;
     const schema = qualifierParts[qualifierParts.length - 1]!;
-    const database = (options.databaseType === "snowflake" ? findCaseSensitiveName(options.knownDatabases, databaseQualifier) : findExactName(options.knownDatabases, databaseQualifier)) ?? databaseQualifier;
+    const database = findExactName(options.knownDatabases, databaseQualifier) ?? databaseQualifier;
     return {
       database,
       schema,

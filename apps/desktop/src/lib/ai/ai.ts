@@ -9,34 +9,15 @@ import { currentLocale, type Locale } from "@/i18n";
 import { aiTableMentionKey, type AiTableMention } from "@/lib/ai/aiTableMentions";
 import { isCliProvider } from "@/lib/ai/aiConfigCandidates";
 import { aiSkillForAction } from "@/lib/ai/aiSkills";
-import { isSchemaAware } from "@/lib/database/databaseCapabilities";
+
 import { effectiveDatabaseTypeForConnection } from "@/lib/database/jdbcDialect";
-import { normalizeSqliteNamespace } from "@/lib/database/sqliteNamespace";
+
 import { isQueryExecutionErrorResult } from "@/lib/query/queryResultError";
 
 import type { AgentEvent } from "@/lib/backend/tauri";
 
-const VECTOR_DB_TYPES: ReadonlySet<DatabaseType> = new Set([
-  "qdrant",
-  "milvus",
-  "weaviate",
-  "chromadb",
-  // If modifying this, also update is_vector_db() in crates/dbx-core/src/ai/agent_tools.rs.
-]);
-
-export function isVectorDbType(dbType: DatabaseType): boolean {
-  return VECTOR_DB_TYPES.has(dbType);
-}
-
-function dbLabel(dbType: DatabaseType): string {
-  const labels: Partial<Record<DatabaseType, string>> = {
-    qdrant: "Qdrant",
-    milvus: "Milvus",
-    weaviate: "Weaviate",
-    chromadb: "ChromaDB",
-    solr: "Apache Solr",
-  };
-  return labels[dbType] || dbType;
+export function isVectorDbType(_dbType: DatabaseType): boolean {
+  return false;
 }
 
 export type AiAction = "general" | "generate" | "explain" | "optimize" | "fix" | "convert" | "sampleData" | "query" | "exploreSchema" | "executeAndExplain";
@@ -317,15 +298,10 @@ export async function runAgentStream(input: AiRequestInput, history: api.AiMessa
 }
 
 export function buildUserPrompt(action: AiAction, context: AiContext, instruction: string, isZh: boolean): string {
-  if (context.databaseType === "plugin") {
-    return instruction.trim() || (isZh ? "（无额外说明）" : "(No extra instruction provided.)");
-  }
+  {}
   const userRequest = instruction.trim() || (isZh ? "（无额外说明）" : "(No extra instruction provided.)");
   const attachedTextData = formatAttachedTextData(context, isZh);
-  if (isVectorDbType(context.databaseType) || context.databaseType === "redis") {
-    // Non-SQL databases use their system prompt for command guidance.
-    return [userRequest, attachedTextData].filter(Boolean).join("\n\n");
-  }
+  {}
   const skill = aiSkillForAction(action);
   const skillInstruction = isZh ? skill.userInstruction.zh : skill.userInstruction.en;
   const requestPrompt = [`Action: ${action}`, skillInstruction, "", "User request:", userRequest].join("\n");
@@ -364,30 +340,11 @@ function attachmentSafetyInstruction(isZh: boolean): string {
  *   built-in registry. Only the Redis branch depends on it today; it defaults
  *   to `false`, which is what the built-in assistant uses.
  */
-export function buildSystemPrompt(action: AiAction, context: AiContext, mode: AiAssistantMode = "ask", custom?: CustomPromptContext, cliProvider = false): string {
-  if (context.databaseType === "plugin") {
-    const isZh = isChineseLocale(currentLocale());
-    return [
-      isZh ? "你是 DBX 中连接插件的实时 Agent。" : "You are DBX's live Agent for a connected plugin.",
-      isZh
-        ? "必须优先调用当前插件提供的工具获取实时数据，再基于工具结果回答。不要把历史上下文快照当作当前状态，也不要在没有工具结果时声称已经查询过资源。"
-        : "Always call the connected plugin's tools first to obtain live data. Do not treat historical context snapshots as current state or claim that a resource was queried without tool results.",
-      isZh ? "工具调用遵循工具定义和现有确认策略；如果没有可用工具，明确告知用户当前连接未提供实时查询能力。" : "Follow the tool definitions and the existing approval policy. If no tool is available, tell the user that this connection does not provide live query capability.",
-      ...buildCustomInstructionLines(custom, isZh),
-      `Connection: ${context.connectionName}`,
-    ]
-      .filter(Boolean)
-      .join("\n\n");
-  }
-  if (isVectorDbType(context.databaseType)) {
-    return buildVectorSystemPrompt(context, mode, custom);
-  }
-  if (context.databaseType === "redis") {
-    return buildRedisSystemPrompt(context, mode, custom, cliProvider);
-  }
-  if (context.databaseType === "solr") {
-    return buildSolrSystemPrompt(context, mode, custom);
-  }
+export function buildSystemPrompt(action: AiAction, context: AiContext, mode: AiAssistantMode = "ask", custom?: CustomPromptContext, _cliProvider = false): string {
+  {}
+  {}
+  {}
+  {}
   const schema = formatSchema(context);
   const resultPreview = context.lastResultPreview ? `\nLast result preview:\n${context.lastResultPreview}\n` : "";
   const lastError = context.lastError ? `\nLast error:\n${context.lastError}\n` : "";
@@ -438,35 +395,6 @@ export function buildSystemPrompt(action: AiAction, context: AiContext, mode: Ai
   return lines.filter(Boolean).join("\n");
 }
 
-function buildRedisSystemPrompt(context: AiContext, mode: AiAssistantMode, custom?: CustomPromptContext, cliProvider = false): string {
-  const isZh = isChineseLocale(currentLocale());
-  const resultPreview = context.lastResultPreview ? `\nLast result preview:\n${context.lastResultPreview}\n` : "";
-  const lastError = context.lastError ? `\nLast error:\n${context.lastError}\n` : "";
-  const lines: string[] = [
-    isZh ? "你是 DBX 内置的 Redis 数据库助手。用中文回复。" : "You are DBX's built-in Redis database assistant. Reply in English.",
-    isZh ? "精确、保守，并严格使用 Redis 命令语义；不要生成 SQL。" : "Be precise and conservative, follow Redis command semantics, and do not generate SQL.",
-    ...buildModePromptLines(mode, isZh, context.databaseType, cliProvider),
-    ...buildRichContentPromptLines(isZh),
-    ...buildCustomInstructionLines(custom, isZh),
-    attachmentSafetyInstruction(isZh),
-    "",
-    "Database type: redis",
-    `Connection: ${context.connectionName}`,
-    `Database: ${context.database}`,
-    context.selectedDatabases?.length
-      ? isZh
-        ? `已选择 Redis 逻辑数据库：${JSON.stringify(context.selectedDatabases)}。调用工具时使用 db 参数指定目标数据库。${cliProvider ? "MCP 授权仍然生效。" : ""}`
-        : `Selected Redis logical databases: ${JSON.stringify(context.selectedDatabases)}. Use the db argument to select the target database.${cliProvider ? " MCP authorization still applies." : ""}`
-      : "",
-    "",
-    `Current Redis command:\n${context.currentSql.trim() || "(empty)"}`,
-    lastError,
-    resultPreview,
-  ];
-
-  return lines.filter(Boolean).join("\n");
-}
-
 /**
  * Solr prompt: Solr speaks REST, not SQL, so the generic dialect instructions
  * would push the model toward SELECT statements that the Solr driver rejects.
@@ -474,51 +402,6 @@ function buildRedisSystemPrompt(context: AiContext, mode: AiAssistantMode, custo
  * body); schema context entries are Solr cores whose "columns" are schema
  * fields (the PK-flagged field is the core's uniqueKey).
  */
-function buildSolrSystemPrompt(context: AiContext, mode: AiAssistantMode, custom?: CustomPromptContext): string {
-  const isZh = isChineseLocale(currentLocale());
-  const schema = formatSchema(context);
-  const resultPreview = context.lastResultPreview ? `\nLast result preview:\n${context.lastResultPreview}\n` : "";
-  const lastError = context.lastError ? `\nLast error:\n${context.lastError}\n` : "";
-  const referencedSqlFiles = formatReferencedSqlFiles(context);
-  const lines: string[] = [
-    isZh ? "你是 DBX 内置的 Apache Solr 助手。用中文回复。" : "You are DBX's built-in Apache Solr assistant. Reply in English.",
-    isZh
-      ? 'Solr 不使用 SQL。查询一律使用 DBX REST 控制台格式：首行 `METHOD /path`，后续可选 JSON 请求体，例如 `GET /{core}/select?q=*:*&rows=20`、`POST /{core}/query` 加 {"query":"..."} JSON body。路径可以省略开头的 /solr 段，wt=json 会自动补上。'
-      : 'Solr does not use SQL. Always express queries in the DBX REST-console format: `METHOD /path` on the first line plus an optional JSON body, e.g. `GET /{core}/select?q=*:*&rows=20` or `POST /{core}/query` with a body such as {"query":"..."}. A leading /solr path segment may be omitted and wt=json is appended automatically.',
-    isZh
-      ? "Schema 上下文中每个条目是一个 Solr core（类型标注为 CORE）；其下列出的是 schema fields，标记为 PK 的字段是该 core 的唯一键（uniqueKey）。用真实字段名构造 q/fq 参数，不要编造不存在的字段。"
-      : "Each entry in the schema context is a Solr core (marked CORE); the listed items are its schema fields and the PK-flagged field is the core's uniqueKey. Build q/fq parameters from real field names and never invent fields that are not listed.",
-    ...buildModePromptLines(mode, isZh, context.databaseType),
-    ...buildRichContentPromptLines(isZh),
-    ...buildCustomInstructionLines(custom, isZh),
-    attachmentSafetyInstruction(isZh),
-    // The ```sql fence is only a transport convention: the editor treats the
-    // block content as a Solr REST request, never as SQL.
-    isZh ? "返回请求时放在 ```sql 代码块中，块内容是 Solr REST 请求文本而非 SQL。额外说明简短实用。" : "Put the request in a fenced ```sql code block; the block holds Solr REST request text, not SQL. Keep extra explanation short and practical.",
-    "",
-    "Database type: solr",
-    `Connection: ${context.connectionName}`,
-    `Database: ${context.database}`,
-    context.schema ? `Selected schema: ${context.schema}` : "",
-    schemaCoverageLine(context, isZh),
-    "",
-    `Current request:\n${context.currentSql.trim() || "(empty)"}`,
-    referencedSqlFiles,
-    lastError,
-    resultPreview,
-    `Schema:\n${schema}`,
-  ];
-
-  if (context.schemaScope === "focused_table") {
-    lines.push(
-      isZh
-        ? "Schema 上下文只覆盖当前打开的 core；连接中可能还有其他 core。用户询问有哪些 core 或提到上下文中不存在的 core 时，不要直接断言不存在，先用 list_tables 确认。"
-        : "Schema context covers only the currently opened core; the connection may contain other cores. When the user asks what cores exist or mentions a core absent from context, do not conclude it is missing; use list_tables to verify first.",
-    );
-  }
-
-  return lines.filter(Boolean).join("\n");
-}
 
 function buildBasePromptLines(isZh: boolean): string[] {
   return [
@@ -543,57 +426,6 @@ function buildBasePromptLines(isZh: boolean): string[] {
     isZh ? "对于 DROP、DELETE、TRUNCATE、ALTER 或没有 WHERE 的 UPDATE，简要警告并优先提供安全的 SELECT 预览。" : "For destructive statements (DROP, DELETE, TRUNCATE, ALTER, UPDATE without WHERE), warn briefly and prefer a safer SELECT preview.",
     isZh ? "对于 UPDATE 或 DELETE，必须带 WHERE 并说明影响范围；生产库写操作只给建议，不主动建议执行。" : "For UPDATE or DELETE, require a WHERE clause and explain the affected scope; for production writes, provide guidance but do not proactively suggest execution.",
     isZh ? "当用户回复简短肯定词时（例如：需要、好、可以、对），直接执行你之前提议的动作，不要再反问确认。" : "When the user replies with a short affirmative (e.g.: Yes, OK, Sure, Do it), directly execute the action you previously proposed — do not ask for confirmation again.",
-  ];
-}
-
-function buildVectorSystemPrompt(context: AiContext, mode: AiAssistantMode, custom?: CustomPromptContext): string {
-  const isZh = isChineseLocale(currentLocale());
-  const schema = formatSchema(context);
-  const resultPreview = context.lastResultPreview ? `\nLast result preview:\n${context.lastResultPreview}\n` : "";
-  const lastError = context.lastError ? `\nLast error:\n${context.lastError}\n` : "";
-  const referencedSqlFiles = formatReferencedSqlFiles(context);
-  const lines: string[] = [
-    isZh ? `你是 DBX 内置的向量数据库助手。当前连接的是 ${dbLabel(context.databaseType)} 数据库。用中文回复。` : `You are DBX's vector database assistant. Connected to ${dbLabel(context.databaseType)}. Reply in English.`,
-    isZh ? "数据存储在集合（collections）中，每条记录包含唯一标识及可选的元数据负载（payload/metadata）。" : "Data is stored in collections. Each record has a unique identifier and optional metadata payload.",
-    ...buildVectorModePromptLines(context, mode, isZh),
-    ...buildRichContentPromptLines(isZh),
-    ...buildCustomInstructionLines(custom, isZh),
-    attachmentSafetyInstruction(isZh),
-    "",
-    `Database type: ${context.databaseType}`,
-    `Connection: ${context.connectionName}`,
-    `Database: ${context.database}`,
-    schemaCoverageLine(context, isZh),
-    "",
-    `Current collection:\n${context.currentSql.trim() || "(none)"}`,
-    referencedSqlFiles,
-    lastError,
-    resultPreview,
-    "",
-    `Schema:\n${schema}`,
-  ];
-
-  if (context.schemaScope === "focused_table") {
-    lines.push(
-      isZh
-        ? "Schema 上下文只覆盖当前打开的集合；数据库中可能还有其他集合。用户询问当前有哪些集合或提到上下文中不存在的集合时，不要直接断言不存在，先用 list_collections 工具确认。"
-        : "Schema context covers only the currently opened collection; the database may contain other collections. When the user asks what collections exist or mentions a collection absent from context, do not conclude it is missing; use list_collections to verify first.",
-    );
-  }
-
-  return lines.filter(Boolean).join("\n");
-}
-
-function buildVectorModePromptLines(context: AiContext, mode: AiAssistantMode, isZh: boolean): string[] {
-  const currentTimeGuidance = currentTimeToolGuidance();
-  if (mode === "agent") {
-    return [isZh ? "你处于 Agent 模式。你有以下工具可用：list_collections、browse_collection、get_current_time。" : "You are in Agent mode. You have the following tools available: list_collections, browse_collection, get_current_time.", currentTimeGuidance];
-  }
-  return [
-    isZh
-      ? `你处于 Ask 模式。你只能使用 list_collections 确认集合清单；不要浏览集合数据。${dbLabel(context.databaseType)} 的查询格式为 REST API（METHOD /path + JSON body），具体格式因数据库类型而异。只生成查询请求文本和说明，不要暗示已经执行。`
-      : `You are in Ask mode. You may only use list_collections to inspect collection names; do not browse collection data. ${dbLabel(context.databaseType)} uses a REST API query format (METHOD /path + JSON body) that varies by database type. Generate query strings and explanations only; do not imply execution.`,
-    currentTimeGuidance,
   ];
 }
 
@@ -640,86 +472,11 @@ function buildRichContentPromptLines(isZh: boolean): string[] {
       ];
 }
 
-function buildModePromptLines(mode: AiAssistantMode, isZh: boolean, databaseType: DatabaseType, cliProvider = false): string[] {
+function buildModePromptLines(mode: AiAssistantMode, isZh: boolean, _databaseType: DatabaseType, _cliProvider = false): string[] {
   const currentTimeGuidance = currentTimeToolGuidance();
-  if (databaseType === "redis") {
-    if (mode === "agent") {
-      // The two lanes expose different Redis tool names, and naming a tool the
-      // run cannot call is exactly what issue #10425 reported: the built-in
-      // assistant was told to use the MCP-only `dbx_execute_redis_command`.
-      const openLine = cliProvider
-        ? isZh
-          ? "你处于 Redis Agent 模式。查询或修改 Redis 数据时使用 dbx_execute_redis_command，不要生成或执行 SQL。"
-          : "You are in Redis Agent mode. Use dbx_execute_redis_command to query or modify Redis data; do not generate or execute SQL."
-        : isZh
-          ? "你处于 Redis Agent 模式。你有以下工具可用：execute_redis_command（只读）、get_current_time。用户询问 Redis 数据时必须调用 execute_redis_command 获取真实结果后再回答，不要只输出命令文本后停止，也不要生成或执行 SQL。"
-          : "You are in Redis Agent mode. You have the following tools available: execute_redis_command (read-only) and get_current_time. When the user asks for Redis data you MUST call execute_redis_command to obtain real results before answering — do not stop at command text — and do not generate or execute SQL.";
-      // The ```redis fence language is deliberate, not cosmetic: an unlabelled
-      // fence is normalised to `sql` (aiMessageRender.ts) and a single SQL block
-      // is what the write-confirmation heuristic binds to, which would offer a
-      // SQL write grant for a Redis command that can never use it.
-      const writeLine = cliProvider
-        ? isZh
-          ? "禁止不经确认直接执行 Redis 写命令；如果安全执行条件不满足，先说明原因，再给出只读替代方案。"
-          : "Never execute Redis write commands without confirmation. If safe execution requirements are not met, explain why and provide a read-only alternative."
-        : isZh
-          ? "execute_redis_command 只放行 DBX 判定为只读的命令；SET、DEL、EXPIRE、EVAL 等写命令一定会被拒绝，不要反复重试。用户要求改动数据时，把完整命令放在一个 ```redis 代码块里输出，并说明需要用户在 Redis 控制台中执行（控制台会先确认）。"
-          : "execute_redis_command runs only commands DBX classifies as read-only; writes such as SET, DEL, EXPIRE or EVAL are always refused, so do not retry them. When the user asks for a change, put the exact command in one ```redis fenced code block and tell them to run it in the Redis console, which asks for confirmation first.";
-      return [
-        openLine,
-        isZh
-          ? "逻辑数据库必须通过工具的 db 参数选择；当前或已选择数据库也会由 DBX 作用域自动限定。禁止执行 SELECT 命令切换数据库。"
-          : "Select the logical database with the tool's db argument; DBX also scopes the current or selected database automatically. Never send the SELECT command to switch databases.",
-        isZh ? "遍历或匹配键必须使用 SCAN，不要使用 KEYS；需要完整结果时，使用返回的游标继续扫描直到游标为 0。" : "Use SCAN, not KEYS, to enumerate or match keys. For complete results, continue with the returned cursor until it reaches 0.",
-        currentTimeGuidance,
-        writeLine,
-      ];
-    }
-    return [
-      isZh
-        ? "你处于 Redis Ask 模式。只生成 Redis 命令和说明，不要生成 SQL，也不要暗示已经执行或即将自动执行。需要指定逻辑数据库时说明 DB 编号，不要生成 SELECT 命令。"
-        : "You are in Redis Ask mode. Generate Redis commands and explanations only, not SQL, and do not imply that anything has run or will auto-run. State the target database number when needed; do not generate SELECT commands.",
-      currentTimeGuidance,
-    ];
-  }
-  if (databaseType === "mongodb") {
-    if (mode === "agent") {
-      return [
-        isZh ? "你处于 MongoDB Agent 模式。你有以下工具可用：list_tables、get_columns、execute_query、get_current_time。" : "You are in MongoDB Agent mode. You have the following tools available: list_tables, get_columns, execute_query, get_current_time.",
-        isZh
-          ? "execute_query 接收 MongoDB shell 风格命令，不是 SQL，例如 db.collection.find({})、db.collection.findOne({})、db.collection.aggregate([])。用户提出数据查询意图时，必须调用该工具获取真实结果后再回答。"
-          : "execute_query accepts MongoDB shell-style commands, not SQL, for example db.collection.find({}), db.collection.findOne({}), or db.collection.aggregate([]). For data queries, call the tool and answer from its actual results.",
-        currentTimeGuidance,
-        isZh ? "禁止不经确认直接执行 MongoDB 写命令；如果安全执行条件不满足，先说明原因，再给只读预览或澄清问题。" : "Never execute MongoDB write commands without confirmation. If safe execution requirements are not met, explain why first, then provide a read-only preview or a clarifying question.",
-      ];
-    }
-    return [
-      isZh ? "你处于 MongoDB Ask 模式。只生成 MongoDB shell 风格命令和说明，不要生成 SQL，也不要暗示已经执行或即将自动执行。" : "You are in MongoDB Ask mode. Generate MongoDB shell-style commands and explanations, not SQL, and do not imply that anything has run or will auto-run.",
-      currentTimeGuidance,
-    ];
-  }
-  if (databaseType === "solr") {
-    if (mode === "agent") {
-      return [
-        isZh
-          ? "你处于 Solr Agent 模式。你有以下工具可用：list_tables（列出 Solr cores）、get_columns（返回某个 core 的 schema fields）、execute_query、get_current_time。"
-          : "You are in Solr Agent mode. You have the following tools available: list_tables (lists Solr cores), get_columns (returns a core's schema fields), execute_query, get_current_time.",
-        isZh
-          ? "execute_query 接受 DBX REST 控制台格式的 Solr 请求而不是 SQL：首行 `METHOD /path`，后续可选 JSON body，例如 `GET /{core}/select?q=*:*&rows=20` 或 `POST /{core}/query` 加 JSON body。用户提出数据查询意图时，必须调用该工具获取真实结果后再回答。"
-          : "execute_query accepts Solr REST-console requests, not SQL: `METHOD /path` on the first line plus an optional JSON body, for example `GET /{core}/select?q=*:*&rows=20` or `POST /{core}/query` with a JSON body. For data queries, call the tool and answer from its actual results.",
-        currentTimeGuidance,
-        isZh
-          ? "禁止不经确认直接执行 Solr 写请求（`/{core}/update`、commit、schema/admin 变更）；如果安全执行条件不满足，先说明原因，再给出只读替代方案。"
-          : "Never execute Solr write requests (`/{core}/update`, commits, schema/admin changes) without confirmation. If safe execution requirements are not met, explain why and provide a read-only alternative.",
-      ];
-    }
-    return [
-      isZh
-        ? "你处于 Solr Ask 模式。只生成 Solr REST 请求（`METHOD /path` + 可选 JSON body）和说明，不要生成 SQL，也不要暗示已经执行或即将自动执行。"
-        : "You are in Solr Ask mode. Generate Solr REST requests (`METHOD /path` plus optional JSON body) and explanations only, not SQL, and do not imply that anything has run or will auto-run.",
-      currentTimeGuidance,
-    ];
-  }
+  {}
+  {}
+  {}
   if (mode === "agent") {
     return [
       isZh ? "你处于 Agent 模式。你有以下工具可用：list_tables、get_columns、execute_query、get_sample_data、get_current_time。" : "You are in Agent mode. You have the following tools available: list_tables, get_columns, execute_query, get_sample_data, get_current_time.",
@@ -743,10 +500,9 @@ function currentTimeToolGuidance(): string {
   return `When a request needs a relative time expression such as yesterday, last 7 days, this month, or today, call get_current_time first with {"timezone":"${timezone}","utc_offset_minutes":${utcOffsetMinutes}}; do not guess the current date or timezone.`;
 }
 
-function schemaCoverageLine(context: AiContext, isZh: boolean): string {
+function schemaCoverageLine(context: AiContext, _isZh: boolean): string {
   if (context.schemaScope === "focused_table") {
-    if (isVectorDbType(context.databaseType)) {
-      return isZh ? "Schema 上下文只覆盖当前打开的集合，不是完整的集合列表。" : "Schema context scope: focused collection only; not a complete collection list.";
+    {
     }
     return "Schema context scope: focused table only; not a complete database table list.";
   }
@@ -875,14 +631,14 @@ export async function buildAiContext(
   const maxFksPerTable = options.maxFksPerTable ?? 10;
   const databaseType = aiDatabaseTypeForConnection(connection);
   const { database, schema } = resolveAiDatabaseTarget(tab, connection);
-  const supportsMetadata = connection.db_type !== "plugin";
+
   const tables: AiSchemaTable[] = [];
   const tableKeys = new Set<string>();
   let truncated = false;
   let schemaScope: AiContext["schemaScope"] = "database";
   let currentCollectionName: string | undefined;
 
-  if (supportsMetadata && tab.tableMeta) {
+  if (tab.tableMeta) {
     schemaScope = "focused_table";
     const s = tab.tableMeta.schema ?? "";
     const tName = tab.tableMeta.tableName;
@@ -901,7 +657,7 @@ export async function buildAiContext(
     truncated = tab.tableMeta.columns.length > maxColumnsPerTable;
   }
 
-  for (const mention of supportsMetadata ? (options.mentionedTables ?? []) : []) {
+  for (const mention of options.mentionedTables ?? []) {
     const key = aiTableMentionKey(mention.schema, mention.table);
     if (tableKeys.has(key)) continue;
     const entry = await loadMentionedTableContext(tab, connection, mention, maxColumnsPerTable, maxIndexesPerTable, maxFksPerTable).catch(() => undefined);
@@ -911,42 +667,9 @@ export async function buildAiContext(
   }
 
   // Vector databases: load collections instead of SQL tables
-  if (supportsMetadata && isVectorDbType(databaseType)) {
-    try {
-      const collections = await api.vectorListCollections(tab.connectionId, database);
+  {}
 
-      // Find the currently opened collection (tab.sql is UUID for ChromaDB, name for others)
-      const currentCollection = collections.find((c) => c.id === tab.sql || c.name === tab.sql);
-      if (currentCollection) {
-        schemaScope = "focused_table";
-        currentCollectionName = currentCollection.name;
-        tables.push({
-          name: currentCollection.name,
-          tableType: "COLLECTION",
-          comment: currentCollection.dimension ? `${currentCollection.dimension}d vector` : undefined,
-          columns: [],
-        });
-        tableKeys.add(aiTableMentionKey(undefined, currentCollection.name));
-      }
-
-      for (const col of collections.slice(0, maxTables)) {
-        const key = aiTableMentionKey(undefined, col.name);
-        if (tableKeys.has(key)) continue;
-        tables.push({
-          name: col.name,
-          tableType: "COLLECTION",
-          comment: col.dimension ? `${col.dimension}d vector` : undefined,
-          columns: [],
-        });
-        tableKeys.add(key);
-      }
-      if (collections.length > maxTables) truncated = true;
-    } catch {
-      truncated = true;
-    }
-  }
-
-  if (supportsMetadata && !tab.tableMeta && !["redis", "mongodb"].includes(connection.db_type) && !isVectorDbType(databaseType)) {
+  if (!tab.tableMeta) {
     try {
       const schemas = await loadCandidateSchemas(tab, connection);
       for (const schema of schemas) {
@@ -958,7 +681,7 @@ export async function buildAiContext(
           candidates.map((table) =>
             Promise.all([api.getColumns(tab.connectionId, database, schema, table.name), api.listIndexes(tab.connectionId, database, schema, table.name).catch(() => [] as IndexInfo[]), api.listForeignKeys(tab.connectionId, database, schema, table.name).catch(() => [] as ForeignKeyInfo[])]).then(
               ([columns, indexes, foreignKeys]) => ({
-                schema: schema === database && !isSchemaAware(databaseType) ? undefined : schema,
+                schema: schema === database ? undefined : schema,
                 name: table.name,
                 tableType: table.table_type,
                 comment: table.comment,
@@ -1007,7 +730,7 @@ export async function buildAiContext(
 }
 
 async function loadMentionedTableContext(tab: AiContextTarget, connection: ConnectionConfig, mention: AiTableMention, maxColumnsPerTable: number, maxIndexesPerTable: number, maxFksPerTable: number): Promise<AiSchemaTable | undefined> {
-  const databaseType = aiDatabaseTypeForConnection(connection);
+  aiDatabaseTypeForConnection(connection);
   const database = aiDatabaseNamespace(tab, connection);
   const schema = await resolveMentionedTableSchema(tab, connection, mention);
   const [columns, indexes, foreignKeys, tableComment] = await Promise.all([
@@ -1017,7 +740,7 @@ async function loadMentionedTableContext(tab: AiContextTarget, connection: Conne
     loadTableComment(tab.connectionId, database, schema, mention.table).catch(() => undefined),
   ]);
   return {
-    schema: schema === database && !isSchemaAware(databaseType) ? undefined : schema,
+    schema: schema === database ? undefined : schema,
     name: mention.table,
     tableType: "TABLE",
     comment: tableComment,
@@ -1037,24 +760,14 @@ async function resolveMentionedTableSchema(tab: AiContextTarget, connection: Con
   if (tab.tableMeta?.tableName.toLowerCase() === mention.table.toLowerCase() && tab.tableMeta.schema) {
     return tab.tableMeta.schema;
   }
-  if (isSchemaAware(aiDatabaseTypeForConnection(connection))) {
-    const database = aiDatabaseNamespace(tab, connection);
-    const schemas = await loadCandidateSchemas(tab, connection);
-    for (const schema of schemas) {
-      const tables = await api.listTables(tab.connectionId, database, schema, mention.table, 10).catch(() => []);
-      if (tables.some((table) => table.name.toLowerCase() === mention.table.toLowerCase())) return schema;
-    }
-  }
+  {}
   return aiDatabaseNamespace(tab, connection);
 }
 
 async function loadCandidateSchemas(tab: AiContextTarget, connection: ConnectionConfig): Promise<string[]> {
   const { database, schema } = resolveAiDatabaseTarget(tab, connection);
   if (schema) return [schema];
-  if (isSchemaAware(aiDatabaseTypeForConnection(connection))) {
-    const schemas = await api.listSchemas(tab.connectionId, database);
-    return prioritizeSchemas(schemas);
-  }
+  {}
   return [database];
 }
 
@@ -1069,18 +782,16 @@ export function aiDatabaseTypeForConnection(connection: ConnectionConfig): Datab
  * what the AI request actually consumes (e.g. gbase maps to a MySQL-like
  * effective type that ignores schemas).
  */
-export function aiSchemaSelectionSupported(connection: ConnectionConfig): boolean {
-  return isSchemaAware(aiDatabaseTypeForConnection(connection));
+export function aiSchemaSelectionSupported(_connection: ConnectionConfig): boolean {
+  return false;
 }
 
 function aiDatabaseNamespace(tab: AiNamespaceSource, connection: ConnectionConfig): string {
   return resolveAiDatabaseTarget(tab, connection).database;
 }
 
-export function resolveAiNamespaceSelection(tab: AiNamespaceSource, connection: ConnectionConfig): AiNamespaceSelection {
-  if (connection.db_type === "dameng") {
-    return { kind: "schema", value: tab.schema?.trim() || "" };
-  }
+export function resolveAiNamespaceSelection(tab: AiNamespaceSource, _connection: ConnectionConfig): AiNamespaceSelection {
+  {}
   return { kind: "database", value: tab.database || "" };
 }
 
@@ -1095,10 +806,10 @@ export function resolveAiMentionDatabase(tab: AiNamespaceSource, connection: Con
   return selectedDatabases[0] ?? tab.database ?? "";
 }
 
-export function resolveDefaultAiSchema(connection: ConnectionConfig, schemaOptions: string[]): string | undefined {
-  if (connection.db_type !== "dameng") return undefined;
-  const username = connection.username.trim().toLowerCase();
-  return schemaOptions.find((schema) => schema.trim().toLowerCase() === username) ?? schemaOptions[0];
+export function resolveDefaultAiSchema(_connection: ConnectionConfig, _schemaOptions: string[]): string | undefined {
+  {
+    return undefined;
+  }
 }
 
 /**
@@ -1109,25 +820,10 @@ export function resolveDefaultAiSchema(connection: ConnectionConfig, schemaOptio
  */
 export function resolveAiDatabaseTarget(tab: AiNamespaceSource, connection: ConnectionConfig): { database: string; schema?: string } {
   const database = tab.database || connection.database || "main";
-  if (connection.db_type === "dameng") {
-    return {
-      database,
-      schema: resolveAiNamespaceSelection(tab, connection).value || undefined,
-    };
-  }
-  const normalizedDatabase = connection.db_type === "sqlite" ? normalizeSqliteNamespace(database, connection) : database;
-  const schema = isSchemaAware(aiDatabaseTypeForConnection(connection)) ? tab.schema?.trim() || undefined : undefined;
+  {}
+  const normalizedDatabase = database;
+  const schema = undefined;
   return schema ? { database: normalizedDatabase, schema } : { database: normalizedDatabase };
-}
-
-function prioritizeSchemas(schemas: string[]): string[] {
-  const preferred = ["public", "dbo", "main"];
-  return [...schemas].sort((a, b) => {
-    const ai = preferred.indexOf(a);
-    const bi = preferred.indexOf(b);
-    if (ai >= 0 || bi >= 0) return (ai >= 0 ? ai : 99) - (bi >= 0 ? bi : 99);
-    return a.localeCompare(b);
-  });
 }
 
 function extractLastError(result?: QueryResult): string | undefined {

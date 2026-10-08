@@ -11,7 +11,7 @@ import { supportsDatabaseCompare } from "@/lib/database/databaseCompareCapabilit
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useToast } from "@/composables/useToast";
 import { databaseOptionsForConnection, fetchNamespaceOptionsForConnection } from "@/composables/useDatabaseOptions";
-import { isSchemaAware } from "@/lib/database/databaseCapabilities";
+
 import { copyToClipboard } from "@/lib/common/clipboard";
 import { inferCompareKeyColumns, normalizeKeyColumns, sameKeyColumns, type CompareKeyColumnOption, type DataCompareCellValue, type DataCompareSyncPlan } from "@/lib/dataGrid/dataCompare";
 import {
@@ -682,25 +682,21 @@ function swapSourceTarget() {
   });
 }
 
-async function resolveSchema(connectionId: string, database: string, preferredSchema = ""): Promise<string> {
-  const config = store.getConfig(connectionId);
-  if (isSchemaAware(config?.db_type)) {
-    const schemas = await api.listSchemas(connectionId, database);
-    if (preferredSchema && schemas.includes(preferredSchema)) return preferredSchema;
-    return schemas.includes("public") ? "public" : (schemas[0] ?? "");
-  }
+async function resolveSchema(connectionId: string, database: string, _preferredSchema = ""): Promise<string> {
+  store.getConfig(connectionId);
+  {}
   return database;
 }
 
-async function loadSchemas(side: "source" | "target", preferredSchema = "") {
+async function loadSchemas(side: "source" | "target", _preferredSchema = "") {
   const connectionId = side === "source" ? sourceConnectionId.value : targetConnectionId.value;
   const database = side === "source" ? sourceDatabase.value : targetDatabase.value;
   if (!connectionId || !database || !supportsDatabaseCompare(store.getConfig(connectionId), "data")) return;
   pendingMetadataRequests.value += 1;
   try {
-    const isCurrent = metadataRequestIsCurrent(side);
-    const config = store.getConfig(connectionId);
-    if (!isSchemaAware(config?.db_type)) {
+    metadataRequestIsCurrent(side);
+    store.getConfig(connectionId);
+    {
       if (side === "source") {
         sourceSchemas.value = [];
         sourceSchema.value = database;
@@ -710,17 +706,6 @@ async function loadSchemas(side: "source" | "target", preferredSchema = "") {
       }
       await loadTables(side);
       return;
-    }
-
-    const schemas = await api.listSchemas(connectionId, database);
-    if (!isCurrent()) return;
-    const schema = preferredSchema && schemas.includes(preferredSchema) ? preferredSchema : schemas.includes("public") ? "public" : (schemas[0] ?? "");
-    if (side === "source") {
-      sourceSchemas.value = schemas;
-      sourceSchema.value = schema;
-    } else {
-      targetSchemas.value = schemas;
-      targetSchema.value = schema;
     }
   } finally {
     pendingMetadataRequests.value -= 1;

@@ -83,15 +83,13 @@ export const WHERE_IS_NOT_KEYWORDS: readonly DataGridConditionKeyword[] = [{ val
 
 export const WHERE_AFTER_NOT_KEYWORDS: readonly DataGridConditionKeyword[] = [{ value: "BETWEEN", comment: "BETWEEN ... AND ..." }, { value: "IN" }, { value: "LIKE" }, { value: "ILIKE" }];
 
-const ILIKE_SUPPORTED_DATABASES: ReadonlySet<DatabaseType> = new Set<DatabaseType>(["postgres", "redshift", "duckdb", "snowflake", "clickhouse", "databend", "kingbase", "highgo", "uxdb", "vastbase", "gaussdb", "opengauss", "questdb", "vertica", "databricks", "kwdb", "h2"]);
-
 // SQLite parses `x REGEXP y` but needs a driver-registered regexp() function,
 // which DBX does not provide, so the SQLite family is excluded; Hive-family
 // dialects ship the REGEXP/RLIKE binary operator.
-const REGEXP_OPERATOR_SUPPORTED_DATABASES: ReadonlySet<DatabaseType> = new Set<DatabaseType>(["mysql", "doris", "starrocks", "goldendb", "manticoresearch", "gbase", "hive", "spark", "kyuubi", "impala"]);
+const REGEXP_OPERATOR_SUPPORTED_DATABASES: ReadonlySet<DatabaseType> = new Set<DatabaseType>(["mysql"]);
 
 export function supportsConditionIlike(databaseType?: DatabaseType): boolean {
-  return !databaseType || ILIKE_SUPPORTED_DATABASES.has(databaseType);
+  return !databaseType;
 }
 
 export function supportsConditionRegexp(databaseType?: DatabaseType): boolean {

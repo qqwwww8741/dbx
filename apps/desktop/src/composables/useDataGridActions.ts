@@ -7,7 +7,7 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { buildTableSelectSql, quoteTableDataIdentifier } from "@/lib/table/tableSelectSql";
 import { tableOpenPageLimit } from "@/lib/table/tableOpenPageLimit";
 import { tableDataLargeValuePreviewOptions, tableDataPreviewRowBudget } from "@/lib/dataGrid/dataGridLargeValues";
-import { elasticsearchCursorPageJumpRequestCount } from "@/lib/dataGrid/dataGridPagination";
+
 import { editablePrimaryKeys, shouldIncludeSyntheticRowId } from "@/lib/table/tableEditing";
 import { tableMetaForDataTab } from "@/lib/table/tableDataTabMeta";
 import { loadVirtualRowIdentifier } from "@/lib/table/virtualRowIdentifier";
@@ -17,14 +17,13 @@ import { useToast } from "@/composables/useToast";
 import { effectiveDatabaseTypeForConnection, metadataSchemaForConnection } from "@/lib/database/jdbcDialect";
 import { invalidateTableMetadataCache, loadTableColumns, loadTableMetadata, TABLE_METADATA_CACHE_TTL_MS } from "@/lib/metadata/tableMetadataCache";
 import { isDataTabMetadataLifecycleStale } from "@/lib/sidebar/dataTabOpenPolicy";
-import { applyMongoFindSort } from "@/lib/mongo/mongoShellCommand";
+
 import { uuid } from "@/lib/common/utils";
 import { simpleDataGridOrderByReferencesMissingColumn, type DataGridSortMode } from "@/lib/dataGrid/dataGridSort";
 import type { DataGridReloadIntent } from "@/lib/dataGrid/dataGridToolbar";
 import { continuousQueryResultMaxRows, MAX_QUERY_RESULT_MAX_ROWS } from "@/lib/dataGrid/queryResultRowLimit";
 import { queryResultBaseSql, queryResultExecutionSql } from "@/lib/tabs/tabPresentation";
 import { sqlExecutionTargetCapabilities } from "@/lib/database/sqlExecutionTargetCapabilities";
-import { usesAgentCursorForTableData } from "@/lib/database/databaseDriverManifest";
 
 const DATA_TAB_METADATA_TTL_MS = TABLE_METADATA_CACHE_TTL_MS;
 
@@ -86,22 +85,10 @@ export function useDataGridActions(activeTab: ComputedRef<QueryTab | undefined>)
 
   function reconcileOracleTableType(tab: QueryTab): void {
     const config = connectionStore.getConfig(tab.connectionId);
-    const databaseType = effectiveDatabaseTypeForConnection(config);
-    if (databaseType !== "oracle" && databaseType !== "oceanbase-oracle") return;
-    const tableMeta = tab.tableMeta;
-    if (!tableMeta?.tableName) return;
-
-    const normalize = (value: string | undefined) => value?.trim().toLowerCase() ?? "";
-    const resolvedSchema = tableMeta.schema?.trim() || config?.default_schema?.trim();
-    const matches = connectionStore
-      .lookupLocalCompletionTables(tab.connectionId, tableMeta.database ?? tab.database, tableMeta.tableName, 20, resolvedSchema, tableMeta.catalog)
-      .filter((candidate) => normalize(candidate.name) === normalize(tableMeta.tableName) && normalize(candidate.schema) === normalize(resolvedSchema) && normalize(candidate.catalog) === normalize(tableMeta.catalog));
-    if (matches.length !== 1) return;
-
-    const objectType = matches[0]?.type;
-    const resolvedTableType = objectType === "view" ? "VIEW" : objectType === "materialized_view" ? "MATERIALIZED_VIEW" : objectType === "table" ? "TABLE" : undefined;
-    if (!resolvedTableType || tableMeta.tableType?.trim().toUpperCase() === resolvedTableType) return;
-    queryStore.setTableMeta(tab.id, { ...tableMeta, tableType: resolvedTableType });
+    effectiveDatabaseTypeForConnection(config);
+    {
+      return;
+    }
   }
 
   function resultSortPagination(tab: QueryTab): { limit: number; offset: number } | undefined {
@@ -342,7 +329,7 @@ export function useDataGridActions(activeTab: ComputedRef<QueryTab | undefined>)
         // Dameng 元数据必须与数据查询串行（同 useSidebarDataOpenRuntime），
         // 延后到查询完成后再启动。主动刷新和跨生命周期重建除外：必须先拿到新列再
         // 构建 SQL，否则第一次 toolbar reload 仍会沿用断链前的显式列列表。
-        const deferMetadataRefresh = intent !== "refresh" && !lifecycleStale && effectiveDatabaseTypeForConnection(connectionStore.getConfig(tab.connectionId)) === "dameng";
+
         const startMetadataRefresh = () => {
           console.info("[DBX][reloadData:metadata:background:start]", { traceId, elapsed: elapsed(), reason: hasRealTableMetaColumns ? "stale" : "missing", metadataAgeMs });
           void refreshDataTabTableMeta(tab, { force: lifecycleStale, trace: { traceId, elapsed } })
@@ -413,7 +400,9 @@ export function useDataGridActions(activeTab: ComputedRef<QueryTab | undefined>)
           // 挂起等待，防止数据查询先返回后编辑/保存以空 primaryKeys 短暂可用，
           // 走整行 WHERE 保存路径（#3727）。真实元数据经 setTableMeta 落地后解除
           if (!hasRealTableMetaColumns) tab.tableMetaPending = true;
-          if (!deferMetadataRefresh) startMetadataRefresh();
+          {
+            startMetadataRefresh();
+          }
         } else {
           console.info("[DBX][reloadData:metadata:skip]", { traceId, elapsed: elapsed(), columnCount: tab.tableMeta!.columns.length, metadataAgeMs });
         }
@@ -435,10 +424,12 @@ export function useDataGridActions(activeTab: ComputedRef<QueryTab | undefined>)
         } catch (e) {
           console.error("[DBX][reloadData:error]", { traceId, elapsed: elapsed(), error: e });
           stopPreparing();
-          if (shouldRefreshMetadata && deferMetadataRefresh) startMetadataRefresh();
+          {
+          }
           throw e;
         }
-        if (shouldRefreshMetadata && deferMetadataRefresh) startMetadataRefresh();
+        {
+        }
         return;
       } finally {
         pendingDataReloads.delete(tab);
@@ -540,73 +531,14 @@ export function useDataGridActions(activeTab: ComputedRef<QueryTab | undefined>)
         });
       const executionTarget = queryStore.activeResultExecutionTarget(tab.id);
       const executionConnection = connectionStore.getConfig(executionTarget?.connectionId ?? tab.connectionId);
-      const effectiveDbType = effectiveDatabaseTypeForConnection(executionConnection);
-      const usesElasticsearchCursor = effectiveDbType === "elasticsearch" || effectiveDbType === "easysearch";
+      effectiveDatabaseTypeForConnection(executionConnection);
 
       // Elasticsearch search_after has no random page access, so every missing
       // cursor must be fetched in order. This workaround still sends one ES
       // request per skipped page (page 1 -> 101 sends 100 requests);
       // retainDisplayedResult only hides those intermediate pages from the UI.
-      const currentResultSessionId = tab.resultSessionId ?? tab.result?.session_id;
-      if (usesElasticsearchCursor && tab.result?.has_more === true && !appendResult && typeof expectedNextOffset === "number" && limit === tab.resultPageLimit && currentResultSessionId) {
-        let nextOffset = expectedNextOffset;
-        let nextSessionId: string | undefined = currentResultSessionId;
-        const currentPage = Math.floor(nextOffset / limit);
-        const targetPage = Math.floor(offset / limit) + 1;
-        const totalRequests = elasticsearchCursorPageJumpRequestCount(currentPage, targetPage);
-        const jumpProgress =
-          totalRequests > 1
-            ? {
-                completedRequests: 0,
-                totalRequests,
-                targetPage,
-              }
-            : undefined;
-        if (jumpProgress) {
-          tab.resultPageJumpProgress = jumpProgress;
-        }
-        const activeJumpProgress = tab.resultPageJumpProgress;
-        const executeCursorPage = async (pageOffset: number, pageSessionId?: string, retainDisplayedResult = false) => {
-          await executePage(pageOffset, pageSessionId, retainDisplayedResult);
-          if (activeJumpProgress) {
-            activeJumpProgress.completedRequests += 1;
-          }
-        };
 
-        try {
-          if (offset < nextOffset) {
-            await executeCursorPage(0, undefined, offset !== 0);
-            if (offset === 0) {
-              return;
-            }
-            const restartedTab = activeTab.value;
-            if (restartedTab?.id !== tab.id) {
-              return;
-            }
-            nextOffset = limit;
-            nextSessionId = restartedTab.resultSessionId;
-          }
-          while (nextOffset < offset) {
-            if (!nextSessionId) {
-              return;
-            }
-            await executeCursorPage(nextOffset, nextSessionId, true);
-            const advancedTab = activeTab.value;
-            if (advancedTab?.id !== tab.id) {
-              return;
-            }
-            nextOffset += limit;
-            nextSessionId = advancedTab.resultSessionId;
-          }
-          if (nextOffset === offset && nextSessionId) {
-            await executeCursorPage(offset, nextSessionId);
-            return;
-          }
-        } finally {
-          if (tab.resultPageJumpProgress === activeJumpProgress) {
-            tab.resultPageJumpProgress = undefined;
-          }
-        }
+      {
       }
 
       await executePage(offset, sessionId);
@@ -628,10 +560,9 @@ export function useDataGridActions(activeTab: ComputedRef<QueryTab | undefined>)
       }),
     });
     queryStore.updateSql(tab.id, sql);
-    const expectedNextOffset = appendResult ? tab.result?.rows.length : (tab.resultPageOffset ?? 0) + (tab.resultPageLimit ?? limit);
-    const continuesResultSession = offset === expectedNextOffset && limit === tab.resultPageLimit;
-    const connection = useConnectionStore().getConfig(tab.connectionId);
-    const sessionId = usesAgentCursorForTableData(connection?.db_type, connection?.driver_profile) && tab.result?.has_more && tab.result.session_id && continuesResultSession ? tab.result.session_id : undefined;
+
+    useConnectionStore().getConfig(tab.connectionId);
+    const sessionId = undefined;
     await queryStore.executeTabSql(tab.id, sql, {
       pagination: { offset, limit, sessionId, clientSessionId: sessionId ? tab.resultClientSessionId : undefined },
       ...appendOptions,
@@ -660,9 +591,9 @@ export function useDataGridActions(activeTab: ComputedRef<QueryTab | undefined>)
     if (tab.mode === "data") {
       if (!tableMetaForDataTab(tab)) return;
       tab.whereInput = whereInput ?? "";
-      const config = connectionStore.getConfig(tab.connectionId);
+      connectionStore.getConfig(tab.connectionId);
       const quotedColumn = quoteIdent(tab, column);
-      const headerOrderBy = direction ? `${config?.db_type === "neo4j" ? `n.${quotedColumn}` : quotedColumn} ${direction.toUpperCase()}` : undefined;
+      const headerOrderBy = direction ? `${quotedColumn} ${direction.toUpperCase()}` : undefined;
       const orderBy = effectiveOrderBy === undefined ? headerOrderBy : effectiveOrderBy.trim() || undefined;
       const limit = tableDataPageLimit(tab);
       const pagination = { limit, offset: 0 };
@@ -696,24 +627,7 @@ export function useDataGridActions(activeTab: ComputedRef<QueryTab | undefined>)
 
     const executionTarget = queryStore.activeResultExecutionTarget(tab.id);
     const config = connectionStore.getConfig(executionTarget?.connectionId ?? tab.connectionId);
-    if (effectiveDatabaseTypeForConnection(config) === "mongodb") {
-      const sortedSql = applyMongoFindSort(baseSql, column, direction);
-      if (!sortedSql) {
-        toast(t("grid.sortUnsupported"), 5000);
-        return;
-      }
-      queryStore.updateSql(tab.id, sortedSql);
-      await queryStore.executeTabSql(tab.id, sortedSql, {
-        ...activeQueryTargetOptions(tab),
-        resultBaseSql: baseSql,
-        resultSortedSql: sortedSql,
-        ...(pagination ? { pagination } : {}),
-        preserveResultDuringExecution: true,
-        preserveTotalRowCountDuringExecution: true,
-        replaceActiveResultInGroup: true,
-      });
-      return;
-    }
+    {}
 
     const sortColumns = visibleQuerySortColumns(tab.result?.columns ?? [], tab.result?.hidden_column_indexes, columnIndex);
     if (!sortColumns) {

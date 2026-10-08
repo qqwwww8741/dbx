@@ -1,5 +1,4 @@
 import type { DatabaseType, TreeNode } from "@/types/database";
-import { xuguDependencyProvider } from "@/lib/database/xuguObjectDependencies";
 
 /**
  * The subset of a sidebar node needed by a database dependency provider.
@@ -20,9 +19,7 @@ export interface DatabaseDependencyProvider {
   buildQuery(node: DependencyTreeNode): string | null;
 }
 
-const PROVIDERS: Partial<Record<DatabaseType, DatabaseDependencyProvider>> = {
-  xugu: xuguDependencyProvider,
-};
+const PROVIDERS: Partial<Record<DatabaseType, DatabaseDependencyProvider>> = {};
 
 export function databaseDependencyProviderFor(databaseType?: DatabaseType): DatabaseDependencyProvider | null {
   return databaseType ? (PROVIDERS[databaseType] ?? null) : null;

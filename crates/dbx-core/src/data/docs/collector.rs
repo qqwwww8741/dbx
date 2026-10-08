@@ -420,25 +420,6 @@ mod tests {
     }
 
     #[test]
-    fn a_postgres_named_enum_column_keeps_its_own_type_name() {
-        // PostgreSQL reports the enum's own type name in `data_type`, not an
-        // inline `ENUM(...)` spelling. The user's real type identity must
-        // survive into the document instead of being replaced by a
-        // synthesized `{table}_{column}` name.
-        let mut column = crate::types::ColumnInfo {
-            name: "status".to_string(),
-            data_type: "ConversationStatus".to_string(),
-            ..Default::default()
-        };
-        column.enum_values = Some(vec!["open".to_string(), "closed".to_string()]);
-
-        let synthesized = synthesize_enum(Some("public"), "conversations", &column).expect("enum");
-
-        assert_eq!(synthesized.name, "ConversationStatus");
-        assert!(!synthesized.synthesized);
-    }
-
-    #[test]
     fn a_column_without_enum_values_synthesises_nothing() {
         let column = crate::types::ColumnInfo {
             name: "status".to_string(),
@@ -493,11 +474,6 @@ mod tests {
         assert_eq!(enums.len(), 1, "two columns of the same named type must dedupe to one block: {enums:?}");
         assert_eq!(enums[0].name, "ConversationStatus");
         assert!(!enums[0].synthesized);
-    }
-
-    #[test]
-    fn postgres_reports_foreign_key_ddl_capability_true() {
-        assert!(supports_foreign_keys(crate::models::connection::DatabaseType::Postgres));
     }
 
     fn column_with_comment(comment: &str) -> crate::types::ColumnInfo {

@@ -1,5 +1,5 @@
 use dbx_sql_core::value_literals::quote_string_literal;
-use dbx_sql_dialect::postgres_index_key::decorate_postgres_index_key;
+
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 use log;
@@ -15,17 +15,9 @@ use crate::sql_dialect::type_rewrite::{
     apply_auto_inc_to_column_def, column_is_auto_increment, rewrite_column_type, type_looks_integer, AutoIncColumnBuild,
 };
 use crate::sql_parser::ast_filter::AstTransmitFilter;
-use crate::table_structure_sql::{
-    build_sqlserver_alter_column_preserving_default_sql, build_sqlserver_column_comment_sql,
-    build_sqlserver_drop_default_constraint_sql, build_sqlserver_table_comment_sql, sqlserver_unicode_string_literal,
-};
 use crate::types::{
     ColumnInfo, ForeignKeyInfo, FunctionInfo, IndexInfo, OwnerInfo, RuleInfo, SequenceInfo, TableInfo, TriggerInfo,
 };
-
-mod sqlserver_dependencies;
-
-use sqlserver_dependencies::build_dependency_aware_alter_column_batch;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1746,35 +1738,6 @@ pub fn diff_permissions(source: &[PermissionInfo], target: &[PermissionInfo]) ->
     diffs
 }
 
-fn sqlserver_permission_securable(permission: &PermissionInfo, schema: Option<&str>) -> String {
-    match permission.object_type.trim().to_ascii_uppercase().as_str() {
-        "SCHEMA" => format!("SCHEMA::{}", quote_id(&permission.object_name, DatabaseType::SqlServer)),
-        "DATABASE" => format!("DATABASE::{}", quote_id(&permission.object_name, DatabaseType::SqlServer)),
-        _ => {
-            let object_name = if schema.is_none() {
-                permission
-                    .object_name
-                    .split_once('.')
-                    .filter(|(_, object)| !object.contains('.'))
-                    .map(|(object_schema, object)| {
-                        format!(
-                            "{}.{}",
-                            quote_id(
-                                object_schema.trim_matches(|ch| matches!(ch, '[' | ']' | '"')),
-                                DatabaseType::SqlServer,
-                            ),
-                            quote_id(object.trim_matches(|ch| matches!(ch, '[' | ']' | '"')), DatabaseType::SqlServer,)
-                        )
-                    })
-                    .unwrap_or_else(|| qualified_name(&permission.object_name, DatabaseType::SqlServer, schema))
-            } else {
-                qualified_name(&permission.object_name, DatabaseType::SqlServer, schema)
-            };
-            format!("OBJECT::{object_name}")
-        }
-    }
-}
-
 pub fn generate_permission_sync_sql(diffs: &[PermissionDiff], db_type: DatabaseType, schema: Option<&str>) -> String {
     let mut lines: Vec<String> = Vec::new();
     let profile = profile_for(db_type);
@@ -1783,13 +1746,7 @@ pub fn generate_permission_sync_sql(diffs: &[PermissionDiff], db_type: DatabaseT
         match diff.diff_type.as_str() {
             "added" => {
                 if let Some(source) = &diff.source {
-                    if db_type == DatabaseType::SqlServer {
-                        let securable = sqlserver_permission_securable(source, schema);
-                        let grantee = quote_id(&source.grantee, db_type);
-                        let with_grant = if source.is_grantable { " WITH GRANT OPTION" } else { "" };
-                        lines
-                            .push(format!("GRANT {} ON {} TO {}{};", source.privilege, securable, grantee, with_grant));
-                    } else if profile.grant_uses_mysql_user_syntax {
+                    if profile.grant_uses_mysql_user_syntax {
                         let object_path = if let Some(sch) = schema {
                             format!("`{}`.`{}`", sch.replace('`', "``"), source.object_name.replace('`', "``"))
                         } else {
@@ -1819,11 +1776,7 @@ pub fn generate_permission_sync_sql(diffs: &[PermissionDiff], db_type: DatabaseT
             }
             "removed" => {
                 if let Some(target) = &diff.target {
-                    if db_type == DatabaseType::SqlServer {
-                        let securable = sqlserver_permission_securable(target, schema);
-                        let grantee = quote_id(&target.grantee, db_type);
-                        lines.push(format!("REVOKE {} ON {} FROM {};", target.privilege, securable, grantee));
-                    } else if profile.grant_uses_mysql_user_syntax {
+                    if profile.grant_uses_mysql_user_syntax {
                         let object_path = if let Some(sch) = schema {
                             format!("`{}`.`{}`", sch.replace('`', "``"), target.object_name.replace('`', "``"))
                         } else {
@@ -1927,7 +1880,7 @@ impl Default for SchemaDiffPreparationOptions {
             target_rules: Vec::new(),
             source_owners: Vec::new(),
             target_owners: Vec::new(),
-            database_type: DatabaseType::Sqlite,
+            database_type: DatabaseType::Mysql,
             target_schema: None,
             ignore_comments: false,
             cascade_delete: false,
@@ -2293,7 +2246,7 @@ fn resolve_schema_diff_table_names(
 }
 
 fn compare_mysql_column_charset(options: &SchemaDiffPreparationOptions) -> bool {
-    if !options.compare_charset || !matches!(options.database_type, DatabaseType::Mysql | DatabaseType::Goldendb) {
+    if !options.compare_charset || !matches!(options.database_type, DatabaseType::Mysql) {
         return false;
     }
 
@@ -2686,17 +2639,7 @@ fn view_definitions_differ(
 
     match source_dialect {
         Some(DialectKind::Mysql) => normalize_mysql_view_ddl(source_ddl) != normalize_mysql_view_ddl(target_ddl),
-        Some(DialectKind::Oracle) => {
-            // Each side's view lives in its own schema, and Oracle hands the body back exactly
-            // as it was written. dbx's own generated script rewrites only the header, so after
-            // applying it the target body can still qualify the *source* schema — normalising
-            // references to either compared schema keeps the comparison idempotent instead of
-            // reporting the view as permanently modified.
-            let schemas = oracle_view_schemas(source_ddl, target_ddl);
-            let schemas: Vec<&str> = schemas.iter().map(String::as_str).collect();
-            normalize_oracle_view_ddl_with_schemas(source_ddl, &schemas)
-                != normalize_oracle_view_ddl_with_schemas(target_ddl, &schemas)
-        }
+
         _ => false,
     }
 }
@@ -2937,181 +2880,6 @@ fn mysql_quoted_token_end(ddl: &str, start: usize) -> usize {
         index += 1;
     }
     bytes.len()
-}
-
-/// How `normalize_oracle_view_ddl` groups a token: anything the server reads as a
-/// single value is an atom, everything else is punctuation.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum OracleViewTokenKind {
-    Atom,
-    Symbol,
-}
-
-struct OracleViewToken {
-    kind: OracleViewTokenKind,
-    text: String,
-    /// Bare words and `"quoted"` identifiers are the ones that can name the owner;
-    /// `'literals'` never are, so a literal that happens to spell the schema stays a
-    /// literal.
-    identifier: bool,
-    /// Quoted identifiers keep their case and never spell a keyword.
-    quoted: bool,
-    /// Whether whitespace separated this token from the previous one.
-    spaced: bool,
-}
-
-/// Normalizes Oracle view text so that two schemas holding the *same* view compare equal
-/// and two holding different views do not (#9261).
-///
-/// Oracle reports it through `DBMS_METADATA`, which repeats the owner in the header
-/// (`CREATE OR REPLACE FORCE VIEW "DBX_TEST"."V_SAME"`) and qualifies every reference in
-/// the body with it (`FROM DBX_TEST.CMP_SAME`), so the owner is replaced by a placeholder
-/// exactly like `normalize_mysql_view_ddl` does for its backtick schema qualifier. The
-/// header (including the column list) stays part of the comparison because a view that
-/// exposes different columns is a different view, and comments are dropped because they
-/// carry no query semantics.
-/// Test-facing shorthand for the single-sided normalisation: collapse only this statement's
-/// own owner (production comparisons use `oracle_view_schemas` and normalise both sides
-/// against every compared schema).
-#[cfg(test)]
-fn normalize_oracle_view_ddl(ddl: &str) -> String {
-    let owner = oracle_view_owner(&oracle_view_tokens(ddl));
-    let schemas: Vec<&str> = owner.as_deref().into_iter().collect();
-    normalize_oracle_view_ddl_with_schemas(ddl, &schemas)
-}
-
-/// Every schema a pair of captured view definitions is allowed to qualify: each side's own
-/// owner, so the header qualifier and a body that names either schema collapse to the same
-/// placeholder.
-fn oracle_view_schemas(source_ddl: &str, target_ddl: &str) -> Vec<String> {
-    let mut schemas = Vec::new();
-    for ddl in [source_ddl, target_ddl] {
-        let Some(owner) = oracle_view_owner(&oracle_view_tokens(ddl)) else { continue };
-        if !schemas.iter().any(|known: &String| known.eq_ignore_ascii_case(&owner)) {
-            schemas.push(owner);
-        }
-    }
-    schemas
-}
-
-fn normalize_oracle_view_ddl_with_schemas(ddl: &str, schemas: &[&str]) -> String {
-    // `DBMS_METADATA` may or may not hand the statement over with its trailing `;` — the
-    // terminator carries no meaning for the comparison. (A literal's own semicolon is
-    // inside quotes, so the statement never ends with one there.)
-    let ddl = ddl.trim_end();
-    let ddl = ddl.strip_suffix(';').map_or(ddl, str::trim_end);
-    let tokens = oracle_view_tokens(ddl);
-    let mut normalized = String::with_capacity(ddl.len());
-    let mut previous = None;
-
-    for (position, token) in tokens.iter().enumerate() {
-        let replacement = if token.identifier
-            && schemas.iter().any(|schema| token.text.eq_ignore_ascii_case(schema))
-            && oracle_view_tokens_continue_with_dot(&tokens, position)
-        {
-            "__dbx_schema__".to_string()
-        } else {
-            token.text.clone()
-        };
-        if token.spaced && previous == Some(token.kind) {
-            normalized.push(' ');
-        }
-        normalized.push_str(&replacement);
-        previous = Some(token.kind);
-    }
-
-    normalized
-}
-
-fn oracle_view_tokens_continue_with_dot(tokens: &[OracleViewToken], position: usize) -> bool {
-    tokens.get(position + 1).is_some_and(|next| next.kind == OracleViewTokenKind::Symbol && next.text == ".")
-}
-
-/// The schema in `CREATE OR REPLACE FORCE VIEW "OWNER"."NAME"`, when the captured text
-/// qualifies the view at all.
-fn oracle_view_owner(tokens: &[OracleViewToken]) -> Option<String> {
-    let view = tokens.iter().position(|token| !token.quoted && token.text.eq_ignore_ascii_case("VIEW"))?;
-    let name = tokens.get(view + 1)?;
-    oracle_view_tokens_continue_with_dot(tokens, view + 1).then(|| name.text.clone())
-}
-
-fn oracle_view_tokens(ddl: &str) -> Vec<OracleViewToken> {
-    let bytes = ddl.as_bytes();
-    let mut tokens = Vec::new();
-    let mut index = 0;
-    let mut spaced = false;
-
-    while index < bytes.len() {
-        if bytes[index].is_ascii_whitespace() {
-            spaced = true;
-            index += 1;
-            continue;
-        }
-
-        let (end, kind, text, identifier, quoted, keep) = match bytes[index] {
-            b'\'' => {
-                let end = oracle_quoted_token_end(ddl, index);
-                (end, OracleViewTokenKind::Atom, ddl[index..end].to_string(), false, false, true)
-            }
-            b'"' => {
-                let end = oracle_quoted_token_end(ddl, index);
-                (end, OracleViewTokenKind::Atom, decode_oracle_quoted_identifier(&ddl[index..end]), true, true, true)
-            }
-            b'-' if bytes.get(index + 1) == Some(&b'-') => {
-                let end = ddl[index..].find('\n').map_or(bytes.len(), |offset| index + offset);
-                (end, OracleViewTokenKind::Atom, String::new(), false, false, false)
-            }
-            b'/' if bytes.get(index + 1) == Some(&b'*') => {
-                let end = ddl[index + 2..].find("*/").map_or(bytes.len(), |offset| index + 2 + offset + 2);
-                (end, OracleViewTokenKind::Atom, String::new(), false, false, false)
-            }
-            byte if view_ddl_symbol(byte) => {
-                (index + 1, OracleViewTokenKind::Symbol, ddl[index..index + 1].to_string(), false, false, true)
-            }
-            _ => {
-                let mut end = index + 1;
-                while end < bytes.len()
-                    && !bytes[end].is_ascii_whitespace()
-                    && !matches!(bytes[end], b'\'' | b'"')
-                    && !view_ddl_symbol(bytes[end])
-                {
-                    end += 1;
-                }
-                (end, OracleViewTokenKind::Atom, ddl[index..end].to_string(), true, false, true)
-            }
-        };
-
-        if keep {
-            tokens.push(OracleViewToken { kind, text, identifier, quoted, spaced });
-        }
-        spaced = false;
-        index = end;
-    }
-
-    tokens
-}
-
-/// Oracle ends a quoted token at the matching quote; a doubled quote is an escape
-/// (there is no backslash escape).
-fn oracle_quoted_token_end(ddl: &str, start: usize) -> usize {
-    let bytes = ddl.as_bytes();
-    let quote = bytes[start];
-    let mut index = start + 1;
-    while index < bytes.len() {
-        if bytes[index] == quote {
-            if bytes.get(index + 1) == Some(&quote) {
-                index += 2;
-                continue;
-            }
-            return index + 1;
-        }
-        index += 1;
-    }
-    bytes.len()
-}
-
-fn decode_oracle_quoted_identifier(identifier: &str) -> String {
-    identifier.strip_prefix('"').and_then(|value| value.strip_suffix('"')).unwrap_or(identifier).replace("\"\"", "\"")
 }
 
 fn skip_ascii_whitespace(input: &str, mut index: usize) -> usize {
@@ -4160,12 +3928,10 @@ fn column_def_with_charset(
     source_dialect: Option<DialectKind>,
     include_charset: bool,
 ) -> String {
-    if db_type == DatabaseType::SqlServer {
-        return sqlserver_column_definition(col, &col.data_type, source_dialect, None);
-    }
+    {}
     let profile = profile_for(db_type);
     let mut definition = format!("{} {}", quote_id(&col.name, db_type), col.data_type);
-    if include_charset && matches!(db_type, DatabaseType::Mysql | DatabaseType::Goldendb) {
+    if include_charset && matches!(db_type, DatabaseType::Mysql) {
         if let Some(character_set) = mysql_charset_value(col.character_set.as_deref()) {
             definition.push_str(&format!(" CHARACTER SET {}", quote_id(character_set, db_type)));
         }
@@ -4191,10 +3957,7 @@ fn column_def_with_charset(
 }
 
 fn qualified_name(name: &str, db_type: DatabaseType, schema: Option<&str>) -> String {
-    let schema = schema
-        .map(str::trim)
-        .filter(|schema| !schema.is_empty())
-        .or_else(|| (db_type == DatabaseType::SqlServer).then_some("dbo"));
+    let schema = schema.map(str::trim).filter(|schema| !schema.is_empty()).or_else(|| (false).then_some("dbo"));
     schema
         .map(|schema| format!("{}.{}", quote_id(schema, db_type), quote_id(name, db_type)))
         .unwrap_or_else(|| quote_id(name, db_type))
@@ -4365,36 +4128,9 @@ fn strip_identifier_quotes(segment: &str) -> String {
 fn drop_index_sql(table_name: &str, index_name: &str, db_type: DatabaseType, schema: Option<&str>) -> String {
     let profile = profile_for(db_type);
     let table = qualified_name(table_name, db_type, schema);
-    if db_type == DatabaseType::SqlServer {
-        let table_literal = table.replace('\'', "''");
-        let index_literal = index_name.replace('\'', "''");
-        let quoted_index = quote_id(index_name, db_type);
-        // sys.indexes also exposes the backing indexes of PRIMARY KEY and UNIQUE
-        // constraints. SQL Server rejects DROP INDEX for those and requires
-        // ALTER TABLE ... DROP CONSTRAINT instead, so resolve the object kind at
-        // execution time before choosing the documented drop form.
-        let batch = format!(
-            "DECLARE @dbx_constraint_name sysname, @dbx_drop_sql NVARCHAR(MAX); \
-             SELECT @dbx_constraint_name = kc.name \
-             FROM sys.key_constraints AS kc \
-             JOIN sys.indexes AS i ON i.object_id = kc.parent_object_id AND i.index_id = kc.unique_index_id \
-             WHERE kc.parent_object_id = OBJECT_ID(N'{table_literal}') AND i.name = N'{index_literal}'; \
-             IF @dbx_constraint_name IS NOT NULL BEGIN \
-               SET @dbx_drop_sql = N'ALTER TABLE {table_literal} DROP CONSTRAINT ' + QUOTENAME(@dbx_constraint_name); \
-               EXEC sys.sp_executesql @dbx_drop_sql; \
-             END ELSE IF EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'{table_literal}') AND name = N'{index_literal}') BEGIN \
-               DROP INDEX {quoted_index} ON {table}; \
-             END;"
-        );
-        return sqlserver_single_statement_batch(&batch);
-    }
+    {}
     let index = qualified_name(index_name, db_type, schema);
-    if matches!(db_type, DatabaseType::Oracle | DatabaseType::OceanbaseOracle) {
-        // Oracle versions before 23c do not support `DROP INDEX IF EXISTS`.
-        // Schema comparison already identified this index as present, so the
-        // direct form is both valid and sufficient for the generated script.
-        return format!("DROP INDEX {index};");
-    }
+    {}
     if profile.drop_index_uses_on_table {
         format!("DROP INDEX {} ON {table};", quote_id(index_name, db_type))
     } else {
@@ -4412,111 +4148,21 @@ fn mysql_index_column_sql(column: &str) -> String {
     }
 }
 
-fn is_postgres_family_ddl(db_type: DatabaseType) -> bool {
-    matches!(
-        db_type,
-        DatabaseType::Postgres
-            | DatabaseType::Redshift
-            | DatabaseType::Gaussdb
-            | DatabaseType::Kingbase
-            | DatabaseType::Highgo
-            | DatabaseType::Vastbase
-            | DatabaseType::OpenGauss
-            | DatabaseType::Kwdb
-            | DatabaseType::Firebird
-            | DatabaseType::Vertica
-            | DatabaseType::Exasol
-            | DatabaseType::Uxdb
-    )
-}
-
-/// One PostgreSQL index key part for DDL: the key text plus its operator class
-/// and, for B-tree keys, the explicit ordering.
-///
-/// Expression/functional index key parts (e.g. from pg_get_indexdef) arrive as raw
-/// expression text, not a plain column name; quoting the whole expression as an
-/// identifier turns it into a literal column reference that doesn't exist (#6295).
-///
-/// `pg_index.indoption` carries bit 0 = DESC and bit 1 = NULLS FIRST per key.
-/// Dropping it silently rebuilt `col DESC NULLS LAST` as a plain ASC key (#8559
-/// fixed exactly this for data transfer; the sync DDL kept losing it, #9988).
-/// Only B-tree keys carry meaningful flags, so other access methods keep the
-/// bare key text - same rule as the transfer path.
-fn postgres_index_column_sql(
-    column: &str,
-    is_expression: Option<bool>,
-    opclass: Option<&str>,
-    key_options: Option<i16>,
-    db_type: DatabaseType,
-) -> String {
-    let trimmed = column.trim();
-    let base = if is_expression.unwrap_or(false) { trimmed.to_string() } else { quote_id(column, db_type) };
-    decorate_postgres_index_key(&base, opclass, key_options)
-}
-
 pub fn create_index_sql(table_name: &str, index: &IndexInfo, db_type: DatabaseType, schema: Option<&str>) -> String {
     use crate::sql_dialect::ddl_profile::IndexTypePlacement;
     let profile = profile_for(db_type);
     let table = qualified_name(table_name, db_type, schema);
-    if db_type == DatabaseType::SqlServer
-        && index.columns.iter().enumerate().any(|(position, column)| {
-            index.key_is_expression.get(position).copied().unwrap_or(false) || column.trim_start().starts_with('(')
-        })
-    {
-        return format!(
-            "-- Skip index {} on {table}: SQL Server indexes require columns or pre-existing computed columns, not source-dialect expressions.",
-            index.name
-        );
-    }
+    {}
     let mut columns = index
         .columns
         .iter()
         .enumerate()
-        .map(|(i, column)| {
-            if db_type == DatabaseType::Mysql {
-                mysql_index_column_sql(column)
-            } else if is_postgres_family_ddl(db_type) {
-                let opclass = index.column_opclasses.get(i).and_then(|opclass| opclass.as_deref());
-                let key_options = index
-                    .index_type
-                    .as_deref()
-                    .filter(|index_type| index_type.trim().eq_ignore_ascii_case("btree"))
-                    .and_then(|_| index.key_options.get(i).copied());
-                postgres_index_column_sql(
-                    column,
-                    index.key_is_expression.get(i).copied(),
-                    opclass,
-                    key_options,
-                    db_type,
-                )
-            } else {
-                quote_id(column, db_type)
-            }
-        })
+        .map(|(i, column)| mysql_index_column_sql(column))
         .collect::<Vec<_>>()
         .join(", ");
     let source_index_type = index.index_type.as_deref().unwrap_or_default().trim();
-    let index_type = if db_type == DatabaseType::SqlServer {
-        match source_index_type.to_ascii_uppercase().as_str() {
-            "CLUSTERED" => "CLUSTERED".to_string(),
-            "NONCLUSTERED" => "NONCLUSTERED".to_string(),
-            "CLUSTERED COLUMNSTORE" => "CLUSTERED COLUMNSTORE".to_string(),
-            "NONCLUSTERED COLUMNSTORE" | "COLUMNSTORE" => "NONCLUSTERED COLUMNSTORE".to_string(),
-            // SQL Server rowstore indexes are B-trees by default.
-            "" | "BTREE" => String::new(),
-            _ => {
-                return format!(
-                    "-- Skip index {} on {table}: index type '{}' has no direct SQL Server CREATE INDEX form.",
-                    index.name, source_index_type
-                );
-            }
-        }
-    } else {
-        source_index_type.to_string()
-    };
-    if db_type == DatabaseType::SqlServer && index.is_unique && index_type.contains("COLUMNSTORE") {
-        return format!("-- Skip index {} on {table}: SQL Server columnstore indexes cannot be UNIQUE.", index.name);
-    }
+    let index_type = { source_index_type.to_string() };
+    {}
     let unique = if index.is_unique && !index_type.contains("COLUMNSTORE") { "UNIQUE " } else { "" };
     let (type_prefix, using_before_on, using_suffix) = if index_type.is_empty() {
         (String::new(), String::new(), String::new())
@@ -4529,10 +4175,7 @@ pub fn create_index_sql(table_name: &str, index: &IndexInfo, db_type: DatabaseTy
         }
     };
     let included_columns = index.included_columns.clone().unwrap_or_default();
-    let include_clause = if !included_columns.is_empty()
-        && profile.index_supports_include
-        && !(db_type == DatabaseType::SqlServer && index_type.contains("COLUMNSTORE"))
-    {
+    let include_clause = if !included_columns.is_empty() && profile.index_supports_include && !(false) {
         format!(
             " INCLUDE ({})",
             included_columns.iter().map(|column| quote_id(column, db_type)).collect::<Vec<_>>().join(", ")
@@ -4540,15 +4183,7 @@ pub fn create_index_sql(table_name: &str, index: &IndexInfo, db_type: DatabaseTy
     } else {
         String::new()
     };
-    if db_type == DatabaseType::SqlServer
-        && index_type == "NONCLUSTERED COLUMNSTORE"
-        && columns.is_empty()
-        && !included_columns.is_empty()
-    {
-        // sys.index_columns exposes columnstore members as included columns
-        // because a columnstore index has no key columns.
-        columns = included_columns.iter().map(|column| quote_id(column, db_type)).collect::<Vec<_>>().join(", ");
-    }
+    {}
     let filter = if profile.index_supports_filter { index.filter.as_deref().unwrap_or_default() } else { "" };
     let filter_clause = if filter.is_empty() { String::new() } else { format!(" WHERE {filter}") };
     let comment = index.comment.as_deref().unwrap_or("");
@@ -4557,9 +4192,7 @@ pub fn create_index_sql(table_name: &str, index: &IndexInfo, db_type: DatabaseTy
     } else {
         String::new()
     };
-    if db_type == DatabaseType::SqlServer && index_type == "CLUSTERED COLUMNSTORE" {
-        return format!("CREATE {type_prefix}INDEX {} ON {table};", quote_id(&index.name, db_type));
-    }
+    {}
     if columns.is_empty() {
         return format!("-- Skip index {} on {table}: no index columns were available.", index.name);
     }
@@ -4606,17 +4239,9 @@ fn add_foreign_key_sql_with_reference_separator(
             return String::new();
         };
         let normalized = value.trim().to_ascii_uppercase();
-        if db_type != DatabaseType::SqlServer {
+        {
             return format!(" ON {kind} {value}");
         }
-        let sqlserver_action = match normalized.as_str() {
-            "RESTRICT" | "NO ACTION" => "NO ACTION",
-            "CASCADE" => "CASCADE",
-            "SET NULL" => "SET NULL",
-            "SET DEFAULT" => "SET DEFAULT",
-            _ => return String::new(),
-        };
-        format!(" ON {kind} {sqlserver_action}")
     };
     let on_delete = action("DELETE", fk.on_delete.as_ref());
     let on_update = action("UPDATE", fk.on_update.as_ref());
@@ -4644,13 +4269,7 @@ fn ddl_column_name(column: &ColumnDiff) -> &str {
 fn drop_object_sql(diff: &TableDiff, db_type: DatabaseType, schema: Option<&str>, cascade: &str) -> String {
     let object_type = if diff.object_type.as_deref() == Some("view") { "VIEW" } else { "TABLE" };
     let name = qualified_name(target_table_name(diff), db_type, schema);
-    if db_type == DatabaseType::SqlServer {
-        let object_id_type = if object_type == "VIEW" { "V" } else { "U" };
-        return format!(
-            "IF OBJECT_ID(N'{}', N'{object_id_type}') IS NOT NULL DROP {object_type} {name};",
-            name.replace('\'', "''")
-        );
-    }
+    {}
     // Oracle only gained `IF EXISTS` in 23c, and Access/Firebird/Db2/Informix/HANA/Teradata
     // never had it; the comparison already knows the object exists on the target, so the
     // direct form is valid and sufficient — the same reasoning `drop_index_sql` uses.
@@ -4751,502 +4370,6 @@ fn default_literal(default: &str, data_type: &str, source: DialectKind, extra: O
     normalized.to_string()
 }
 
-fn consume_postgres_cast_name(value: &str, start: usize) -> Option<(usize, Option<String>)> {
-    let ch = value[start..].chars().next()?;
-    if ch == '"' {
-        let mut index = start + ch.len_utf8();
-        while index < value.len() {
-            let next = value[index..].chars().next().expect("index is on a character boundary");
-            index += next.len_utf8();
-            if next == '"' {
-                if value[index..].starts_with('"') {
-                    index += 1;
-                } else {
-                    return Some((index, None));
-                }
-            }
-        }
-        return None;
-    }
-    if ch.is_alphabetic() || ch == '_' {
-        let mut index = start + ch.len_utf8();
-        while index < value.len() {
-            let next = value[index..].chars().next().expect("index is on a character boundary");
-            if next.is_alphanumeric() || matches!(next, '_' | '$') {
-                index += next.len_utf8();
-            } else {
-                break;
-            }
-        }
-        return Some((index, Some(value[start..index].to_ascii_lowercase())));
-    }
-    None
-}
-
-fn postgres_cast_whitespace_end(value: &str, start: usize) -> usize {
-    start + value[start..].chars().take_while(|ch| ch.is_ascii_whitespace()).map(char::len_utf8).sum::<usize>()
-}
-
-fn consume_postgres_cast_keyword(value: &str, start: usize, keyword: &str) -> Option<usize> {
-    let token_start = postgres_cast_whitespace_end(value, start);
-    if token_start == start {
-        return None;
-    }
-    let (end, unquoted) = consume_postgres_cast_name(value, token_start)?;
-    unquoted.as_deref().is_some_and(|token| token.eq_ignore_ascii_case(keyword)).then_some(end)
-}
-
-fn postgres_dollar_quote_delimiter_end(value: &str, start: usize) -> Option<usize> {
-    if !value[start..].starts_with('$') {
-        return None;
-    }
-    if value[..start].chars().next_back().is_some_and(|ch| ch.is_alphanumeric() || matches!(ch, '_' | '$')) {
-        return None;
-    }
-    let relative_end = value[start + 1..].find('$')?;
-    let delimiter_end = start + 1 + relative_end + 1;
-    let tag = &value[start + 1..delimiter_end - 1];
-    let mut chars = tag.chars();
-    if let Some(first) = chars.next() {
-        if !(first.is_alphabetic() || first == '_') || !chars.all(|ch| ch.is_alphanumeric() || ch == '_') {
-            return None;
-        }
-    }
-    Some(delimiter_end)
-}
-
-fn consume_postgres_dollar_quoted(value: &str, start: usize) -> Option<usize> {
-    let delimiter_end = postgres_dollar_quote_delimiter_end(value, start)?;
-    let delimiter = &value[start..delimiter_end];
-    value[delimiter_end..].find(delimiter).map(|offset| delimiter_end + offset + delimiter.len())
-}
-
-fn postgres_escape_string_quote(value: &str, quote_index: usize) -> bool {
-    let mut prefix = value[..quote_index].char_indices().rev();
-    let Some((e_index, 'e' | 'E')) = prefix.next() else {
-        return false;
-    };
-    value[..e_index].chars().next_back().is_none_or(|ch| !(ch.is_alphanumeric() || matches!(ch, '_' | '$')))
-}
-
-fn consume_postgres_cast_group(value: &str, start: usize, open: char, close: char) -> Option<usize> {
-    if value[start..].chars().next()? != open {
-        return None;
-    }
-    let mut depth = 0usize;
-    let mut index = start;
-    let mut in_single_quote = false;
-    let mut in_escape_single_quote = false;
-    let mut in_double_quote = false;
-    while index < value.len() {
-        let ch = value[index..].chars().next().expect("index is on a character boundary");
-        let next_index = index + ch.len_utf8();
-        if in_single_quote && in_escape_single_quote && ch == '\\' {
-            index = value[next_index..].chars().next().map_or(next_index, |escaped| next_index + escaped.len_utf8());
-            continue;
-        }
-        if ch == '\'' && !in_double_quote {
-            if in_single_quote && value[next_index..].starts_with('\'') {
-                index = next_index + 1;
-                continue;
-            }
-            in_single_quote = !in_single_quote;
-            if in_single_quote {
-                in_escape_single_quote = postgres_escape_string_quote(value, index);
-            } else {
-                in_escape_single_quote = false;
-            }
-        } else if ch == '"' && !in_single_quote {
-            if in_double_quote && value[next_index..].starts_with('"') {
-                index = next_index + 1;
-                continue;
-            }
-            in_double_quote = !in_double_quote;
-        } else if !in_single_quote && !in_double_quote {
-            if postgres_dollar_quote_delimiter_end(value, index).is_some() {
-                index = consume_postgres_dollar_quoted(value, index)?;
-                continue;
-            }
-            if ch == open {
-                depth += 1;
-            } else if ch == close {
-                depth = depth.saturating_sub(1);
-                if depth == 0 {
-                    return Some(next_index);
-                }
-            }
-        }
-        index = next_index;
-    }
-    None
-}
-
-fn consume_postgres_cast_type(value: &str, start: usize) -> usize {
-    let mut index = postgres_cast_whitespace_end(value, start);
-    let Some((name_end, first_name)) = consume_postgres_cast_name(value, index) else {
-        return start;
-    };
-    index = name_end;
-    let mut qualified = false;
-
-    // A type name may be schema-qualified, with whitespace around the dot. Do
-    // not treat arbitrary whitespace-separated words as part of the type: that
-    // would consume expression operators such as `AND`, `IS`, or `COLLATE`.
-    loop {
-        let dot = postgres_cast_whitespace_end(value, index);
-        if !value[dot..].starts_with('.') {
-            break;
-        }
-        let component_start = postgres_cast_whitespace_end(value, dot + 1);
-        let Some((component_end, _)) = consume_postgres_cast_name(value, component_start) else {
-            return start;
-        };
-        qualified = true;
-        index = component_end;
-    }
-
-    let base_name = (!qualified).then_some(first_name).flatten();
-
-    // PostgreSQL has a small, explicit set of whitespace-separated built-in
-    // type names. Only those phrases may extend across whitespace; accepting an
-    // arbitrary second identifier corrupts expressions such as `x::int IS NULL`.
-    if let Some(base) = base_name.as_deref() {
-        match base {
-            "character" | "char" | "bit" => {
-                if let Some(end) = consume_postgres_cast_keyword(value, index, "varying") {
-                    index = end;
-                }
-            }
-            "double" => {
-                if let Some(end) = consume_postgres_cast_keyword(value, index, "precision") {
-                    index = end;
-                }
-            }
-            "national" => {
-                if let Some(end) = consume_postgres_cast_keyword(value, index, "character")
-                    .or_else(|| consume_postgres_cast_keyword(value, index, "char"))
-                {
-                    index = end;
-                    if let Some(end) = consume_postgres_cast_keyword(value, index, "varying") {
-                        index = end;
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
-    let modifier_start = postgres_cast_whitespace_end(value, index);
-    if value[modifier_start..].starts_with('(') {
-        let Some(end) = consume_postgres_cast_group(value, modifier_start, '(', ')') else {
-            return start;
-        };
-        index = end;
-    }
-
-    if matches!(base_name.as_deref(), Some("time" | "timestamp")) {
-        let suffix_start = index;
-        if let Some(with_end) = consume_postgres_cast_keyword(value, suffix_start, "with")
-            .or_else(|| consume_postgres_cast_keyword(value, suffix_start, "without"))
-        {
-            let Some(time_end) = consume_postgres_cast_keyword(value, with_end, "time") else {
-                return start;
-            };
-            let Some(zone_end) = consume_postgres_cast_keyword(value, time_end, "zone") else {
-                return start;
-            };
-            index = zone_end;
-        }
-    }
-
-    if base_name.as_deref() == Some("interval") {
-        const INTERVAL_FIELDS: &[&str] = &["year", "month", "day", "hour", "minute", "second"];
-        let field_start = index;
-        let field = INTERVAL_FIELDS
-            .iter()
-            .find_map(|field| consume_postgres_cast_keyword(value, field_start, field).map(|end| (*field, end)));
-        if let Some((first_field, first_end)) = field {
-            index = first_end;
-            let to_start = index;
-            if let Some(to_end) = consume_postgres_cast_keyword(value, to_start, "to") {
-                let valid_final_fields: &[&str] = match first_field {
-                    "year" => &["month"],
-                    "day" => &["hour", "minute", "second"],
-                    "hour" => &["minute", "second"],
-                    "minute" => &["second"],
-                    _ => &[],
-                };
-                let Some(final_end) =
-                    valid_final_fields.iter().find_map(|field| consume_postgres_cast_keyword(value, to_end, field))
-                else {
-                    return start;
-                };
-                index = final_end;
-            }
-
-            let precision_start = postgres_cast_whitespace_end(value, index);
-            if value[precision_start..].starts_with('(') {
-                let Some(end) = consume_postgres_cast_group(value, precision_start, '(', ')') else {
-                    return start;
-                };
-                index = end;
-            }
-        }
-    }
-
-    loop {
-        let array_start = postgres_cast_whitespace_end(value, index);
-        if !value[array_start..].starts_with('[') {
-            break;
-        }
-        let Some(end) = consume_postgres_cast_group(value, array_start, '[', ']') else {
-            return start;
-        };
-        let bounds = value[array_start + 1..end - 1].trim();
-        if !bounds.is_empty() && !bounds.chars().all(|ch| ch.is_ascii_digit()) {
-            return start;
-        }
-        index = end;
-    }
-
-    if value[index..]
-        .chars()
-        .next()
-        .is_some_and(|ch| ch.is_alphanumeric() || matches!(ch, '_' | '$' | '"' | '\'' | '('))
-    {
-        return start;
-    }
-
-    index
-}
-
-fn strip_postgres_default_casts(value: &str) -> String {
-    let mut result = String::with_capacity(value.len());
-    let mut segment_start = 0;
-    let mut index = 0;
-    let mut in_single_quote = false;
-    let mut in_escape_single_quote = false;
-    let mut in_double_quote = false;
-    while index < value.len() {
-        let ch = value[index..].chars().next().expect("index is on a character boundary");
-        if in_single_quote && in_escape_single_quote && ch == '\\' {
-            let next_index = index + ch.len_utf8();
-            index = value[next_index..].chars().next().map_or(next_index, |escaped| next_index + escaped.len_utf8());
-            continue;
-        }
-        if ch == '\'' && !in_double_quote {
-            let next_index = index + ch.len_utf8();
-            if in_single_quote && value[next_index..].starts_with('\'') {
-                index = next_index + 1;
-                continue;
-            }
-            in_single_quote = !in_single_quote;
-            if in_single_quote {
-                in_escape_single_quote = postgres_escape_string_quote(value, index);
-            } else {
-                in_escape_single_quote = false;
-            }
-            index = next_index;
-            continue;
-        }
-        if ch == '"' && !in_single_quote {
-            let next_index = index + ch.len_utf8();
-            if in_double_quote && value[next_index..].starts_with('"') {
-                index = next_index + 1;
-                continue;
-            }
-            in_double_quote = !in_double_quote;
-            index = next_index;
-            continue;
-        }
-        if !in_single_quote && !in_double_quote && postgres_dollar_quote_delimiter_end(value, index).is_some() {
-            index = consume_postgres_dollar_quoted(value, index).unwrap_or(value.len());
-            continue;
-        }
-        if !in_single_quote && !in_double_quote && value[index..].starts_with("::") {
-            let type_start = index + 2;
-            let cast_end = consume_postgres_cast_type(value, type_start);
-            if cast_end == type_start {
-                // Cast removal is all-or-nothing. Continuing after a malformed
-                // candidate could peel a nested `::` inside its unclosed
-                // modifier or array suffix and corrupt the original default.
-                return value.to_string();
-            }
-            result.push_str(&value[segment_start..index]);
-            index = cast_end;
-            segment_start = index;
-            continue;
-        }
-        index += ch.len_utf8();
-    }
-    result.push_str(&value[segment_start..]);
-    result
-}
-
-fn sqlserver_sequence_default(value: &str, target_schema: Option<&str>) -> Option<String> {
-    let lowered = value.trim().to_ascii_lowercase();
-    if !lowered.starts_with("nextval(") {
-        return None;
-    }
-    let start = value.find('\'')? + 1;
-    let end = value[start..].find('\'')? + start;
-    let sequence = value[start..end].split('.').next_back()?.trim_matches('"');
-    (!sequence.is_empty())
-        .then(|| format!("NEXT VALUE FOR {}", qualified_name(sequence, DatabaseType::SqlServer, target_schema)))
-}
-
-fn trim_outer_parentheses_for_match(mut value: &str) -> &str {
-    loop {
-        let trimmed = value.trim();
-        if !trimmed.starts_with('(') || !trimmed.ends_with(')') {
-            return trimmed;
-        }
-        let mut depth = 0usize;
-        let mut in_single_quote = false;
-        let mut closes_at_end = false;
-        let mut chars = trimmed.char_indices().peekable();
-        while let Some((index, ch)) = chars.next() {
-            if ch == '\'' {
-                if in_single_quote && chars.peek().is_some_and(|(_, next)| *next == '\'') {
-                    chars.next();
-                    continue;
-                }
-                in_single_quote = !in_single_quote;
-                continue;
-            }
-            if in_single_quote {
-                continue;
-            }
-            if ch == '(' {
-                depth += 1;
-            } else if ch == ')' {
-                depth = depth.saturating_sub(1);
-                if depth == 0 {
-                    closes_at_end = index + ch.len_utf8() == trimmed.len();
-                    if !closes_at_end {
-                        break;
-                    }
-                }
-            }
-        }
-        if !closes_at_end {
-            return trimmed;
-        }
-        value = &trimmed[1..trimmed.len() - 1];
-    }
-}
-
-fn sqlserver_hex_default(value: &str) -> Option<String> {
-    let trimmed = value.trim();
-    let digits =
-        if trimmed.len() >= 3 && (trimmed.starts_with("x'") || trimmed.starts_with("X'")) && trimmed.ends_with('\'') {
-            &trimmed[2..trimmed.len() - 1]
-        } else if trimmed.starts_with("'\\x") && trimmed.ends_with('\'') {
-            &trimmed[3..trimmed.len() - 1]
-        } else {
-            return None;
-        };
-    (!digits.is_empty() && digits.chars().all(|ch| ch.is_ascii_hexdigit())).then(|| format!("0x{digits}"))
-}
-
-fn sqlserver_bit_string_default(value: &str) -> Option<String> {
-    let trimmed = value.trim();
-    if trimmed.len() < 4 || !(trimmed.starts_with("b'") || trimmed.starts_with("B'")) || !trimmed.ends_with('\'') {
-        return None;
-    }
-    let bits = &trimmed[2..trimmed.len() - 1];
-    (!bits.is_empty() && bits.len() <= 64 && bits.bytes().all(|bit| matches!(bit, b'0' | b'1')))
-        .then(|| u64::from_str_radix(bits, 2).ok().map(|value| value.to_string()))
-        .flatten()
-}
-
-#[cfg(test)]
-fn sqlserver_default_literal(
-    default: &str,
-    mapped_type: &str,
-    source_dialect: Option<DialectKind>,
-    extra: Option<&str>,
-) -> String {
-    sqlserver_default_literal_for_schema(default, mapped_type, source_dialect, extra, None)
-}
-
-fn sqlserver_default_literal_for_schema(
-    default: &str,
-    mapped_type: &str,
-    source_dialect: Option<DialectKind>,
-    extra: Option<&str>,
-    target_schema: Option<&str>,
-) -> String {
-    let source = effective_source_dialect(source_dialect, DatabaseType::SqlServer);
-    let mut value = default_literal(default, mapped_type, source, extra);
-    if source == DialectKind::SqlServer {
-        return value;
-    }
-    if source == DialectKind::Postgres {
-        value = strip_postgres_default_casts(&value);
-    }
-
-    let normalized = value.trim();
-    let match_value = trim_outer_parentheses_for_match(normalized);
-    let lowered = match_value.to_ascii_lowercase();
-    let target_upper = mapped_type.trim().to_ascii_uppercase();
-    let target_is_binary = target_upper.starts_with("BINARY") || target_upper.starts_with("VARBINARY");
-    let target_is_bit = target_upper == "BIT";
-    let rewritten = if let Some(hex) = target_is_binary.then(|| sqlserver_hex_default(match_value)).flatten() {
-        hex
-    } else if target_is_bit && matches!(lowered.as_str(), "true" | "'true'" | "'t'" | "b'1'") {
-        "1".to_string()
-    } else if target_is_bit && matches!(lowered.as_str(), "false" | "'false'" | "'f'" | "b'0'") {
-        "0".to_string()
-    } else if let Some(bits) = sqlserver_bit_string_default(match_value) {
-        bits
-    } else if lowered == "now()"
-        || lowered.starts_with("now(")
-        || lowered == "transaction_timestamp()"
-        || lowered == "statement_timestamp()"
-        || lowered == "sysdate()"
-        || lowered == "localtimestamp"
-        || lowered.starts_with("localtimestamp(")
-        || (source == DialectKind::Mysql && (lowered == "localtime" || lowered.starts_with("localtime(")))
-        || lowered == "current_timestamp"
-        || lowered.starts_with("current_timestamp(")
-    {
-        // CURRENT_TIMESTAMP is SQL Server's GETDATE() synonym and therefore
-        // returns `datetime`, even when assigned to a higher-precision target.
-        // Use the native high-precision functions for datetime2/offset columns.
-        if target_upper.starts_with("DATETIMEOFFSET") {
-            "SYSDATETIMEOFFSET()".to_string()
-        } else if target_upper.starts_with("DATETIME2") {
-            "SYSDATETIME()".to_string()
-        } else {
-            "CURRENT_TIMESTAMP".to_string()
-        }
-    } else if matches!(lowered.as_str(), "uuid()" | "uuid_generate_v4()" | "gen_random_uuid()") {
-        "NEWID()".to_string()
-    } else if matches!(lowered.as_str(), "curdate()" | "current_date" | "current_date()") {
-        "CONVERT(date, GETDATE())".to_string()
-    } else if matches!(lowered.as_str(), "curtime()" | "current_time" | "current_time()" | "localtime")
-        || lowered.starts_with("current_time(")
-        || lowered.starts_with("localtime(")
-    {
-        "CONVERT(time, GETDATE())".to_string()
-    } else if let Some(sequence) = sqlserver_sequence_default(match_value, target_schema) {
-        sequence
-    } else if lowered.starts_with("e'") {
-        format!("N{}", &normalized[1..])
-    } else {
-        normalized.to_string()
-    };
-
-    let target_is_unicode =
-        target_upper.starts_with("NVARCHAR") || target_upper.starts_with("NCHAR") || target_upper.starts_with("NTEXT");
-    if target_is_unicode {
-        sqlserver_unicode_string_literal(&rewritten).unwrap_or(rewritten)
-    } else {
-        rewritten
-    }
-}
-
 /// A bare temporal default, with or without a precision argument, so
 /// `CURRENT_TIMESTAMP(6)` and `LOCALTIME(3)` are recognised alongside the bare
 /// keywords. `transfer::is_mysql_function_default` already accepts the
@@ -5270,168 +4393,6 @@ fn is_hex_literal(value: &str) -> bool {
     !digits.is_empty() && digits.chars().all(|c| c.is_ascii_hexdigit())
 }
 
-fn sqlserver_identity_clause(col: &ColumnInfo) -> Option<String> {
-    let extra = col.extra.as_deref().unwrap_or_default().trim();
-    let lowered = extra.to_ascii_lowercase();
-    if let Some(identity_index) = lowered.find("identity") {
-        let rest = extra[identity_index + "identity".len()..].trim_start();
-        if let Some(args) = rest.strip_prefix('(').and_then(|args| args.split_once(')').map(|pair| pair.0)) {
-            let values = args.split(',').map(str::trim).collect::<Vec<_>>();
-            if values.len() == 2 && values.iter().all(|value| value.parse::<i64>().is_ok()) {
-                return Some(format!("IDENTITY({},{})", values[0], values[1]));
-            }
-        }
-        return Some("IDENTITY(1,1)".to_string());
-    }
-    if lowered.contains("auto_increment") || lowered.contains("serial") {
-        return Some("IDENTITY(1,1)".to_string());
-    }
-    let source_base = col.data_type.split('(').next().unwrap_or(&col.data_type).trim().to_ascii_lowercase();
-    if matches!(source_base.as_str(), "serial" | "smallserial" | "bigserial") {
-        return Some("IDENTITY(1,1)".to_string());
-    }
-    None
-}
-
-fn sqlserver_column_definition(
-    col: &ColumnInfo,
-    mapped_type: &str,
-    source_dialect: Option<DialectKind>,
-    target_schema: Option<&str>,
-) -> String {
-    let mut definition = format!("{} {mapped_type}", quote_id(&col.name, DatabaseType::SqlServer));
-    let identity = sqlserver_identity_clause(col);
-    if let Some(identity) = &identity {
-        definition.push(' ');
-        definition.push_str(identity);
-    }
-    // PRIMARY KEY columns must be NOT NULL in SQL Server even when a source
-    // (notably SQLite metadata) reports the column as nullable.
-    definition.push_str(if col.is_nullable && !col.is_primary_key { " NULL" } else { " NOT NULL" });
-    // SQL Server does not permit a DEFAULT constraint on an IDENTITY column.
-    if identity.is_none() {
-        if let Some(default) = col.column_default.as_deref().filter(|value| !value.trim().is_empty()) {
-            definition.push_str(&format!(
-                " DEFAULT {}",
-                sqlserver_default_literal_for_schema(
-                    default,
-                    mapped_type,
-                    source_dialect,
-                    col.extra.as_deref(),
-                    target_schema,
-                )
-            ));
-        }
-    }
-    definition
-}
-
-fn sqlserver_has_default(col: &ColumnInfo) -> bool {
-    col.column_default
-        .as_deref()
-        .is_some_and(|value| !value.trim().is_empty() && !value.trim().eq_ignore_ascii_case("null"))
-}
-
-/// Keep a DECLARE/SELECT/IF default-constraint operation together when the deploy
-/// path splits top-level SQL on semicolons. The inner batch is a Unicode literal,
-/// so it is submitted to SQL Server as one executable statement.
-fn sqlserver_single_statement_batch(batch: &str) -> String {
-    format!("EXEC sys.sp_executesql N'{}';", batch.trim().trim_end_matches(';').replace('\'', "''"))
-}
-
-fn sqlserver_add_default_constraint_sql(
-    table: &str,
-    column_name: &str,
-    source: &ColumnInfo,
-    mapped_type: &str,
-    source_dialect: Option<DialectKind>,
-    target_schema: Option<&str>,
-) -> Option<String> {
-    let default = source
-        .column_default
-        .as_deref()
-        .filter(|value| !value.trim().is_empty() && !value.trim().eq_ignore_ascii_case("null"))?;
-    Some(format!(
-        "ALTER TABLE {table} ADD DEFAULT {} FOR {};",
-        sqlserver_default_literal_for_schema(
-            default,
-            mapped_type,
-            source_dialect,
-            source.extra.as_deref(),
-            target_schema,
-        ),
-        quote_id(column_name, DatabaseType::SqlServer)
-    ))
-}
-
-fn sqlserver_column_change_statements(
-    table: &str,
-    column_name: &str,
-    source: &ColumnInfo,
-    target: &ColumnInfo,
-    mapped_type: &str,
-    source_dialect: Option<DialectKind>,
-    target_schema: Option<&str>,
-) -> Vec<String> {
-    let definition_changed = !source.data_type.trim().eq_ignore_ascii_case(target.data_type.trim())
-        || source.is_nullable != target.is_nullable;
-    let default_changed =
-        source.column_default.as_deref().map(str::trim) != target.column_default.as_deref().map(str::trim);
-    let had_default = sqlserver_has_default(target);
-    let mut statements = Vec::new();
-
-    if definition_changed {
-        let mut alter_batch = Vec::new();
-        if had_default && !default_changed {
-            alter_batch.push(build_sqlserver_alter_column_preserving_default_sql(
-                table,
-                column_name,
-                mapped_type,
-                source.is_nullable,
-            ));
-        } else {
-            if had_default {
-                alter_batch.push(build_sqlserver_drop_default_constraint_sql(table, column_name));
-            }
-            let nullability = if source.is_nullable { "NULL" } else { "NOT NULL" };
-            alter_batch.push(format!(
-                "ALTER TABLE {table} ALTER COLUMN {} {mapped_type} {nullability};",
-                quote_id(column_name, DatabaseType::SqlServer)
-            ));
-            if default_changed {
-                if let Some(statement) = sqlserver_add_default_constraint_sql(
-                    table,
-                    column_name,
-                    source,
-                    mapped_type,
-                    source_dialect,
-                    target_schema,
-                ) {
-                    alter_batch.push(statement);
-                }
-            }
-        }
-        let batch = build_dependency_aware_alter_column_batch(table, column_name, &alter_batch.join("\n"));
-        statements.push(sqlserver_single_statement_batch(&batch));
-        return statements;
-    }
-
-    if default_changed {
-        if had_default {
-            statements.push(sqlserver_single_statement_batch(&build_sqlserver_drop_default_constraint_sql(
-                table,
-                column_name,
-            )));
-        }
-        if let Some(statement) =
-            sqlserver_add_default_constraint_sql(table, column_name, source, mapped_type, source_dialect, target_schema)
-        {
-            statements.push(statement);
-        }
-    }
-    statements
-}
-
 fn column_comment_sql(
     table_name: &str,
     column_name: &str,
@@ -5440,9 +4401,7 @@ fn column_comment_sql(
     schema: Option<&str>,
 ) -> Vec<String> {
     let table = qualified_name(table_name, db_type, schema);
-    if db_type == DatabaseType::SqlServer {
-        return build_sqlserver_column_comment_sql(&table, schema, table_name, column_name, comment);
-    }
+    {}
     let profile = profile_for(db_type);
     if profile.column_comment_via_modify_only {
         return vec![format!("-- Column comment for {column_name}: use ALTER TABLE ... MODIFY COLUMN to set comment")];
@@ -5453,9 +4412,7 @@ fn column_comment_sql(
 fn table_comment_sql(table_name: &str, comment: &str, db_type: DatabaseType, schema: Option<&str>) -> Vec<String> {
     let profile = profile_for(db_type);
     let table = qualified_name(table_name, db_type, schema);
-    if db_type == DatabaseType::SqlServer {
-        return build_sqlserver_table_comment_sql(&table, schema, table_name, comment);
-    }
+    {}
     if profile.table_comment_via_alter {
         vec![format!("ALTER TABLE {table} COMMENT = {};", quote_string_literal(comment))]
     } else {
@@ -5490,21 +4447,6 @@ fn create_trigger_sql(
             format!("CREATE TRIGGER {qname} {timing} {event} ON {table} FOR EACH ROW BEGIN {body} END;")
         }
     }
-}
-
-fn is_sqlserver_native_trigger_definition(definition: &str) -> bool {
-    Regex::new(r"(?i)^CREATE\s+(?:OR\s+ALTER\s+)?TRIGGER\b")
-        .expect("static SQL Server trigger regex")
-        .is_match(definition.trim())
-}
-
-fn sqlserver_native_function_sql(definition: &str, qualified_name: &str, is_modified: bool) -> Option<String> {
-    let trimmed = definition.trim().trim_end_matches(';').trim_end();
-    let prefix = Regex::new(r"(?i)^(?:(?:CREATE\s+OR\s+ALTER)|CREATE|ALTER)\s+FUNCTION\b").ok()?.find(trimmed)?;
-    let verb = if is_modified { "ALTER FUNCTION" } else { "CREATE FUNCTION" };
-    let definition_after_verb = trimmed[prefix.end()..].trim_start();
-    let arguments_start = definition_after_verb.find('(')?;
-    Some(format!("{verb} {qualified_name}{};", &definition_after_verb[arguments_start..]))
 }
 
 /// PostgreSQL-family drivers read routines through `pg_get_functiondef`, which already
@@ -5556,13 +4498,7 @@ fn generate_create_table_sql(
         };
         let col_name = quote_id(&col.name, db_type);
         let mapped_type = map_type(col);
-        if db_type == DatabaseType::SqlServer {
-            col_defs.push(sqlserver_column_definition(col, &mapped_type, source_dialect, schema));
-            if col.is_primary_key {
-                pk_cols.push(col_name);
-            }
-            continue;
-        }
+        {}
         let is_int = type_looks_integer(&mapped_type);
         let auto_build = apply_auto_inc_to_column_def(&profile, &col_name, &mapped_type, col, is_int);
 
@@ -5577,11 +4513,7 @@ fn generate_create_table_sql(
             AutoIncColumnBuild::AppendSuffix { suffix, skip_default, postgres_sequence } => {
                 // SQLite accepts AUTOINCREMENT only on an exact INTEGER
                 // PRIMARY KEY, so integer aliases must be normalized here too.
-                let effective_type = if db_type == DatabaseType::Sqlite && suffix.contains("AUTOINCREMENT") {
-                    "INTEGER"
-                } else {
-                    mapped_type.as_str()
-                };
+                let effective_type = { mapped_type.as_str() };
                 let mut def = format!("{} {}", col_name, effective_type);
                 def.push_str(&column_modifier_tail(&profile, col, &mapped_type, db_type, source_dialect, skip_default));
                 if profile.inline_column_comment {
@@ -5593,9 +4525,7 @@ fn generate_create_table_sql(
                     // SQLite requires AUTOINCREMENT to be part of an inline
                     // INTEGER PRIMARY KEY declaration; it cannot be combined
                     // with the table-level PRIMARY KEY clause below.
-                    if db_type == DatabaseType::Sqlite && col.is_primary_key && suffix.contains("AUTOINCREMENT") {
-                        def.push_str(" PRIMARY KEY");
-                    }
+                    {}
                     def.push_str(suffix);
                 }
                 if postgres_sequence {
@@ -5603,7 +4533,7 @@ fn generate_create_table_sql(
                     auto_col_name = Some(col.name.clone());
                 }
                 col_defs.push(def);
-                if col.is_primary_key && !(db_type == DatabaseType::Sqlite && suffix.contains("AUTOINCREMENT")) {
+                if col.is_primary_key && !(false) {
                     pk_cols.push(quote_id(&col.name, db_type));
                 }
             }
@@ -5734,28 +4664,12 @@ fn generate_create_table_sql(
             };
             let timing = &trigger.timing;
 
-            if db_type == DatabaseType::SqlServer
-                && source_dialect.is_some_and(|source| source != DialectKind::SqlServer)
-            {
-                missing.push(MissingRollbackObject {
-                    kind: "trigger".to_string(),
-                    name: trigger.name.clone(),
-                    table: Some(name.to_string()),
-                    reason: "source-dialect trigger bodies cannot be translated safely to T-SQL".to_string(),
-                });
-            } else if let Some(stmt) = &trigger.statement {
+            if let Some(stmt) = &trigger.statement {
                 if !stmt.trim().is_empty() {
                     let trimmed = stmt.trim().trim_end_matches(';');
-                    if db_type == DatabaseType::SqlServer && is_sqlserver_native_trigger_definition(trimmed) {
-                        // OBJECT_DEFINITION already returns the complete native
-                        // CREATE TRIGGER statement. Wrapping it as a trigger body
-                        // produces an invalid nested CREATE TRIGGER batch.
-                        lines.push(sqlserver_single_statement_batch(&format!("{trimmed};")));
-                    } else {
+                    {
                         let trigger_sql = create_trigger_sql(&profile, &trigger.name, timing, event_desc, &table, stmt);
-                        if db_type == DatabaseType::SqlServer {
-                            lines.push(sqlserver_single_statement_batch(&trigger_sql));
-                        } else {
+                        {
                             lines.push(trigger_sql);
                         }
                     }
@@ -5849,16 +4763,7 @@ fn append_sequence_diff_sql(
                 if let Some(source) = &diff.source {
                     if let Some(template) = profile.sequence_alter_template {
                         lines.push(format!("-- Alter sequence: {}", diff.name));
-                        if db_type == DatabaseType::SqlServer
-                            && diff.target.as_ref().is_some_and(|target| {
-                                !target.data_type.trim().eq_ignore_ascii_case(source.data_type.trim())
-                            })
-                        {
-                            lines.push(
-                                "-- SQL Server ALTER SEQUENCE cannot change the data type; recreate the sequence manually if the type must change."
-                                    .to_string(),
-                            );
-                        }
+                        {}
                         let name = qualified_name(&diff.name, db_type, schema);
                         let cycle = if source.cycle { "CYCLE" } else { "NO CYCLE" };
                         lines.push(DdlDialectProfile::render_template(
@@ -6132,7 +5037,7 @@ fn generate_schema_sync_sql_inner(
         rewrite_column_type(&source_type, db_type, source_dialect)
     };
     let is_same_dialect =
-        source_dialect.map(|source| DialectKind::from_database_type(db_type) == source).unwrap_or(false);
+        source_dialect.map(|source| source == DialectKind::from_database_type(db_type)).unwrap_or(false);
 
     append_sequence_diff_sql(&mut lines, sequence_diffs, profile, db_type, schema, cascade, |diff_type| {
         diff_type == "added"
@@ -6286,18 +5191,7 @@ fn generate_schema_sync_sql_inner(
                 }
             }
         }
-        if db_type == DatabaseType::SqlServer {
-            if let Some(indexes) = &diff.indexes {
-                for index in indexes {
-                    if index.diff_type == "removed" || (index.diff_type == "modified" && index.source.is_some()) {
-                        // SQL Server will reject DROP/ALTER COLUMN while a changed
-                        // index still depends on it. Drop changed indexes before
-                        // applying column DDL, then recreate modified ones below.
-                        lines.push(drop_index_sql(target_name, &index.name, db_type, schema));
-                    }
-                }
-            }
-        }
+        {}
 
         if let Some(columns) = &diff.columns {
             let convert_col =
@@ -6306,15 +5200,8 @@ fn generate_schema_sync_sql_inner(
                 match column.diff_type.as_str() {
                     "added" => {
                         if let Some(source) = &column.source {
-                            if db_type == DatabaseType::SqlServer {
-                                let mapped = convert_col(source);
-                                standalone_statements.push(format!(
-                                    "ALTER TABLE {table} ADD {};",
-                                    sqlserver_column_definition(source, &mapped.data_type, source_dialect, schema)
-                                ));
-                                continue;
-                            }
-                            let position = if db_type == DatabaseType::Mysql {
+                            {}
+                            let position = {
                                 match &column.add_position {
                                     Some(ColumnAddPosition::First) => " FIRST".to_string(),
                                     Some(ColumnAddPosition::After(predecessor)) => {
@@ -6322,8 +5209,6 @@ fn generate_schema_sync_sql_inner(
                                     }
                                     None => String::new(),
                                 }
-                            } else {
-                                String::new()
                             };
                             let definition = column_def(&convert_col(source), db_type, source_dialect);
                             // Oracle has no `COLUMN` keyword here: it parenthesizes the whole
@@ -6336,17 +5221,7 @@ fn generate_schema_sync_sql_inner(
                         }
                     }
                     "removed" => {
-                        if db_type == DatabaseType::SqlServer {
-                            if column.target.as_ref().is_some_and(sqlserver_has_default) {
-                                standalone_statements.push(sqlserver_single_statement_batch(
-                                    &build_sqlserver_drop_default_constraint_sql(&table, &column.name),
-                                ));
-                            }
-                            standalone_statements
-                                .push(format!("ALTER TABLE {table} DROP COLUMN {};", quote_id(&column.name, db_type)));
-                        } else {
-                            parts.push(format!("  DROP COLUMN {}", quote_id(&column.name, db_type)));
-                        }
+                        parts.push(format!("  DROP COLUMN {}", quote_id(&column.name, db_type)));
                     }
                     "modified" => {
                         if let Some(source) = &column.source {
@@ -6355,19 +5230,7 @@ fn generate_schema_sync_sql_inner(
                             if mapped.name != target_column_name {
                                 mapped.name = target_column_name.to_string();
                             }
-                            if db_type == DatabaseType::SqlServer {
-                                if let Some(target_col) = &column.target {
-                                    standalone_statements.extend(sqlserver_column_change_statements(
-                                        &table,
-                                        target_column_name,
-                                        source,
-                                        target_col,
-                                        &mapped.data_type,
-                                        source_dialect,
-                                        schema,
-                                    ));
-                                }
-                            } else if profile.parenthesized_alter_column_clause {
+                            if profile.parenthesized_alter_column_clause {
                                 // Oracle spells the whole column change as one
                                 // `MODIFY (col definition)` clause, which also carries the
                                 // `DEFAULT`/`NOT NULL` order the server accepts.
@@ -6456,36 +5319,6 @@ fn generate_schema_sync_sql_inner(
                                         );
                                     }
                                 }
-                                RenameColumnSyntax::AlterColumnRenameTo => {
-                                    let old_name = quote_id(&target_col.name, db_type);
-                                    let new_name = quote_id(&column.name, db_type);
-                                    parts.push(format!("  ALTER COLUMN {old_name} RENAME TO {new_name}"));
-                                    if source.data_type.to_lowercase() != target_col.data_type.to_lowercase() {
-                                        parts.push(format!(
-                                            "  ALTER COLUMN {new_name} SET DATA TYPE {}",
-                                            mapped.data_type
-                                        ));
-                                    }
-                                }
-                                RenameColumnSyntax::SqlServerSpRename => {
-                                    let target_table = qualified_name(target_name, db_type, schema);
-                                    let full_obj_path =
-                                        format!("{target_table}.{}", quote_id(&target_col.name, db_type));
-                                    standalone_statements.push(format!(
-                                        "EXEC sp_rename '{}', '{}', 'COLUMN';",
-                                        full_obj_path.replace('\'', "''"),
-                                        column.name.replace('\'', "''")
-                                    ));
-                                    standalone_statements.extend(sqlserver_column_change_statements(
-                                        &target_table,
-                                        &column.name,
-                                        source,
-                                        target_col,
-                                        &mapped.data_type,
-                                        source_dialect,
-                                        schema,
-                                    ));
-                                }
                             }
                         }
                     }
@@ -6552,13 +5385,11 @@ fn generate_schema_sync_sql_inner(
                         }
                     }
                     "removed" => {
-                        if db_type != DatabaseType::SqlServer {
-                            lines.push(drop_index_sql(target_name, &index.name, db_type, schema));
-                        }
+                        lines.push(drop_index_sql(target_name, &index.name, db_type, schema));
                     }
                     "modified" => {
                         if let Some(source) = &index.source {
-                            if db_type != DatabaseType::SqlServer {
+                            {
                                 lines.push(drop_index_sql(target_name, &index.name, db_type, schema));
                             }
                             lines.push(create_index_sql(target_name, source, db_type, schema));
@@ -6611,39 +5442,19 @@ fn generate_schema_sync_sql_inner(
             match diff.diff_type.as_str() {
                 "added" | "modified" => {
                     if let Some(source) = &diff.source {
-                        if db_type == DatabaseType::SqlServer
-                            && source_dialect.is_some_and(|source| source != DialectKind::SqlServer)
-                        {
-                            lines.push(format!(
-                                "-- Skip function {}: source-dialect function definitions cannot be translated safely to T-SQL",
-                                diff.name
-                            ));
-                            continue;
-                        }
+                        {}
                         if let Some(template) = profile.function_create_template {
                             let verb = if diff.diff_type == "added" { "Create" } else { "Alter" };
                             lines.push(format!("-- {verb} function: {}", diff.name));
-                            if db_type == DatabaseType::SqlServer {
-                                let name = qualified_name(&diff.name, db_type, schema);
-                                if let Some(sql) = sqlserver_native_function_sql(
-                                    &source.definition,
-                                    &name,
-                                    diff.diff_type == "modified",
-                                ) {
-                                    lines.push(sqlserver_single_statement_batch(&sql));
-                                    continue;
-                                }
-                            }
-                            if db_type != DatabaseType::SqlServer {
+                            {}
+                            {
                                 let name = qualified_name(&diff.name, db_type, schema);
                                 if let Some(sql) = native_create_routine_sql(&source.definition, &name) {
                                     lines.push(sql);
                                     continue;
                                 }
                             }
-                            let create_kw = if db_type == DatabaseType::SqlServer && diff.diff_type == "modified" {
-                                "ALTER FUNCTION"
-                            } else if profile.create_function_or_replace {
+                            let create_kw = if profile.create_function_or_replace {
                                 "CREATE OR REPLACE FUNCTION"
                             } else {
                                 "CREATE FUNCTION"
@@ -6653,9 +5464,7 @@ fn generate_schema_sync_sql_inner(
                                 template,
                                 &[("create_kw", create_kw), ("name", &name), ("definition", &source.definition)],
                             );
-                            if db_type == DatabaseType::SqlServer {
-                                lines.push(sqlserver_single_statement_batch(&function_sql));
-                            } else {
+                            {
                                 lines.push(function_sql);
                             }
                         } else {
@@ -6946,18 +5755,6 @@ mod tests {
     }
 
     #[test]
-    fn goldendb_charset_metadata_uses_the_mysql_dialect() {
-        let mut options = mysql_charset_options(true);
-        options.database_type = DatabaseType::Goldendb;
-        options.source_dialect = None;
-        options.target_dialect = None;
-
-        let result = prepare_schema_diff(options);
-        assert_eq!(result.diffs.len(), 1);
-        assert!(result.sync_sql.contains("CHARACTER SET `utf8mb4` COLLATE `utf8mb4_0900_ai_ci`"));
-    }
-
-    #[test]
     fn disabling_mysql_charset_comparison_preserves_other_column_and_key_differences() {
         let mut options = mysql_charset_options(false);
         let source_column = &mut options.source_details[0].columns[0];
@@ -6999,26 +5796,6 @@ mod tests {
                     && index.source.as_ref().is_some_and(|info| info.is_unique && info.name == "uq_users_name")
             })
         }));
-    }
-
-    #[test]
-    fn mysql_charset_metadata_is_not_compared_unless_both_dialects_are_mysql() {
-        let mut options = mysql_charset_options(true);
-        options.source_dialect = Some(DialectKind::Postgres);
-
-        assert!(prepare_schema_diff(options).diffs.is_empty());
-    }
-
-    #[test]
-    fn oracle_schema_sync_drops_indexes_without_if_exists() {
-        assert_eq!(
-            drop_index_sql("orders", "idx_orders_status", DatabaseType::Oracle, Some("APP")),
-            "DROP INDEX APP.IDX_ORDERS_STATUS;"
-        );
-        assert_eq!(
-            drop_index_sql("orders", "idx_orders_status", DatabaseType::OceanbaseOracle, Some("APP")),
-            "DROP INDEX APP.IDX_ORDERS_STATUS;"
-        );
     }
 
     #[test]
@@ -7236,16 +6013,6 @@ mod tests {
     }
 
     #[test]
-    fn non_mysql_add_columns_do_not_emit_mysql_position_clauses() {
-        let diffs = make_col_diffs(&[("first", "int"), ("a", "int"), ("middle", "int")], &[("a", "int")], false);
-
-        let sql = gen_sql(wrap_table_diff("t", diffs), DatabaseType::Postgres, None);
-
-        assert!(!sql.contains(" FIRST"), "PostgreSQL must not use FIRST: {sql}");
-        assert!(!sql.contains(" AFTER "), "PostgreSQL must not use AFTER: {sql}");
-    }
-
-    #[test]
     fn mysql_add_after_renamed_predecessor_uses_final_source_name() {
         let diffs =
             make_col_diffs(&[("new_name", "varchar(32)"), ("inserted", "int")], &[("old_name", "varchar(32)")], true);
@@ -7287,1425 +6054,6 @@ mod tests {
         assert!(sql.contains("MODIFY COLUMN `id`"), "MySQL modify: {sql}");
     }
 
-    // -- 2. Same-dialect: PostgreSQL (double-quotes, ALTER COLUMN … TYPE) --
-    #[test]
-    fn postgresql_same_dialect_modify_and_rename() {
-        let diffs = make_col_diffs(
-            &[("id", "int"), ("name2", "varchar(120)"), ("create_at", "timestamp")],
-            &[("id", "int"), ("name", "varchar(120)")],
-            true,
-        );
-        let sql = gen_sql(wrap_table_diff("t", diffs), DatabaseType::Postgres, None);
-        assert!(sql.contains("RENAME COLUMN"), "PG rename: {sql}");
-        assert!(sql.contains("ADD COLUMN"), "PG add: {sql}");
-        assert!(sql.contains("\"t\""), "PG double-quote table: {sql}");
-        assert!(!sql.contains('`'), "PG no backticks: {sql}");
-    }
-
-    // -- 3. Cross-dialect type conversion: MySQL → PostgreSQL --
-    #[test]
-    fn mysql_to_postgresql_type_conversion_full() {
-        let diffs = make_col_diffs(
-            &[("id", "int(11)"), ("name2", "varchar(120)"), ("flag", "tinyint(2)"), ("ts", "datetime")],
-            &[("id", "integer"), ("name", "varchar(120)"), ("flag", "smallint")],
-            true,
-        );
-        let sql = gen_sql(wrap_table_diff("t", diffs), DatabaseType::Postgres, Some(DialectKind::Mysql));
-        assert!(sql.contains("RENAME COLUMN"), "PG rename: {sql}");
-        assert!(sql.contains("ADD COLUMN"), "PG add: {sql}");
-        assert!(sql.contains("INTEGER"), "int(11)→INTEGER: {sql}");
-        assert!(sql.contains("SMALLINT"), "tinyint→SMALLINT: {sql}");
-        assert!(sql.contains("TIMESTAMP"), "datetime→TIMESTAMP: {sql}");
-        assert!(!sql.contains('`'), "PG no backticks: {sql}");
-    }
-
-    #[test]
-    fn mysql_to_postgresql_type_conversion_modified_only() {
-        let diffs = make_col_diffs(
-            &[("id", "int(11)"), ("amount", "decimal(10,2)"), ("created", "datetime")],
-            &[("id", "integer"), ("amount", "numeric(10,2)"), ("created", "timestamp")],
-            false,
-        );
-        let sql_with = gen_sql(wrap_table_diff("t", diffs.clone()), DatabaseType::Postgres, Some(DialectKind::Mysql));
-        let sql_without = gen_sql(wrap_table_diff("t", diffs), DatabaseType::Postgres, None);
-        assert!(sql_with.contains("INTEGER"), "with: int(11)→INTEGER: {sql_with}");
-        assert!(sql_with.contains("TIMESTAMP"), "with: datetime→TIMESTAMP: {sql_with}");
-        // No source dialect: matrix skipped, but target profile still strips display width.
-        assert!(sql_without.contains("INT"), "without: display width stripped: {sql_without}");
-        assert!(!sql_without.contains("int(11)"), "without: no MySQL display width: {sql_without}");
-        assert!(sql_without.contains("datetime"), "without: datetime preserved: {sql_without}");
-    }
-
-    // -- 4. Reverse: PostgreSQL → MySQL --
-    #[test]
-    fn postgresql_to_mysql_type_conversion_reverse() {
-        let diffs = make_col_diffs(
-            &[("id", "integer"), ("label", "text"), ("active", "boolean")],
-            &[("id", "int"), ("label", "varchar(255)")],
-            false,
-        );
-        let sql = gen_sql(wrap_table_diff("t", diffs), DatabaseType::Mysql, Some(DialectKind::Postgres));
-        assert!(sql.contains('`'), "MySQL backticks: {sql}");
-        assert!(sql.contains("MODIFY COLUMN"), "MySQL modify: {sql}");
-        assert!(sql.contains("LONGTEXT"), "text→LONGTEXT: {sql}");
-        assert!(sql.contains("TINYINT(1)"), "boolean→TINYINT(1): {sql}");
-        assert!(sql.contains("INT"), "integer→INT: {sql}");
-    }
-
-    #[test]
-    fn postgres_create_table_serial_pk_omits_source_sequence_default() {
-        // #10086: on a Postgres-family target (Kingbase in the report), the source
-        // column's raw `column_default` is a live `nextval('<old>_id_seq'::regclass)`
-        // cast pointing at the *source* database's sequence. Inlining that into
-        // `CREATE TABLE ... DEFAULT nextval(...)` fails at parse time on the target
-        // because that sequence doesn't exist there yet ("relation ... does not
-        // exist") — before the table is even created. The correct default is the
-        // `ALTER TABLE ... SET DEFAULT nextval('<name>_<col>_seq')` this function
-        // already emits further down, against the *new* sequence it just created.
-        let columns = vec![ColumnDiff {
-            diff_type: "added".into(),
-            name: "id".into(),
-            source: Some(ColumnInfo {
-                name: "id".into(),
-                data_type: "bigint".into(),
-                is_nullable: false,
-                is_primary_key: true,
-                column_default: Some("nextval('collection_abnormal_record_id_seq'::regclass)".into()),
-                ..Default::default()
-            }),
-            target: None,
-            changes: vec![],
-            add_position: None,
-        }];
-        let (sql, missing) = generate_create_table_sql(
-            "collection_abnormal_record",
-            &columns,
-            &[],
-            &[],
-            None,
-            DatabaseType::Postgres,
-            None,
-            Some(DialectKind::Postgres),
-            &[],
-            &[],
-        );
-        assert!(missing.is_empty(), "{missing:?}");
-        let create_table = sql.split("CREATE SEQUENCE").next().unwrap();
-        assert!(
-            !create_table.contains("nextval"),
-            "CREATE TABLE must not reference the source's sequence before the new one exists: {sql}"
-        );
-        assert!(sql.contains("CREATE SEQUENCE IF NOT EXISTS"), "new sequence: {sql}");
-        assert!(
-            sql.contains("ALTER TABLE \"collection_abnormal_record\" ALTER COLUMN \"id\" SET DEFAULT nextval("),
-            "default wired up after the sequence exists: {sql}"
-        );
-    }
-
-    #[test]
-    fn sync_to_sqlite_keeps_plain_integer_pk_without_autoincrement() {
-        let columns = vec![ColumnDiff {
-            diff_type: "added".into(),
-            name: "id".into(),
-            source: Some(ColumnInfo {
-                name: "id".into(),
-                data_type: "int".into(),
-                is_nullable: false,
-                is_primary_key: true,
-                ..Default::default()
-            }),
-            target: None,
-            changes: vec![],
-            add_position: None,
-        }];
-        let (sql, missing) = generate_create_table_sql(
-            "t",
-            &columns,
-            &[],
-            &[],
-            None,
-            DatabaseType::Sqlite,
-            None,
-            Some(DialectKind::Mysql),
-            &[],
-            &[],
-        );
-        assert!(missing.is_empty(), "{missing:?}");
-        assert!(!sql.contains("AUTOINCREMENT"), "plain integer PK must not gain AUTOINCREMENT: {sql}");
-        assert!(sql.contains("PRIMARY KEY"), "table-level PK must be preserved: {sql}");
-    }
-
-    #[test]
-    fn sync_to_sqlite_composite_integer_pk_stays_valid() {
-        let columns = vec![
-            ColumnDiff {
-                diff_type: "added".into(),
-                name: "a".into(),
-                source: Some(ColumnInfo {
-                    name: "a".into(),
-                    data_type: "int".into(),
-                    is_nullable: false,
-                    is_primary_key: true,
-                    ..Default::default()
-                }),
-                target: None,
-                changes: vec![],
-                add_position: None,
-            },
-            ColumnDiff {
-                diff_type: "added".into(),
-                name: "b".into(),
-                source: Some(ColumnInfo {
-                    name: "b".into(),
-                    data_type: "int".into(),
-                    is_nullable: false,
-                    is_primary_key: true,
-                    ..Default::default()
-                }),
-                target: None,
-                changes: vec![],
-                add_position: None,
-            },
-        ];
-        let (sql, missing) = generate_create_table_sql(
-            "t",
-            &columns,
-            &[],
-            &[],
-            None,
-            DatabaseType::Sqlite,
-            None,
-            Some(DialectKind::Mysql),
-            &[],
-            &[],
-        );
-        assert!(missing.is_empty(), "{missing:?}");
-        assert!(!sql.contains("AUTOINCREMENT"), "composite PK must not gain AUTOINCREMENT: {sql}");
-        assert!(sql.matches("PRIMARY KEY").count() == 1, "single table-level PK expected: {sql}");
-    }
-
-    #[test]
-    fn sync_to_sqlite_explicit_autoincrement_preserved_and_normalized() {
-        let columns = vec![ColumnDiff {
-            diff_type: "added".into(),
-            name: "id".into(),
-            source: Some(ColumnInfo {
-                name: "id".into(),
-                data_type: "bigint".into(),
-                is_nullable: false,
-                is_primary_key: true,
-                extra: Some("auto_increment".to_string()),
-                ..Default::default()
-            }),
-            target: None,
-            changes: vec![],
-            add_position: None,
-        }];
-        let (sql, missing) = generate_create_table_sql(
-            "t",
-            &columns,
-            &[],
-            &[],
-            None,
-            DatabaseType::Sqlite,
-            None,
-            Some(DialectKind::Mysql),
-            &[],
-            &[],
-        );
-        assert!(missing.is_empty(), "{missing:?}");
-        assert!(sql.contains("PRIMARY KEY AUTOINCREMENT"), "explicit auto-increment preserved: {sql}");
-        assert!(sql.contains("INTEGER"), "bigint must normalize to exact INTEGER: {sql}");
-        assert!(!sql.contains("BIGINT"), "bigint must normalize to exact INTEGER: {sql}");
-        assert!(!sql.contains("PRIMARY KEY (\"id\")"), "no duplicate table-level PK: {sql}");
-    }
-
-    // -- 5. MySQL → SQLite type conversion --
-    #[test]
-    fn mysql_to_sqlite_type_conversion() {
-        let diffs = make_col_diffs(
-            &[("id", "int(11)"), ("renamed", "varchar(255)")],
-            &[("id", "integer"), ("old", "text")],
-            true,
-        );
-        let sql = gen_sql(wrap_table_diff("t", diffs), DatabaseType::Sqlite, Some(DialectKind::Mysql));
-        assert!(sql.contains("RENAME COLUMN"), "SQLite rename: {sql}");
-        assert!(sql.contains("INTEGER"), "int(11)→INTEGER: {sql}");
-        assert!(!sql.contains('`'), "SQLite no backticks: {sql}");
-    }
-
-    // -- 6. Database-specific rename syntax --
-    #[test]
-    fn sqlserver_rename_uses_sp_rename() {
-        let diffs = make_col_diffs(
-            &[("id", "int"), ("new_name", "varchar(100)")],
-            &[("id", "int"), ("old_name", "varchar(100)")],
-            true,
-        );
-        let sql = gen_sql(wrap_table_diff("orders", diffs), DatabaseType::SqlServer, None);
-        assert!(sql.contains("sp_rename"), "SQL Server uses sp_rename: {sql}");
-        assert!(sql.contains("[dbo].[orders]"), "sp_rename table path: {sql}");
-        assert!(!sql.contains("ALTER TABLE [dbo].[orders]  EXEC sp_rename"), "sp_rename must be standalone: {sql}");
-        assert!(sql.lines().any(|line| line.starts_with("EXEC sp_rename")), "standalone sp_rename: {sql}");
-        assert!(!sql.contains('`'), "SQL Server no backticks: {sql}");
-    }
-
-    #[test]
-    fn sqlserver_schema_diff_adds_columns_and_unicode_comments_with_tsql() {
-        let source = vec![ColumnInfo {
-            is_nullable: true,
-            comment: Some("厂家追溯码's".to_string()),
-            ..column("manufacture_trace_code", "varchar(200)", None)
-        }];
-        let diffs = diff_columns_with_options(&source, &[], false, false, false, 0.5);
-        let sql = generate_schema_sync_sql(
-            &[wrap_table_diff("inter_putaway_sub", diffs)],
-            &[],
-            &[],
-            &[],
-            &[],
-            DatabaseType::SqlServer,
-            Some("dbo"),
-            false,
-            Some(DialectKind::SqlServer),
-            &[],
-        );
-
-        assert!(
-            sql.contains("ALTER TABLE [dbo].[inter_putaway_sub] ADD [manufacture_trace_code] varchar(200) NULL;"),
-            "SQL Server ADD syntax: {sql}"
-        );
-        assert!(sql.contains("sys.sp_addextendedproperty"), "SQL Server comment add: {sql}");
-        assert!(sql.contains("@value=N'厂家追溯码''s'"), "Unicode comment escaping: {sql}");
-        assert!(!sql.contains("ADD COLUMN"), "SQL Server must not emit ADD COLUMN: {sql}");
-        assert!(!sql.contains("COMMENT ON"), "SQL Server must not emit COMMENT ON: {sql}");
-    }
-
-    #[test]
-    fn sqlserver_schema_diff_renders_default_constraint_transitions_as_single_batches() {
-        let transitions =
-            [(None, Some("((0))"), true), (Some("((0))"), Some("((1))"), true), (Some("((0))"), None, false)];
-
-        for (old_default, new_default, expects_add) in transitions {
-            let source = vec![ColumnInfo {
-                column_default: new_default.map(str::to_string),
-                ..column("frozen_status", "int", None)
-            }];
-            let target = vec![ColumnInfo {
-                column_default: old_default.map(str::to_string),
-                ..column("frozen_status", "int", None)
-            }];
-            let diffs = diff_columns_with_options(&source, &target, false, false, false, 0.5);
-            let sql = generate_schema_sync_sql(
-                &[wrap_table_diff("wbs_flat_package_data_sub", diffs)],
-                &[],
-                &[],
-                &[],
-                &[],
-                DatabaseType::SqlServer,
-                Some("dbo"),
-                false,
-                Some(DialectKind::SqlServer),
-                &[],
-            );
-
-            assert!(!sql.contains(" SET DEFAULT "), "SQL Server must not emit SET DEFAULT: {sql}");
-            assert!(!sql.contains(" DROP DEFAULT"), "SQL Server must not emit DROP DEFAULT: {sql}");
-            if old_default.is_some() {
-                assert!(sql.contains("sys.default_constraints"), "default lookup: {sql}");
-                assert!(sql.contains("DROP CONSTRAINT"), "default drop: {sql}");
-                assert!(sql.contains("EXEC sys.sp_executesql N'"), "drop batch wrapper: {sql}");
-            }
-            if expects_add {
-                assert!(
-                    sql.contains(&format!("ADD DEFAULT {} FOR [frozen_status]", new_default.unwrap())),
-                    "default add: {sql}"
-                );
-            } else {
-                assert!(!sql.contains("ADD DEFAULT"), "default removal must not re-add: {sql}");
-            }
-
-            let statements = crate::sql::split_sql_statements_for_database(&sql, DatabaseType::SqlServer);
-            assert!(
-                statements.iter().all(|statement| !statement.trim_start().starts_with("DECLARE ")),
-                "SQL Server splitter must keep helper batches together: {statements:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn sqlserver_schema_diff_alters_full_column_definition_and_preserves_default() {
-        let source = vec![ColumnInfo {
-            is_nullable: false,
-            column_default: Some("((0))".to_string()),
-            ..column("amount", "bigint", None)
-        }];
-        let target = vec![ColumnInfo {
-            is_nullable: true,
-            column_default: Some("((0))".to_string()),
-            ..column("amount", "int", None)
-        }];
-        let diffs = diff_columns_with_options(&source, &target, false, false, false, 0.5);
-        let sql = generate_schema_sync_sql(
-            &[wrap_table_diff("payments", diffs)],
-            &[],
-            &[],
-            &[],
-            &[],
-            DatabaseType::SqlServer,
-            Some("billing"),
-            false,
-            Some(DialectKind::SqlServer),
-            &[],
-        );
-
-        assert!(
-            sql.contains("ALTER TABLE [billing].[payments] ALTER COLUMN [amount] bigint NOT NULL"),
-            "full SQL Server column definition: {sql}"
-        );
-        assert!(sql.contains("dc.definition"), "existing default definition must be captured: {sql}");
-        assert!(sql.contains("ADD CONSTRAINT"), "existing default constraint must be restored: {sql}");
-        assert!(!sql.contains(" ALTER COLUMN [amount] TYPE "), "no PostgreSQL TYPE syntax: {sql}");
-        assert!(!sql.contains(" SET NOT NULL"), "no PostgreSQL nullability syntax: {sql}");
-
-        let statements = crate::sql::split_sql_statements_for_database(&sql, DatabaseType::SqlServer);
-        assert_eq!(statements.len(), 1, "preserve-default batch must stay atomic: {statements:?}");
-        assert!(statements[0].trim_start().starts_with("-- Alter table: payments\nEXEC sys.sp_executesql N'"));
-    }
-
-    #[test]
-    fn sqlserver_schema_diff_upserts_and_drops_escaped_column_comments() {
-        let cases = [
-            (None, Some("owner's 新值"), true, true, false),
-            (Some("旧值"), Some("owner's 新值"), true, true, false),
-            (Some("旧值"), None, false, false, true),
-        ];
-
-        for (old_comment, new_comment, expects_add, expects_update, expects_drop) in cases {
-            let source = vec![column("display'name", "nvarchar(80)", new_comment)];
-            let target = vec![column("display'name", "nvarchar(80)", old_comment)];
-            let diffs = diff_columns_with_options(&source, &target, false, false, false, 0.5);
-            let sql = generate_schema_sync_sql(
-                &[wrap_table_diff("user's", diffs)],
-                &[],
-                &[],
-                &[],
-                &[],
-                DatabaseType::SqlServer,
-                Some("app's"),
-                false,
-                Some(DialectKind::SqlServer),
-                &[],
-            );
-
-            assert_eq!(sql.contains("sys.sp_addextendedproperty"), expects_add, "comment add: {sql}");
-            assert_eq!(sql.contains("sys.sp_updateextendedproperty"), expects_update, "comment update: {sql}");
-            assert_eq!(sql.contains("sys.sp_dropextendedproperty"), expects_drop, "comment drop: {sql}");
-            assert!(sql.contains("N'app''s'"), "schema escaping: {sql}");
-            assert!(sql.contains("N'user''s'"), "table escaping: {sql}");
-            assert!(sql.contains("N'display''name'"), "column escaping: {sql}");
-            if new_comment.is_some() {
-                assert!(sql.contains("N'owner''s 新值'"), "comment escaping: {sql}");
-            }
-            assert!(!sql.contains("COMMENT ON"), "SQL Server must not emit COMMENT ON: {sql}");
-
-            let statements = crate::sql::split_sql_statements_for_database(&sql, DatabaseType::SqlServer);
-            assert_eq!(statements.len(), 1, "comment transition must be one T-SQL statement: {statements:?}");
-        }
-    }
-
-    #[test]
-    fn sqlserver_schema_diff_rollback_uses_the_same_tsql_strategy() {
-        let source = vec![ColumnInfo {
-            column_default: Some("((1))".to_string()),
-            comment: Some("new".to_string()),
-            ..column("status", "int", None)
-        }];
-        let target = vec![ColumnInfo {
-            column_default: Some("((0))".to_string()),
-            comment: Some("old".to_string()),
-            ..column("status", "int", None)
-        }];
-        let diffs = diff_columns_with_options(&source, &target, false, false, false, 0.5);
-        let plan = generate_schema_sync_sql_plan(
-            &[wrap_table_diff("orders", diffs)],
-            &[],
-            &[],
-            &[],
-            &[],
-            DatabaseType::SqlServer,
-            Some("dbo"),
-            false,
-            Some(DialectKind::SqlServer),
-            &[],
-            true,
-        );
-        let rollback = plan.rollback_sync_sql.expect("rollback SQL");
-
-        for (direction, sql) in [("forward", &plan.sync_sql), ("rollback", &rollback)] {
-            assert!(sql.contains("sys.default_constraints"), "{direction} default constraint strategy: {sql}");
-            assert!(sql.contains("sys.sp_updateextendedproperty"), "{direction} comment strategy: {sql}");
-            assert!(!sql.contains(" SET DEFAULT "), "{direction} no PostgreSQL default syntax: {sql}");
-            assert!(!sql.contains("COMMENT ON"), "{direction} no PostgreSQL comment syntax: {sql}");
-        }
-        assert!(plan.sync_sql.contains("ADD DEFAULT ((1)) FOR [status]"), "forward: {}", plan.sync_sql);
-        assert!(rollback.contains("ADD DEFAULT ((0)) FOR [status]"), "rollback: {rollback}");
-    }
-
-    #[test]
-    fn sqlserver_column_changes_use_tsql_syntax() {
-        let added = ColumnInfo { column_default: Some("(0)".into()), ..column("status", "int", None) };
-        let source_amount = ColumnInfo {
-            is_nullable: false,
-            column_default: Some("((1))".into()),
-            ..column("amount", "decimal(18,2)", None)
-        };
-        let target_amount = ColumnInfo {
-            is_nullable: true,
-            column_default: Some("((0))".into()),
-            ..column("amount", "decimal(10,2)", None)
-        };
-        let diff = wrap_table_diff(
-            "orders",
-            vec![
-                ColumnDiff {
-                    diff_type: "added".into(),
-                    name: "status".into(),
-                    source: Some(added),
-                    target: None,
-                    changes: Vec::new(),
-                    add_position: None,
-                },
-                ColumnDiff {
-                    diff_type: "modified".into(),
-                    name: "amount".into(),
-                    source: Some(source_amount),
-                    target: Some(target_amount),
-                    changes: vec![
-                        "type: decimal(10,2) → decimal(18,2)".into(),
-                        "nullable: YES → NO".into(),
-                        "default: ((0)) → ((1))".into(),
-                    ],
-                    add_position: None,
-                },
-            ],
-        );
-
-        let sql = generate_schema_sync_sql(
-            &[diff],
-            &[],
-            &[],
-            &[],
-            &[],
-            DatabaseType::SqlServer,
-            Some("sales"),
-            false,
-            Some(DialectKind::SqlServer),
-            &[],
-        );
-
-        assert!(
-            sql.contains("ALTER TABLE [sales].[orders] ADD [status] int NOT NULL DEFAULT (0);"),
-            "ADD must use SQL Server column syntax: {sql}"
-        );
-        assert!(
-            sql.contains("ALTER TABLE [sales].[orders] ALTER COLUMN [amount] decimal(18,2) NOT NULL;"),
-            "ALTER COLUMN must repeat type and nullability: {sql}"
-        );
-        assert!(sql.contains("sys.default_constraints"), "old default constraint must be discovered: {sql}");
-        assert!(
-            sql.contains("ALTER TABLE [sales].[orders] ADD DEFAULT ((1)) FOR [amount];"),
-            "new default constraint: {sql}"
-        );
-        assert!(!sql.contains("ADD COLUMN"), "SQL Server must not emit ADD COLUMN: {sql}");
-        assert!(!sql.contains(" TYPE "), "SQL Server must not emit PostgreSQL TYPE syntax: {sql}");
-        assert!(!sql.contains("SET NOT NULL"), "SQL Server must not emit SET NOT NULL: {sql}");
-        assert!(!sql.contains("SET DEFAULT"), "SQL Server must not emit SET DEFAULT: {sql}");
-
-        let parsed = crate::sql::split_sql_statements_for_database(&sql, DatabaseType::SqlServer);
-        assert!(
-            parsed.iter().any(|statement| statement.contains("EXEC sys.sp_executesql N'SET ANSI_NULLS ON;")),
-            "{parsed:?}"
-        );
-        assert!(!parsed.iter().any(|statement| statement.trim_start().starts_with("DECLARE ")), "{parsed:?}");
-    }
-
-    #[test]
-    fn sqlserver_type_change_preserves_unchanged_default_constraint() {
-        let source = ColumnInfo { column_default: Some("((0))".into()), ..column("count", "bigint", None) };
-        let target = ColumnInfo { column_default: Some("((0))".into()), ..column("count", "int", None) };
-        let diff = wrap_table_diff(
-            "metrics",
-            vec![ColumnDiff {
-                diff_type: "modified".into(),
-                name: "count".into(),
-                source: Some(source),
-                target: Some(target),
-                changes: vec!["type: int → bigint".into()],
-                add_position: None,
-            }],
-        );
-
-        let sql = gen_sql(diff, DatabaseType::SqlServer, Some(DialectKind::SqlServer));
-
-        assert!(sql.contains("EXEC sys.sp_executesql N'SET ANSI_NULLS ON;"), "single executable batch: {sql}");
-        assert!(sql.contains("dc.definition"), "default expression must be preserved: {sql}");
-        assert!(sql.contains("DROP CONSTRAINT"), "old default must be removed before ALTER COLUMN: {sql}");
-        assert!(
-            sql.contains("ALTER TABLE [dbo].[metrics] ALTER COLUMN [count] bigint NOT NULL"),
-            "valid ALTER COLUMN: {sql}"
-        );
-        assert!(sql.contains("ADD CONSTRAINT"), "original default constraint name must be restored: {sql}");
-    }
-
-    #[test]
-    fn sqlserver_schema_diff_rollback_preserves_default_and_column_comment_changes() {
-        let source = vec![ColumnInfo {
-            column_default: Some("((1))".to_string()),
-            comment: Some("new owner's state".to_string()),
-            ..column("status", "int", None)
-        }];
-        let target = vec![ColumnInfo {
-            column_default: Some("((0))".to_string()),
-            comment: Some("旧状态".to_string()),
-            ..column("status", "int", None)
-        }];
-        let diffs = diff_columns_with_options(&source, &target, false, false, false, 0.5);
-        let plan = generate_schema_sync_sql_plan(
-            &[wrap_table_diff("orders", diffs)],
-            &[],
-            &[],
-            &[],
-            &[],
-            DatabaseType::SqlServer,
-            Some("dbo"),
-            false,
-            Some(DialectKind::SqlServer),
-            &[],
-            true,
-        );
-        let rollback = plan.rollback_sync_sql.expect("rollback SQL");
-
-        for (direction, sql) in [("forward", &plan.sync_sql), ("rollback", &rollback)] {
-            assert!(sql.contains("sys.default_constraints"), "{direction} default constraint strategy: {sql}");
-            assert!(sql.contains("sys.sp_updateextendedproperty"), "{direction} comment update strategy: {sql}");
-            assert!(sql.contains("sys.sp_addextendedproperty"), "{direction} comment add fallback: {sql}");
-            assert!(!sql.contains(" SET DEFAULT "), "{direction} no PostgreSQL default syntax: {sql}");
-            assert!(!sql.contains("COMMENT ON"), "{direction} no PostgreSQL comment syntax: {sql}");
-        }
-        assert!(plan.sync_sql.contains("ADD DEFAULT ((1)) FOR [status]"), "forward: {}", plan.sync_sql);
-        assert!(plan.sync_sql.contains("N'new owner''s state'"), "forward comment: {}", plan.sync_sql);
-        assert!(rollback.contains("ADD DEFAULT ((0)) FOR [status]"), "rollback: {rollback}");
-        assert!(rollback.contains("N'旧状态'"), "rollback comment: {rollback}");
-    }
-
-    #[test]
-    fn sqlserver_index_comments_and_drop_object_use_tsql() {
-        let comment_source = column("payload", "nvarchar(max)", Some("new description"));
-        let comment_target = column("payload", "nvarchar(max)", Some("old description"));
-        let modified = TableDiff {
-            diff_type: "modified".into(),
-            object_type: Some("table".into()),
-            name: "events".into(),
-            target_name: None,
-            columns: Some(vec![ColumnDiff {
-                diff_type: "modified".into(),
-                name: "payload".into(),
-                source: Some(comment_source),
-                target: Some(comment_target),
-                changes: vec!["comment: old description → new description".into()],
-                add_position: None,
-            }]),
-            indexes: Some(vec![IndexDiff {
-                diff_type: "removed".into(),
-                name: "idx_events_payload".into(),
-                source: None,
-                target: None,
-                changes: Vec::new(),
-            }]),
-            foreign_keys: None,
-            triggers: None,
-            ddl: None,
-            target_ddl: None,
-            source_table_comment: Some(Some("new table description".into())),
-            target_table_comment: Some(Some("old table description".into())),
-            sync_sql: None,
-        };
-
-        let sql = generate_schema_sync_sql(
-            &[modified],
-            &[],
-            &[],
-            &[],
-            &[],
-            DatabaseType::SqlServer,
-            Some("audit"),
-            false,
-            Some(DialectKind::SqlServer),
-            &[],
-        );
-        assert!(sql.contains("DROP INDEX [idx_events_payload] ON [audit].[events];"), "DROP INDEX: {sql}");
-        assert!(sql.contains("sys.sp_updateextendedproperty"), "update existing MS_Description: {sql}");
-        assert!(sql.contains("sys.sp_addextendedproperty"), "add missing MS_Description: {sql}");
-        assert!(!sql.contains("sys.sp_dropextendedproperty"), "non-empty comments are not dropped first: {sql}");
-        assert!(!sql.contains("COMMENT ON"), "SQL Server has no COMMENT ON: {sql}");
-
-        let removed = TableDiff {
-            diff_type: "removed".into(),
-            object_type: Some("table".into()),
-            name: "events".into(),
-            target_name: None,
-            ..Default::default()
-        };
-        let drop_sql = generate_schema_sync_sql(
-            &[removed],
-            &[],
-            &[],
-            &[],
-            &[],
-            DatabaseType::SqlServer,
-            Some("audit"),
-            true,
-            Some(DialectKind::SqlServer),
-            &[],
-        );
-        assert!(
-            drop_sql.contains("IF OBJECT_ID(N'[audit].[events]', N'U') IS NOT NULL DROP TABLE [audit].[events];"),
-            "version-compatible conditional DROP: {drop_sql}"
-        );
-        assert!(!drop_sql.contains("CASCADE"), "SQL Server has no DROP CASCADE: {drop_sql}");
-    }
-
-    #[test]
-    fn sqlserver_structured_create_preserves_only_explicit_identity() {
-        let identity =
-            ColumnInfo { is_primary_key: true, extra: Some("identity(10,5)".into()), ..column("id", "int", None) };
-        let ordinary_pk = ColumnInfo { is_primary_key: true, is_nullable: true, ..column("tenant_id", "int", None) };
-        let added = TableDiff {
-            diff_type: "added".into(),
-            object_type: Some("table".into()),
-            name: "accounts".into(),
-            target_name: None,
-            columns: Some(vec![
-                ColumnDiff {
-                    diff_type: "added".into(),
-                    name: "id".into(),
-                    source: Some(identity),
-                    target: None,
-                    changes: Vec::new(),
-                    add_position: None,
-                },
-                ColumnDiff {
-                    diff_type: "added".into(),
-                    name: "tenant_id".into(),
-                    source: Some(ordinary_pk),
-                    target: None,
-                    changes: Vec::new(),
-                    add_position: None,
-                },
-            ]),
-            ..Default::default()
-        };
-
-        let sql = generate_schema_sync_sql(
-            &[added],
-            &[],
-            &[],
-            &[],
-            &[],
-            DatabaseType::SqlServer,
-            Some("dbo"),
-            false,
-            Some(DialectKind::SqlServer),
-            &[],
-        );
-        assert!(sql.contains("[id] int IDENTITY(10,5) NOT NULL"), "identity order and seed: {sql}");
-        assert!(sql.contains("[tenant_id] int NOT NULL"), "SQL Server PK columns cannot be nullable: {sql}");
-        assert_eq!(sql.matches("IDENTITY(").count(), 1, "integer PKs must not become identity implicitly: {sql}");
-        assert!(sql.contains("PRIMARY KEY ([id], [tenant_id])"), "primary key: {sql}");
-    }
-
-    #[test]
-    fn sqlserver_function_and_sequence_changes_use_tsql_verbs() {
-        let function = FunctionDiff {
-            diff_type: "modified".into(),
-            name: "next_value".into(),
-            source: Some(FunctionInfo {
-                name: "next_value".into(),
-                function_type: "scalar".into(),
-                data_type: "int".into(),
-                definition: "() RETURNS int AS BEGIN RETURN 1 END".into(),
-                arguments: String::new(),
-            }),
-            target: None,
-            changes: Vec::new(),
-        };
-        let removed_function = FunctionDiff {
-            diff_type: "removed".into(),
-            name: "old_value".into(),
-            source: None,
-            target: None,
-            changes: Vec::new(),
-        };
-        let sequence = SequenceDiff {
-            diff_type: "modified".into(),
-            name: "event_seq".into(),
-            source: Some(SequenceInfo {
-                name: "event_seq".into(),
-                data_type: "bigint".into(),
-                start_value: "10".into(),
-                min_value: "1".into(),
-                max_value: "9223372036854775807".into(),
-                increment: "5".into(),
-                cycle: false,
-                last_value: None,
-            }),
-            target: Some(SequenceInfo {
-                name: "event_seq".into(),
-                data_type: "int".into(),
-                start_value: "1".into(),
-                min_value: "1".into(),
-                max_value: "2147483647".into(),
-                increment: "1".into(),
-                cycle: false,
-                last_value: None,
-            }),
-            changes: Vec::new(),
-        };
-
-        let sql = generate_schema_sync_sql(
-            &[],
-            &[function, removed_function],
-            &[sequence],
-            &[],
-            &[],
-            DatabaseType::SqlServer,
-            Some("dbo"),
-            false,
-            Some(DialectKind::SqlServer),
-            &[],
-        );
-        assert!(sql.contains("ALTER FUNCTION [dbo].[next_value]"), "modified function: {sql}");
-        assert!(sql.contains("DROP FUNCTION [dbo].[old_value];"), "removed function: {sql}");
-        assert!(!sql.contains("DROP FUNCTION IF EXISTS"), "legacy-compatible function drop: {sql}");
-        assert!(
-            sql.contains(
-                "ALTER SEQUENCE [dbo].[event_seq] RESTART WITH 10 INCREMENT BY 5 MINVALUE 1 MAXVALUE 9223372036854775807 NO CYCLE;"
-            ),
-            "modified sequence: {sql}"
-        );
-        assert!(!sql.contains("ALTER SEQUENCE [dbo].[event_seq] AS"), "ALTER SEQUENCE cannot change type: {sql}");
-        assert!(!sql.contains("ALTER SEQUENCE [dbo].[event_seq] START WITH"), "use RESTART WITH: {sql}");
-        assert!(sql.contains("cannot change the data type"), "manual type-change diagnostic: {sql}");
-    }
-
-    #[test]
-    fn sqlserver_drops_changed_indexes_and_defaults_before_columns() {
-        let target_column = ColumnInfo { column_default: Some("((0))".into()), ..column("legacy_status", "int", None) };
-        let target_index = IndexInfo {
-            name: "idx_events_legacy_status".into(),
-            columns: vec!["legacy_status".into()],
-            is_unique: false,
-            is_primary: false,
-            filter: None,
-            index_type: Some("NONCLUSTERED".into()),
-            included_columns: None,
-            comment: None,
-            key_is_expression: Vec::new(),
-            column_opclasses: vec![],
-            key_options: Vec::new(),
-            constraint_backed: false,
-        };
-        let diff = TableDiff {
-            diff_type: "modified".into(),
-            object_type: Some("table".into()),
-            name: "events".into(),
-            target_name: None,
-            columns: Some(vec![ColumnDiff {
-                diff_type: "removed".into(),
-                name: "legacy_status".into(),
-                source: None,
-                target: Some(target_column),
-                changes: Vec::new(),
-                add_position: None,
-            }]),
-            indexes: Some(vec![IndexDiff {
-                diff_type: "removed".into(),
-                name: "idx_events_legacy_status".into(),
-                source: None,
-                target: Some(target_index),
-                changes: Vec::new(),
-            }]),
-            ..Default::default()
-        };
-
-        let sql = generate_schema_sync_sql(
-            &[diff],
-            &[],
-            &[],
-            &[],
-            &[],
-            DatabaseType::SqlServer,
-            Some("dbo"),
-            false,
-            Some(DialectKind::SqlServer),
-            &[],
-        );
-        let index_drop = sql.find("DROP INDEX [idx_events_legacy_status] ON [dbo].[events]").expect("index drop");
-        let default_drop = sql.find("sys.default_constraints").expect("default constraint lookup");
-        let column_drop = sql.find("ALTER TABLE [dbo].[events] DROP COLUMN [legacy_status]").expect("column drop");
-        assert!(index_drop < default_drop && default_drop < column_drop, "dependency order: {sql}");
-        assert!(sql.contains("sys.key_constraints"), "constraint-backed index handling: {sql}");
-        assert_eq!(
-            sql.matches("DROP INDEX [idx_events_legacy_status] ON [dbo].[events]").count(),
-            1,
-            "drop once: {sql}"
-        );
-    }
-
-    #[test]
-    fn sqlserver_column_changes_capture_dependencies_omitted_from_the_diff() {
-        let source_column = column("amount", "bigint", None);
-        let target_column = column("amount", "int", None);
-        let unchanged_index = IndexInfo {
-            name: "idx_events_amount".into(),
-            columns: vec!["amount".into()],
-            is_unique: false,
-            is_primary: false,
-            filter: None,
-            index_type: Some("NONCLUSTERED".into()),
-            included_columns: None,
-            comment: None,
-            key_is_expression: Vec::new(),
-            column_opclasses: vec![],
-            key_options: Vec::new(),
-            constraint_backed: false,
-        };
-        let unchanged_fk = ForeignKeyInfo {
-            name: "fk_events_parent".into(),
-            column: "amount".into(),
-            ref_schema: Some("dbo".into()),
-            ref_table: "parents".into(),
-            ref_column: "amount".into(),
-            on_update: None,
-            on_delete: None,
-        };
-        let detail = |column: ColumnInfo| TableSchemaDetail {
-            name: "events".into(),
-            columns: vec![column],
-            indexes: vec![unchanged_index.clone()],
-            foreign_keys: vec![unchanged_fk.clone()],
-            triggers: Vec::new(),
-            ddl: None,
-        };
-        let prepared = prepare_schema_diff(SchemaDiffPreparationOptions {
-            source_tables: vec![table_info("events", "BASE TABLE")],
-            target_tables: vec![table_info("events", "BASE TABLE")],
-            source_details: vec![detail(source_column)],
-            target_details: vec![detail(target_column)],
-            database_type: DatabaseType::SqlServer,
-            target_schema: Some("dbo".into()),
-            source_dialect: Some(DialectKind::SqlServer),
-            target_dialect: Some(DialectKind::SqlServer),
-            ..Default::default()
-        });
-
-        assert_eq!(prepared.diffs.len(), 1);
-        assert!(prepared.diffs[0].indexes.is_none(), "unchanged index is intentionally absent from the diff");
-        assert!(prepared.diffs[0].foreign_keys.is_none(), "unchanged FK is intentionally absent from the diff");
-
-        let sql = &prepared.sync_sql;
-        for catalog in [
-            "sys.indexes AS idx",
-            "sys.key_constraints AS key_constraint",
-            "sys.check_constraints AS cc",
-            "sys.foreign_keys AS fk",
-            "sys.stats_columns AS sc",
-        ] {
-            assert!(sql.contains(catalog), "runtime dependency catalog {catalog}: {sql}");
-        }
-        assert!(sql.contains("fkc.referenced_object_id = @dbx_object_id"), "inbound FK predicate: {sql}");
-        assert!(sql.contains("THEN N''PRIMARY KEY '' ELSE N''UNIQUE '' END"), "preserve key object type: {sql}");
-        assert!(sql.contains("ALTER COLUMN [amount] bigint NOT NULL"), "column alter: {sql}");
-        assert!(!sql.contains("idx_events_amount"), "dependency names must come from the live target catalog: {sql}");
-        assert!(!sql.contains("fk_events_parent"), "dependency names must come from the live target catalog: {sql}");
-
-        let executable = crate::sql::split_sql_statements_for_database(sql, DatabaseType::SqlServer);
-        assert_eq!(executable.len(), 1, "the catalog snapshot/drop/alter/recreate flow must stay in one batch: {sql}");
-        assert!(executable[0].contains("EXEC sys.sp_executesql N'"), "single executable batch: {sql}");
-    }
-
-    #[test]
-    fn sqlserver_index_and_foreign_key_forms_follow_tsql() {
-        let btree = IndexInfo {
-            name: "idx_events_status".into(),
-            columns: vec!["status".into()],
-            is_unique: true,
-            is_primary: false,
-            filter: Some("[status] IS NOT NULL".into()),
-            index_type: Some("BTREE".into()),
-            included_columns: Some(vec!["payload".into()]),
-            comment: None,
-            key_is_expression: Vec::new(),
-            column_opclasses: vec![],
-            key_options: Vec::new(),
-            constraint_backed: false,
-        };
-        let btree_sql = create_index_sql("events", &btree, DatabaseType::SqlServer, Some("dbo"));
-        assert_eq!(
-            btree_sql,
-            "CREATE UNIQUE INDEX [idx_events_status] ON [dbo].[events] ([status]) INCLUDE ([payload]) WHERE [status] IS NOT NULL;"
-        );
-        assert!(!btree_sql.contains("BTREE"));
-
-        let columnstore = IndexInfo {
-            name: "ix_events_analytics".into(),
-            columns: Vec::new(),
-            is_unique: false,
-            is_primary: false,
-            filter: None,
-            index_type: Some("NONCLUSTERED COLUMNSTORE".into()),
-            included_columns: Some(vec!["status".into(), "payload".into()]),
-            comment: None,
-            key_is_expression: Vec::new(),
-            column_opclasses: vec![],
-            key_options: Vec::new(),
-            constraint_backed: false,
-        };
-        assert_eq!(
-            create_index_sql("events", &columnstore, DatabaseType::SqlServer, Some("dbo")),
-            "CREATE NONCLUSTERED COLUMNSTORE INDEX [ix_events_analytics] ON [dbo].[events] ([status], [payload]);"
-        );
-
-        let fk = ForeignKeyInfo {
-            name: "fk_events_user".into(),
-            column: "user_id".into(),
-            ref_schema: Some("crm".into()),
-            ref_table: "users".into(),
-            ref_column: "id".into(),
-            on_update: Some("RESTRICT".into()),
-            on_delete: Some("SET NULL".into()),
-        };
-        let fk_sql = add_foreign_key_sql("events", &fk, DatabaseType::SqlServer, Some("dbo"));
-        assert!(fk_sql.contains("ON DELETE SET NULL ON UPDATE NO ACTION"), "FK actions: {fk_sql}");
-        assert!(!fk_sql.contains("RESTRICT"), "SQL Server does not accept RESTRICT: {fk_sql}");
-    }
-
-    #[test]
-    fn sqlserver_uses_native_trigger_and_function_definitions_only_for_tsql_sources() {
-        let columns = vec![ColumnDiff {
-            diff_type: "added".into(),
-            name: "id".into(),
-            source: Some(column("id", "int", None)),
-            target: None,
-            changes: Vec::new(),
-            add_position: None,
-        }];
-        let trigger = TriggerInfo {
-            name: "trg_events_insert".into(),
-            event: "INSERT".into(),
-            timing: "AFTER".into(),
-            level: None,
-            condition: None,
-            language: None,
-            enabled: Some(true),
-            valid: None,
-            comment: None,
-            created_at: None,
-            statement: Some(
-                "CREATE TRIGGER [dbo].[trg_events_insert] ON [dbo].[events] AFTER INSERT AS BEGIN SELECT 1; END".into(),
-            ),
-        };
-        let (native_sql, native_missing) = generate_create_table_sql(
-            "events",
-            &columns,
-            &[],
-            &[],
-            None,
-            DatabaseType::SqlServer,
-            Some("dbo"),
-            Some(DialectKind::SqlServer),
-            &[],
-            std::slice::from_ref(&trigger),
-        );
-        assert!(native_missing.is_empty(), "native trigger is reconstructible");
-        assert_eq!(native_sql.matches("CREATE TRIGGER").count(), 1, "do not nest native DDL: {native_sql}");
-        assert!(!native_sql.contains("AS BEGIN CREATE TRIGGER"), "native trigger body: {native_sql}");
-        let native_trigger_statements =
-            crate::sql::split_sql_statements_for_database(&native_sql, DatabaseType::SqlServer);
-        let trigger_batches = native_trigger_statements
-            .iter()
-            .filter(|statement| statement.contains("CREATE TRIGGER"))
-            .collect::<Vec<_>>();
-        assert_eq!(
-            trigger_batches.len(),
-            1,
-            "trigger body must remain one executable batch: {native_trigger_statements:?}"
-        );
-        let trigger_executable = trigger_batches[0]
-            .lines()
-            .find(|line| !line.trim().is_empty() && !line.trim_start().starts_with("--"))
-            .expect("trigger executable line");
-        assert!(trigger_executable.starts_with("EXEC sys.sp_executesql N'"), "trigger batch: {trigger_batches:?}");
-
-        let (_, cross_missing) = generate_create_table_sql(
-            "events",
-            &columns,
-            &[],
-            &[],
-            None,
-            DatabaseType::SqlServer,
-            Some("dbo"),
-            Some(DialectKind::Mysql),
-            &[],
-            &[trigger],
-        );
-        assert_eq!(cross_missing.len(), 1, "foreign trigger must require manual translation");
-
-        let native_function = FunctionDiff {
-            diff_type: "modified".into(),
-            name: "next_value".into(),
-            source: Some(FunctionInfo {
-                name: "next_value".into(),
-                function_type: "scalar".into(),
-                data_type: "int".into(),
-                definition: "CREATE FUNCTION [source].[next_value]() RETURNS int AS BEGIN RETURN 2 END".into(),
-                arguments: String::new(),
-            }),
-            target: None,
-            changes: Vec::new(),
-        };
-        let native_function_sql = generate_schema_sync_sql(
-            &[],
-            &[native_function],
-            &[],
-            &[],
-            &[],
-            DatabaseType::SqlServer,
-            Some("dbo"),
-            false,
-            Some(DialectKind::SqlServer),
-            &[],
-        );
-        assert!(
-            native_function_sql.contains("ALTER FUNCTION [dbo].[next_value]() RETURNS int"),
-            "native function verb and schema: {native_function_sql}"
-        );
-        assert_eq!(native_function_sql.matches("FUNCTION").count(), 1, "do not nest native function DDL");
-        let native_function_statements =
-            crate::sql::split_sql_statements_for_database(&native_function_sql, DatabaseType::SqlServer);
-        let function_batches = native_function_statements
-            .iter()
-            .filter(|statement| statement.contains("ALTER FUNCTION"))
-            .collect::<Vec<_>>();
-        assert_eq!(
-            function_batches.len(),
-            1,
-            "function body must remain one executable batch: {native_function_statements:?}"
-        );
-        let function_executable = function_batches[0]
-            .lines()
-            .find(|line| !line.trim().is_empty() && !line.trim_start().starts_with("--"))
-            .expect("function executable line");
-        assert!(function_executable.starts_with("EXEC sys.sp_executesql N'"), "function batch: {function_batches:?}");
-
-        let foreign_function = FunctionDiff {
-            diff_type: "added".into(),
-            name: "pg_only".into(),
-            source: Some(FunctionInfo {
-                name: "pg_only".into(),
-                function_type: "FUNCTION".into(),
-                data_type: "integer".into(),
-                definition: "CREATE FUNCTION pg_only() RETURNS integer LANGUAGE sql AS $$ SELECT 1 $$".into(),
-                arguments: String::new(),
-            }),
-            target: None,
-            changes: Vec::new(),
-        };
-        let foreign_function_sql = generate_schema_sync_sql(
-            &[],
-            &[foreign_function],
-            &[],
-            &[],
-            &[],
-            DatabaseType::SqlServer,
-            Some("dbo"),
-            false,
-            Some(DialectKind::Postgres),
-            &[],
-        );
-        assert!(foreign_function_sql.contains("cannot be translated safely to T-SQL"));
-        assert!(
-            !foreign_function_sql.contains("CREATE FUNCTION"),
-            "do not emit PostgreSQL DDL: {foreign_function_sql}"
-        );
-    }
-
-    #[test]
-    fn h2_rename_uses_alter_column_rename_to() {
-        let diffs = make_col_diffs(
-            &[("id", "int"), ("new_name", "varchar(100)")],
-            &[("id", "int"), ("old_name", "varchar(100)")],
-            true,
-        );
-        let sql = gen_sql(wrap_table_diff("t", diffs), DatabaseType::H2, None);
-        assert!(sql.contains("ALTER COLUMN"), "H2 ALTER COLUMN: {sql}");
-        assert!(sql.contains("RENAME TO"), "H2 RENAME TO: {sql}");
-    }
-
-    #[test]
-    fn default_rename_all_other_databases() {
-        let databases = [
-            DatabaseType::ClickHouse,
-            DatabaseType::Oracle,
-            DatabaseType::DuckDb,
-            DatabaseType::Informix,
-            DatabaseType::Questdb,
-        ];
-        for db in databases {
-            let diffs = make_col_diffs(
-                &[("id", "int"), ("new_name", "varchar(100)")],
-                &[("id", "int"), ("old_name", "varchar(100)")],
-                true,
-            );
-            let sql = gen_sql(wrap_table_diff("t", diffs), db, None);
-            assert!(sql.contains("RENAME COLUMN"), "{db:?} uses RENAME COLUMN: {sql}");
-            assert!(!sql.contains('`'), "{db:?} no backticks: {sql}");
-        }
-    }
-
-    // -- 7. MySQL-like databases (Doris, StarRocks) --
-    #[test]
-    fn mysql_like_databases_use_mysql_syntax() {
-        let mysql_likes = [
-            DatabaseType::Doris,
-            DatabaseType::StarRocks,
-            DatabaseType::Goldendb,
-            DatabaseType::Sundb,
-            DatabaseType::Databend,
-            DatabaseType::Gbase,
-        ];
-        for db in mysql_likes {
-            let diffs = make_col_diffs(
-                &[("id", "int"), ("name2", "varchar(50)")],
-                &[("id", "int"), ("name", "varchar(50)")],
-                true,
-            );
-            let sql = gen_sql(wrap_table_diff("t", diffs), db, None);
-            assert!(sql.contains('`'), "{db:?} uses backticks: {sql}");
-            assert!(sql.contains("CHANGE COLUMN"), "{db:?} uses CHANGE COLUMN: {sql}");
-        }
-    }
-
-    // -- 8. No type conversion for unsupported dialect pairs --
-    #[test]
-    fn mysql_to_unsupported_dialect_types_pass_through() {
-        let targets = [
-            DatabaseType::ClickHouse,
-            DatabaseType::Oracle,
-            DatabaseType::DuckDb,
-            DatabaseType::Informix,
-            DatabaseType::H2,
-            DatabaseType::Questdb,
-        ];
-        for target in targets {
-            let diffs = make_col_diffs(
-                &[("id", "int(11)"), ("name2", "varchar(50)")],
-                &[("id", "integer"), ("name", "varchar(50)")],
-                true,
-            );
-            let sql = gen_sql(wrap_table_diff("t", diffs), target, Some(DialectKind::Mysql));
-            // No dialect-pair matrix for these targets; profile still strips MySQL display width.
-            assert!(sql.contains("INT"), "{target:?} strips display width to INT: {sql}");
-            assert!(!sql.contains("int(11)"), "{target:?} no MySQL display width: {sql}");
-            assert!(!sql.contains('`'), "{target:?} no backticks: {sql}");
-        }
-    }
-
-    #[test]
-    fn mysql_to_sqlserver_uses_native_target_types() {
-        let diffs = make_col_diffs(
-            &[
-                ("flag", "tinyint(1)"),
-                ("payload", "json"),
-                ("body", "longtext"),
-                ("raw", "blob"),
-                ("created_at", "datetime(6)"),
-                ("ratio", "double"),
-            ],
-            &[],
-            false,
-        );
-        let sql = gen_sql(wrap_table_diff("events", diffs), DatabaseType::SqlServer, Some(DialectKind::Mysql));
-
-        assert!(sql.contains("[flag] BIT"), "tinyint(1) → BIT: {sql}");
-        assert!(sql.contains("[payload] NVARCHAR(MAX)"), "json → NVARCHAR(MAX): {sql}");
-        assert!(sql.contains("[body] NVARCHAR(MAX)"), "longtext → NVARCHAR(MAX): {sql}");
-        assert!(sql.contains("[raw] VARBINARY(MAX)"), "blob → VARBINARY(MAX): {sql}");
-        assert!(sql.contains("[created_at] DATETIME2(6)"), "datetime → DATETIME2: {sql}");
-        assert!(sql.contains("[ratio] FLOAT"), "double → FLOAT: {sql}");
-    }
-
-    // -- 9. Passthrough when source_dialect is None --
-    #[test]
-    fn without_source_dialect_types_preserved() {
-        let diffs = make_col_diffs(&[("id", "int(11)"), ("flag", "tinyint")], &[("id", "bigint")], false);
-        let sql = gen_sql(wrap_table_diff("t", diffs), DatabaseType::Postgres, None);
-        // No source dialect → no matrix mapping; PG profile still strips display width.
-        assert!(sql.contains("INT"), "display width stripped to INT: {sql}");
-        assert!(!sql.contains("int(11)"), "no MySQL display width: {sql}");
-        assert!(sql.contains("tinyint"), "passthrough tinyint: {sql}");
-    }
-
-    // -- 10. All MySQL→PostgreSQL type mapping rules --
-    #[test]
-    fn mysql_to_postgresql_specific_type_conversions() {
-        let cases = [
-            ("ti1", "tinyint(1)", "BOOLEAN"),
-            ("tiny", "tinyint", "SMALLINT"),
-            ("med", "mediumint", "INTEGER"),
-            ("int_", "int", "INTEGER"),
-            ("big", "bigint", "BIGINT"),
-            ("flt", "float", "REAL"),
-            ("dbl", "double", "DOUBLE PRECISION"),
-            ("txs", "tinytext", "TEXT"),
-            ("tx", "text", "TEXT"),
-            ("txm", "mediumtext", "TEXT"),
-            ("txl", "longtext", "TEXT"),
-            ("blb", "blob", "BYTEA"),
-            ("bls", "tinyblob", "BYTEA"),
-            ("blm", "mediumblob", "BYTEA"),
-            ("bll", "longblob", "BYTEA"),
-            ("dt", "datetime", "TIMESTAMP"),
-        ];
-        for (name, mysql_type, expected_pg) in cases {
-            let diffs = make_col_diffs(&[(name, mysql_type)], &[], false);
-            let sql = gen_sql(wrap_table_diff("t", diffs), DatabaseType::Postgres, Some(DialectKind::Mysql));
-            assert!(sql.contains(expected_pg), "MySQL {mysql_type} → PostgreSQL {expected_pg}: {sql}");
-        }
-    }
-
-    // -- 11. PostgreSQL→MySQL all reverse type mappings --
-    #[test]
-    fn postgresql_to_mysql_all_type_mappings() {
-        let mappings = [
-            ("sml", "smallint", "SMALLINT"),
-            ("int_", "integer", "INT"),
-            ("big", "bigint", "BIGINT"),
-            ("real", "real", "FLOAT"),
-            ("dp", "double precision", "DOUBLE"),
-            ("tx", "text", "LONGTEXT"),
-            ("ba", "bytea", "BLOB"),
-            ("bl", "boolean", "TINYINT(1)"),
-            ("ts", "timestamp", "DATETIME"),
-            ("tstz", "timestamptz", "DATETIME"),
-            ("uuid", "uuid", "CHAR(36)"),
-            ("jb", "jsonb", "JSON"),
-        ];
-        for (name, pg_type, expected_mysql) in mappings {
-            let diffs = make_col_diffs(&[(name, pg_type)], &[], false);
-            let sql = gen_sql(wrap_table_diff("t", diffs), DatabaseType::Mysql, Some(DialectKind::Postgres));
-            assert!(sql.contains(expected_mysql), "PG {pg_type} → MySQL {expected_mysql}: {sql}");
-        }
-    }
-
-    // -- 12. MySQL→SQLite all type mappings --
-    #[test]
-    fn mysql_to_sqlite_all_type_mappings() {
-        let mappings = [
-            ("int", "int", "INTEGER"),
-            ("bi", "bigint", "INTEGER"),
-            ("ti", "tinyint", "INTEGER"),
-            ("si", "smallint", "INTEGER"),
-            ("mi", "mediumint", "INTEGER"),
-            ("db", "double", "REAL"),
-            ("fl", "float", "REAL"),
-            ("dt", "datetime", "TEXT"),
-            ("ts", "timestamp", "TEXT"),
-            ("tx", "text", "TEXT"),
-            ("bl", "blob", "BLOB"),
-        ];
-        for (name, mysql_type, expected_sqlite) in mappings {
-            let diffs = make_col_diffs(&[(name, mysql_type)], &[], false);
-            let sql = gen_sql(wrap_table_diff("t", diffs), DatabaseType::Sqlite, Some(DialectKind::Mysql));
-            assert!(sql.contains(expected_sqlite), "MySQL {mysql_type} → SQLite {expected_sqlite}: {sql}");
-        }
-    }
-
-    // -- 13. Same-dialect: ClickHouse (double-quotes, default rename) --
-    #[test]
-    fn clickhouse_same_dialect_operations() {
-        let diffs = make_col_diffs(&[("id", "Int32"), ("new_col", "String")], &[("id", "Int32")], false);
-        let sql = gen_sql(wrap_table_diff("t", diffs), DatabaseType::ClickHouse, None);
-        assert!(sql.contains("ADD COLUMN"), "ClickHouse add: {sql}");
-        assert!(!sql.contains('`'), "ClickHouse no backticks: {sql}");
-    }
-
-    // -- 14. Same-dialect: Oracle --
-    #[test]
-    fn oracle_same_dialect_operations() {
-        let diffs = make_col_diffs(&[("id", "NUMBER"), ("name", "VARCHAR2(100)")], &[("id", "NUMBER")], false);
-        let sql = gen_sql(wrap_table_diff("t", diffs), DatabaseType::Oracle, None);
-        // Oracle's ADD clause is parenthesized and has no `COLUMN` keyword.
-        assert!(sql.contains("ADD (NAME VARCHAR2(100) NOT NULL)"), "Oracle add: {sql}");
-        assert!(!sql.contains("ADD COLUMN"), "Oracle add must omit COLUMN: {sql}");
-        assert!(!sql.contains('`'), "Oracle no backticks: {sql}");
-    }
-
-    // -- 15. Same-dialect: SQL Server with rename --
-    #[test]
-    fn sqlserver_same_dialect_rename() {
-        let diffs = make_col_diffs(
-            &[("id", "int"), ("new_name", "nvarchar(100)")],
-            &[("id", "int"), ("old_name", "nvarchar(100)")],
-            true,
-        );
-        let sql = gen_sql(wrap_table_diff("t", diffs), DatabaseType::SqlServer, None);
-        assert!(sql.contains("sp_rename"), "SQL Server rename: {sql}");
-    }
-
-    // -- 16. Same-dialect: H2 --
-    #[test]
-    fn h2_same_dialect_rename() {
-        let diffs = make_col_diffs(
-            &[("id", "INT"), ("new_name", "VARCHAR(100)")],
-            &[("id", "INT"), ("old_name", "VARCHAR(100)")],
-            true,
-        );
-        let sql = gen_sql(wrap_table_diff("t", diffs), DatabaseType::H2, None);
-        assert!(sql.contains("ALTER COLUMN"), "H2 rename: {sql}");
-        assert!(sql.contains("RENAME TO"), "H2 rename to: {sql}");
-    }
-
-    // -- 17. Same-dialect: DuckDB --
-    #[test]
-    fn duckdb_same_dialect_add() {
-        let diffs = make_col_diffs(&[("id", "INTEGER"), ("name", "VARCHAR")], &[("id", "INTEGER")], false);
-        let sql = gen_sql(wrap_table_diff("t", diffs), DatabaseType::DuckDb, None);
-        assert!(sql.contains("ADD COLUMN"), "DuckDB add: {sql}");
-        assert!(!sql.contains('`'), "DuckDB no backticks: {sql}");
-    }
-
-    // -- 18. Schema-qualified SQL output --
-    #[test]
-    fn schema_qualified_output() {
-        let diffs = make_col_diffs(&[("name2", "varchar(50)")], &[("name", "varchar(50)")], true);
-        let table_diff = wrap_table_diff("users", diffs);
-        let sql = generate_schema_sync_sql(
-            &[table_diff],
-            &[],
-            &[],
-            &[],
-            &[],
-            DatabaseType::Postgres,
-            Some("public"),
-            false,
-            None,
-            &[],
-        );
-        assert!(sql.contains("\"public\".\"users\""), "schema prefixed: {sql}");
-    }
-
     #[test]
     fn schema_qualified_mysql() {
         let diffs = make_col_diffs(&[("name2", "varchar(50)")], &[("name", "varchar(50)")], true);
@@ -8723,21 +6071,6 @@ mod tests {
             &[],
         );
         assert!(sql.contains("`mydb`.`users`"), "schema prefixed MySQL: {sql}");
-    }
-
-    // -- 19. Multiple operations in one diff --
-    #[test]
-    fn multiple_concurrent_operations() {
-        let diffs = make_col_diffs(
-            &[("id", "int"), ("name2", "varchar(50)"), ("new_col", "text"), ("keep", "boolean")],
-            &[("id", "bigint"), ("name", "varchar(50)"), ("old_col", "int"), ("keep", "boolean")],
-            true,
-        );
-        let sql = gen_sql(wrap_table_diff("t", diffs), DatabaseType::Postgres, None);
-        assert!(sql.contains("RENAME COLUMN"), "rename: {sql}");
-        assert!(sql.contains("ADD COLUMN"), "add: {sql}");
-        assert!(sql.contains("DROP COLUMN"), "drop: {sql}");
-        assert!(sql.contains("ALTER COLUMN"), "modify type: {sql}");
     }
 
     #[test]
@@ -8759,213 +6092,6 @@ mod tests {
         let diffs = make_col_diffs(&[], &[("old1", "int"), ("old2", "varchar(10)")], false);
         let sql = gen_sql(wrap_table_diff("t", diffs), DatabaseType::Mysql, None);
         assert_eq!(sql.matches("DROP COLUMN").count(), 2, "two drops: {sql}");
-    }
-
-    #[test]
-    fn all_columns_added() {
-        let diffs = make_col_diffs(&[("new1", "int"), ("new2", "varchar(10)")], &[], false);
-        for db in [DatabaseType::Mysql, DatabaseType::Postgres, DatabaseType::Oracle] {
-            let sql = gen_sql(wrap_table_diff("t", diffs.clone()), db, None);
-            if db == DatabaseType::Oracle {
-                assert_eq!(sql.matches("ADD (").count(), 2, "Oracle two adds: {sql}");
-                assert!(!sql.contains("ADD COLUMN"), "Oracle add must omit COLUMN: {sql}");
-            } else {
-                assert_eq!(sql.matches("ADD COLUMN").count(), 2, "{db:?} two adds: {sql}");
-            }
-        }
-    }
-
-    // -- 21. Rename + type change in one column --
-    #[test]
-    fn rename_with_simultaneous_type_change() {
-        let diffs = make_col_diffs(
-            &[("id", "int"), ("new_name", "varchar(200)")],
-            &[("id", "int"), ("old_name", "varchar(50)")],
-            true,
-        );
-        let sql = gen_sql(wrap_table_diff("t", diffs), DatabaseType::Postgres, None);
-        assert!(sql.contains("RENAME COLUMN"), "rename: {sql}");
-        assert!(sql.contains("TYPE varchar(200)"), "type change: {sql}");
-    }
-
-    // -- 22. PostgreSQL→PostgreSQL: nullability changes --
-    #[test]
-    fn postgres_nullable_change() {
-        let source = vec![ColumnInfo {
-            name: "name".into(),
-            data_type: "text".into(),
-            is_nullable: true,
-            ..column("name", "text", None)
-        }];
-        let target = vec![ColumnInfo {
-            name: "name".into(),
-            data_type: "text".into(),
-            is_nullable: false,
-            ..column("name", "text", None)
-        }];
-        let diffs = diff_columns_with_options(&source, &target, false, false, false, 0.5);
-        let sql = gen_sql(wrap_table_diff("t", diffs), DatabaseType::Postgres, None);
-        assert!(sql.contains("DROP NOT NULL"), "nullable change: {sql}");
-    }
-
-    #[test]
-    fn postgres_not_nullable_change() {
-        let source = vec![ColumnInfo {
-            name: "name".into(),
-            data_type: "text".into(),
-            is_nullable: false,
-            ..column("name", "text", None)
-        }];
-        let target = vec![ColumnInfo {
-            name: "name".into(),
-            data_type: "text".into(),
-            is_nullable: true,
-            ..column("name", "text", None)
-        }];
-        let diffs = diff_columns_with_options(&source, &target, false, false, false, 0.5);
-        let sql = gen_sql(wrap_table_diff("t", diffs), DatabaseType::Postgres, None);
-        assert!(sql.contains("SET NOT NULL"), "not null change: {sql}");
-    }
-
-    // -- 23. PostgreSQL→SQLite (no existing mapping rules) --
-    #[test]
-    fn postgresql_to_sqlite_no_type_mapping() {
-        let diffs = make_col_diffs(&[("id", "integer"), ("data", "text"), ("ts", "timestamp")], &[], false);
-        let sql = gen_sql(wrap_table_diff("t", diffs), DatabaseType::Sqlite, Some(DialectKind::Postgres));
-        // No PG→SQLite dialect matrix, but SQLite profile type_map still rewrites affinities.
-        assert!(sql.contains("INTEGER"), "integer→INTEGER: {sql}");
-        assert!(sql.contains("TEXT"), "text/timestamp→TEXT: {sql}");
-        assert!(!sql.contains("timestamp"), "timestamp mapped away: {sql}");
-    }
-
-    // -- 24. All MySQL-like databases with rename + type change --
-    #[test]
-    fn mysql_like_rename_with_type_conversion() {
-        let mysql_likes: [(DatabaseType, &str); 7] = [
-            (DatabaseType::Mysql, "Mysql"),
-            (DatabaseType::Doris, "Doris"),
-            (DatabaseType::StarRocks, "StarRocks"),
-            (DatabaseType::Goldendb, "Goldendb"),
-            (DatabaseType::Sundb, "Sundb"),
-            (DatabaseType::Databend, "Databend"),
-            (DatabaseType::Gbase, "Gbase"),
-        ];
-        for (db, label) in mysql_likes {
-            let diffs = make_col_diffs(
-                &[("id", "int(11)"), ("name2", "varchar(50)")],
-                &[("id", "int"), ("name", "varchar(50)")],
-                true,
-            );
-            let sql = gen_sql(wrap_table_diff("t", diffs), db, Some(DialectKind::Mysql));
-            assert!(sql.contains("CHANGE COLUMN"), "{label} CHANGE COLUMN: {sql}");
-            assert!(sql.contains('`'), "{label} backticks: {sql}");
-            assert!(sql.contains("MODIFY COLUMN"), "{label} MODIFY: {sql}");
-        }
-    }
-
-    #[test]
-    fn dameng_modify_column_uses_modify_without_column_keyword() {
-        let diffs = make_col_diffs(&[("name", "varchar(64)")], &[("name", "varchar(32)")], false);
-        let sql = gen_sql(wrap_table_diff("tbxx", diffs), DatabaseType::Dameng, None);
-        assert!(sql.contains("MODIFY NAME varchar(64)"), "Dameng modify: {sql}");
-        assert!(!sql.contains("MODIFY COLUMN"), "Dameng must omit COLUMN: {sql}");
-    }
-
-    // -- 25. Rename with nullable change --
-    #[test]
-    fn rename_with_nullable_change() {
-        let source = vec![ColumnInfo {
-            name: "new_col".into(),
-            data_type: "text".into(),
-            is_nullable: true,
-            ..column("new_col", "text", None)
-        }];
-        let target = vec![ColumnInfo {
-            name: "old_col".into(),
-            data_type: "text".into(),
-            is_nullable: false,
-            ..column("old_col", "text", None)
-        }];
-        let diffs = diff_columns_with_options(&source, &target, false, false, true, 0.5);
-        let sql = gen_sql(wrap_table_diff("t", diffs), DatabaseType::Postgres, None);
-        assert!(sql.contains("RENAME COLUMN"), "rename: {sql}");
-        assert!(sql.contains("DROP NOT NULL"), "nullable: {sql}");
-    }
-
-    // -- 26. Empty diff generates no SQL --
-    #[test]
-    fn empty_diff_generates_no_sql() {
-        let diffs: Vec<ColumnDiff> = vec![];
-        let sql = gen_sql(wrap_table_diff("t", diffs), DatabaseType::Mysql, None);
-        assert_eq!(sql, "", "empty diff should generate no SQL");
-        let sql = gen_sql(wrap_table_diff("t", vec![]), DatabaseType::Postgres, None);
-        assert_eq!(sql, "", "empty diff should generate no SQL for postgres");
-    }
-
-    // -- 27. Databend and Gbase (MySQL-like) --
-    #[test]
-    fn databend_gbase_mysql_like() {
-        for db in [DatabaseType::Databend, DatabaseType::Gbase] {
-            let diffs = make_col_diffs(
-                &[("id", "int"), ("name2", "varchar(50)")],
-                &[("id", "int"), ("name", "varchar(50)")],
-                true,
-            );
-            let sql = gen_sql(wrap_table_diff("t", diffs), db, None);
-            assert!(sql.contains('`'), "{db:?} backticks: {sql}");
-        }
-    }
-
-    // -- 28. Postgres-compatible databases (GaussDB, openGauss, etc.) --
-    #[test]
-    fn postgres_like_databases() {
-        let pg_likes = [
-            DatabaseType::Gaussdb,
-            DatabaseType::Kwdb,
-            DatabaseType::OpenGauss,
-            DatabaseType::Highgo,
-            DatabaseType::Vastbase,
-            DatabaseType::Kingbase,
-            DatabaseType::Firebird,
-            DatabaseType::Redshift,
-            DatabaseType::Vertica,
-            DatabaseType::Exasol,
-        ];
-        for db in pg_likes {
-            let diffs = make_col_diffs(
-                &[("id", "int"), ("name2", "varchar(50)")],
-                &[("id", "int"), ("name", "varchar(50)")],
-                true,
-            );
-            let sql = gen_sql(wrap_table_diff("t", diffs), db, None);
-            assert!(sql.contains("RENAME COLUMN"), "{db:?} RENAME COLUMN: {sql}");
-            assert!(!sql.contains('`'), "{db:?} no backticks: {sql}");
-        }
-    }
-
-    // -- 29. SQLite-compatible databases --
-    #[test]
-    fn sqlite_like_databases() {
-        let sqlite_likes = [DatabaseType::Rqlite, DatabaseType::Turso];
-        for db in sqlite_likes {
-            let diffs = make_col_diffs(
-                &[("id", "int"), ("name2", "varchar(50)")],
-                &[("id", "int"), ("name", "varchar(50)")],
-                true,
-            );
-            let sql = gen_sql(wrap_table_diff("t", diffs), db, None);
-            assert!(sql.contains("RENAME COLUMN"), "{db:?} RENAME COLUMN: {sql}");
-            assert!(!sql.contains('`'), "{db:?} no backticks: {sql}");
-        }
-    }
-
-    // -- 30. ManticoreSearch (separate dialect) --
-    #[test]
-    fn manticore_search_sql() {
-        let diffs = make_col_diffs(&[("id", "bigint"), ("title", "text")], &[("id", "bigint")], false);
-        let sql = gen_sql(wrap_table_diff("t", diffs), DatabaseType::ManticoreSearch, None);
-        assert!(sql.contains("ADD COLUMN"), "Manticore add: {sql}");
-        assert!(sql.contains('`'), "Manticore uses backtick identifiers (MySQL-compatible): {sql}");
     }
 
     #[test]
@@ -9004,48 +6130,6 @@ mod tests {
         assert_eq!(diffs.len(), 1);
         assert_eq!(diffs[0].diff_type, "modified");
         assert_eq!(diffs[0].changes, vec!["unique: YES → NO", "columns: status → status, created_at"]);
-    }
-
-    #[test]
-    fn detects_opclass_change_in_postgres_index() {
-        let source_index = index(IndexInfo {
-            name: "idx_name_trgm".to_string(),
-            columns: vec!["name".to_string()],
-            is_unique: false,
-            is_primary: false,
-            filter: None,
-            index_type: Some("gin".to_string()),
-            included_columns: None,
-            comment: None,
-            key_is_expression: vec![false],
-            column_opclasses: vec![Some("gin_trgm_ops".to_string())],
-            key_options: Vec::new(),
-            constraint_backed: false,
-        });
-        let target_index = index(IndexInfo {
-            name: "idx_name_trgm".to_string(),
-            columns: vec!["name".to_string()],
-            is_unique: false,
-            is_primary: false,
-            filter: None,
-            index_type: Some("gin".to_string()),
-            included_columns: None,
-            comment: None,
-            key_is_expression: vec![false],
-            column_opclasses: vec![None],
-            key_options: Vec::new(),
-            constraint_backed: false,
-        });
-
-        let diffs = diff_indexes(&[source_index], &[target_index]);
-
-        assert_eq!(diffs.len(), 1);
-        assert_eq!(diffs[0].diff_type, "modified");
-        assert!(
-            diffs[0].changes.iter().any(|c| c.contains("opclass")),
-            "Expected opclass change line, got: {:?}",
-            diffs[0].changes
-        );
     }
 
     #[test]
@@ -9120,341 +6204,6 @@ mod tests {
     }
 
     #[test]
-    fn preserves_bare_expression_in_postgres_family_unique_index_ddl() {
-        // Regression for #6295: highgo/postgres-family expression index key parts (e.g. from
-        // pg_get_indexdef) arrived as raw expression text in IndexInfo.columns; quoting the
-        // whole expression as an identifier turned it into a literal (and nonexistent) column.
-        let expression_key_part = "COALESCE(height, '-1'::integer::double precision)";
-        let new_index = index(IndexInfo {
-            name: "uq_tankong_sta_type_time".to_string(),
-            columns: vec![
-                "sta_id".to_string(),
-                "data_type".to_string(),
-                "data_time".to_string(),
-                expression_key_part.to_string(),
-            ],
-            is_unique: true,
-            is_primary: false,
-            filter: None,
-            index_type: None,
-            included_columns: None,
-            comment: None,
-            key_is_expression: vec![false, false, false, true],
-            column_opclasses: vec![],
-            key_options: Vec::new(),
-            constraint_backed: false,
-        });
-
-        let sql = generate_schema_sync_sql(
-            &[TableDiff {
-                diff_type: "modified".to_string(),
-                object_type: Some("table".to_string()),
-                name: "tankong_data".to_string(),
-                target_name: None,
-                columns: None,
-                indexes: Some(vec![IndexDiff {
-                    diff_type: "added".to_string(),
-                    name: new_index.name.clone(),
-                    source: Some(new_index),
-                    target: None,
-                    changes: vec![],
-                }]),
-                foreign_keys: None,
-                triggers: None,
-                ddl: None,
-                target_ddl: None,
-                source_table_comment: None,
-                target_table_comment: None,
-                sync_sql: None,
-            }],
-            &[],
-            &[],
-            &[],
-            &[],
-            DatabaseType::Highgo,
-            Some("public"),
-            false,
-            None,
-            &[],
-        );
-
-        assert!(sql.contains(&format!(
-            "CREATE UNIQUE INDEX \"uq_tankong_sta_type_time\" ON \"public\".\"tankong_data\" (\"sta_id\", \"data_type\", \"data_time\", {expression_key_part})"
-        )));
-        assert!(!sql.contains(&format!("\"{expression_key_part}\"")));
-    }
-
-    #[test]
-    fn postgres_sync_index_ddl_keeps_key_order_opclass_and_full_expression() {
-        // Regression for #9988: `pg_index.indoption` (bit 0 = DESC, bit 1 = NULLS FIRST)
-        // and `pg_index.indclass` were dropped by the sync DDL, so a published index came
-        // back as plain ASC keys with default null ordering. The expression key part is
-        // also asserted verbatim - the driver used to return it truncated to 63 bytes
-        // because `COALESCE(name, text)` resolves to `name` (see postgres.rs).
-        let expression_key_part =
-            "(((category)::text = ANY ((ARRAY['industrial'::character varying, 'macro'::character varying])::text[])))";
-        let new_index = index(IndexInfo {
-            name: "index_repro_rank".to_string(),
-            columns: vec![
-                "((has_current_analysis AND (NOT dirty) AND researchable))".to_string(),
-                "researchable".to_string(),
-                expression_key_part.to_string(),
-                "((new_events_24h > 0))".to_string(),
-                "evidence_count".to_string(),
-                "material_at".to_string(),
-                "topic_id".to_string(),
-            ],
-            is_unique: false,
-            is_primary: false,
-            filter: Some("(NOT suppressed)".to_string()),
-            index_type: Some("btree".to_string()),
-            included_columns: None,
-            comment: None,
-            key_is_expression: vec![true, false, true, true, false, false, false],
-            column_opclasses: vec![None, None, None, None, None, None, Some("pg_catalog.text_pattern_ops".to_string())],
-            key_options: vec![3, 3, 3, 3, 3, 3, 3],
-            constraint_backed: false,
-        });
-
-        let sql = generate_schema_sync_sql(
-            &[TableDiff {
-                diff_type: "modified".to_string(),
-                object_type: Some("table".to_string()),
-                name: "index_repro".to_string(),
-                target_name: None,
-                columns: None,
-                indexes: Some(vec![IndexDiff {
-                    diff_type: "added".to_string(),
-                    name: new_index.name.clone(),
-                    source: Some(new_index),
-                    target: None,
-                    changes: vec![],
-                }]),
-                foreign_keys: None,
-                triggers: None,
-                ddl: None,
-                target_ddl: None,
-                source_table_comment: None,
-                target_table_comment: None,
-                sync_sql: None,
-            }],
-            &[],
-            &[],
-            &[],
-            &[],
-            DatabaseType::Postgres,
-            Some("public"),
-            false,
-            None,
-            &[],
-        );
-
-        assert!(
-            sql.contains(
-                "CREATE INDEX \"index_repro_rank\" ON \"public\".\"index_repro\" USING btree (((has_current_analysis AND (NOT dirty) AND researchable)) DESC NULLS FIRST, \"researchable\" DESC NULLS FIRST"
-            ),
-            "{sql}"
-        );
-        assert!(sql.contains(&format!("{expression_key_part} DESC NULLS FIRST")), "{sql}");
-        assert!(sql.contains("\"topic_id\" pg_catalog.text_pattern_ops DESC NULLS FIRST"), "{sql}");
-        assert!(sql.contains("WHERE (NOT suppressed);"), "{sql}");
-    }
-
-    #[test]
-    fn postgres_sync_index_ddl_keeps_non_btree_keys_bare() {
-        // `indoption` is only meaningful for B-tree keys, so a GIN index must not gain
-        // `ASC NULLS LAST` suffixes even when the introspection reports the flags.
-        let new_index = index(IndexInfo {
-            name: "idx_payload_gin".to_string(),
-            columns: vec!["payload".to_string()],
-            is_unique: false,
-            is_primary: false,
-            filter: None,
-            index_type: Some("gin".to_string()),
-            included_columns: None,
-            comment: None,
-            key_is_expression: vec![false],
-            column_opclasses: vec![Some("public.gin_trgm_ops".to_string())],
-            key_options: vec![0],
-            constraint_backed: false,
-        });
-
-        let sql = generate_schema_sync_sql(
-            &[TableDiff {
-                diff_type: "modified".to_string(),
-                object_type: Some("table".to_string()),
-                name: "events".to_string(),
-                target_name: None,
-                columns: None,
-                indexes: Some(vec![IndexDiff {
-                    diff_type: "added".to_string(),
-                    name: new_index.name.clone(),
-                    source: Some(new_index),
-                    target: None,
-                    changes: vec![],
-                }]),
-                foreign_keys: None,
-                triggers: None,
-                ddl: None,
-                target_ddl: None,
-                source_table_comment: None,
-                target_table_comment: None,
-                sync_sql: None,
-            }],
-            &[],
-            &[],
-            &[],
-            &[],
-            DatabaseType::Postgres,
-            Some("public"),
-            false,
-            None,
-            &[],
-        );
-
-        assert!(sql.contains("USING gin (\"payload\" public.gin_trgm_ops)"), "{sql}");
-        assert!(!sql.contains("NULLS LAST"), "{sql}");
-        assert!(!sql.contains("NULLS FIRST"), "{sql}");
-    }
-
-    #[test]
-    fn quotes_real_columns_whose_names_contain_expression_like_characters() {
-        // PR #6312 review: a quoted column identifier can legitimately contain whitespace,
-        // `(`, or `::` (e.g. PostgreSQL metadata returning the ordinary column name
-        // `order item` through a.attname). The old character-based heuristic mistook such
-        // columns for expressions and left them bare, generating an invalid
-        // `CREATE INDEX ... (order item)` instead of `CREATE INDEX ... ("order item")`.
-        // With real per-key provenance (`key_is_expression`), only genuine expression key
-        // parts from pg_get_indexdef are left unquoted.
-        let expression_key_part = "COALESCE(height, '-1'::integer::double precision)";
-        let new_index = index(IndexInfo {
-            name: "uq_weird_columns".to_string(),
-            columns: vec![
-                "order item".to_string(),
-                "a(b)".to_string(),
-                "a::b".to_string(),
-                expression_key_part.to_string(),
-            ],
-            key_is_expression: vec![false, false, false, true],
-            column_opclasses: vec![],
-            key_options: Vec::new(),
-            constraint_backed: false,
-            is_unique: true,
-            is_primary: false,
-            filter: None,
-            index_type: None,
-            included_columns: None,
-            comment: None,
-        });
-
-        let sql = generate_schema_sync_sql(
-            &[TableDiff {
-                diff_type: "modified".to_string(),
-                object_type: Some("table".to_string()),
-                name: "tankong_data".to_string(),
-                target_name: None,
-                columns: None,
-                indexes: Some(vec![IndexDiff {
-                    diff_type: "added".to_string(),
-                    name: new_index.name.clone(),
-                    source: Some(new_index),
-                    target: None,
-                    changes: vec![],
-                }]),
-                foreign_keys: None,
-                triggers: None,
-                ddl: None,
-                target_ddl: None,
-                source_table_comment: None,
-                target_table_comment: None,
-                sync_sql: None,
-            }],
-            &[],
-            &[],
-            &[],
-            &[],
-            DatabaseType::Highgo,
-            Some("public"),
-            false,
-            None,
-            &[],
-        );
-
-        assert!(sql.contains(&format!(
-            "CREATE UNIQUE INDEX \"uq_weird_columns\" ON \"public\".\"tankong_data\" (\"order item\", \"a(b)\", \"a::b\", {expression_key_part})"
-        )));
-        assert!(!sql.contains(&format!("\"{expression_key_part}\"")));
-
-        // Real PostgreSQL-family validation: parse the generated DDL with the PostgreSQL
-        // dialect so this also proves the statement is syntactically valid, not just that the
-        // expected substring is present.
-        use sqlparser::dialect::PostgreSqlDialect;
-        use sqlparser::parser::Parser;
-        let create_index_sql = sql
-            .lines()
-            .find(|line| line.starts_with("CREATE UNIQUE INDEX \"uq_weird_columns\""))
-            .expect("generated DDL should include the CREATE INDEX statement");
-        let statements = Parser::parse_sql(&PostgreSqlDialect {}, create_index_sql)
-            .unwrap_or_else(|error| panic!("generated DDL must be valid PostgreSQL: {error}\nSQL: {create_index_sql}"));
-        assert_eq!(statements.len(), 1);
-    }
-
-    #[test]
-    fn quotes_expression_like_column_names_without_agent_provenance() {
-        for db_type in [DatabaseType::Kingbase, DatabaseType::Vastbase] {
-            let new_index = index(IndexInfo {
-                name: "idx_weird_columns".to_string(),
-                columns: vec!["order item".to_string(), "a(b)".to_string(), "a::b".to_string()],
-                key_is_expression: Vec::new(),
-                column_opclasses: vec![],
-                key_options: Vec::new(),
-                constraint_backed: false,
-                is_unique: false,
-                is_primary: false,
-                filter: None,
-                index_type: None,
-                included_columns: None,
-                comment: None,
-            });
-
-            let sql = generate_schema_sync_sql(
-                &[TableDiff {
-                    diff_type: "modified".to_string(),
-                    object_type: Some("table".to_string()),
-                    name: "tankong_data".to_string(),
-                    target_name: None,
-                    columns: None,
-                    indexes: Some(vec![IndexDiff {
-                        diff_type: "added".to_string(),
-                        name: new_index.name.clone(),
-                        source: Some(new_index),
-                        target: None,
-                        changes: vec![],
-                    }]),
-                    foreign_keys: None,
-                    triggers: None,
-                    ddl: None,
-                    target_ddl: None,
-                    source_table_comment: None,
-                    target_table_comment: None,
-                    sync_sql: None,
-                }],
-                &[],
-                &[],
-                &[],
-                &[],
-                db_type,
-                Some("public"),
-                false,
-                None,
-                &[],
-            );
-
-            assert!(sql.contains("(\"order item\", \"a(b)\", \"a::b\")"), "{db_type:?}: {sql}");
-        }
-    }
-
-    #[test]
     fn detects_foreign_key_additions_removals_and_target_changes() {
         let diffs = diff_foreign_keys(
             &[
@@ -9507,69 +6256,6 @@ mod tests {
                 ("added", "orders_account_id_fk"),
                 ("removed", "orders_region_id_fk"),
             ]
-        );
-    }
-
-    #[test]
-    fn generates_sync_sql_for_index_and_foreign_key_changes() {
-        let diffs = vec![TableDiff {
-            diff_type: "modified".to_string(),
-            object_type: None,
-            name: "orders".to_string(),
-            target_name: None,
-            columns: None,
-            indexes: Some(vec![IndexDiff {
-                diff_type: "modified".to_string(),
-                name: "idx_orders_status".to_string(),
-                source: Some(index(IndexInfo {
-                    name: "idx_orders_status".to_string(),
-                    columns: vec!["status".to_string(), "created_at".to_string()],
-                    is_unique: true,
-                    is_primary: false,
-                    filter: None,
-                    index_type: None,
-                    included_columns: None,
-                    comment: None,
-                    key_is_expression: Vec::new(),
-                    column_opclasses: vec![],
-                    key_options: Vec::new(),
-                    constraint_backed: false,
-                })),
-                target: None,
-                changes: Vec::new(),
-            }]),
-            foreign_keys: Some(vec![ForeignKeyDiff {
-                diff_type: "modified".to_string(),
-                name: "orders_user_id_fk".to_string(),
-                source: Some(foreign_key(ForeignKeyInfo {
-                    name: "orders_user_id_fk".to_string(),
-                    column: String::new(),
-                    ref_schema: None,
-                    ref_table: "users".to_string(),
-                    ref_column: String::new(),
-                    on_update: None,
-                    on_delete: None,
-                })),
-                target: None,
-                changes: Vec::new(),
-            }]),
-            triggers: None,
-            ddl: None,
-            target_ddl: None,
-            source_table_comment: None,
-            target_table_comment: None,
-            sync_sql: None,
-        }];
-
-        assert_eq!(
-            generate_schema_sync_sql(&diffs, &[], &[], &[], &[], DatabaseType::Postgres, None, false, None, &[]),
-            [
-                "ALTER TABLE \"orders\" DROP CONSTRAINT \"orders_user_id_fk\";",
-                "DROP INDEX IF EXISTS \"idx_orders_status\";",
-                "CREATE UNIQUE INDEX \"idx_orders_status\" ON \"orders\" (\"status\", \"created_at\");",
-                "ALTER TABLE \"orders\" ADD CONSTRAINT \"orders_user_id_fk\" FOREIGN KEY (\"user_id\") REFERENCES \"users\" (\"id\");",
-            ]
-            .join("\n")
         );
     }
 
@@ -9843,148 +6529,6 @@ mod tests {
     }
 
     #[test]
-    fn qualifies_generated_schema_sync_sql_with_target_schema() {
-        let diffs = vec![TableDiff {
-            diff_type: "modified".to_string(),
-            object_type: None,
-            name: "orders".to_string(),
-            target_name: None,
-            columns: Some(vec![ColumnDiff {
-                diff_type: "added".to_string(),
-                name: "status".to_string(),
-                source: Some(ColumnInfo {
-                    name: "status".to_string(),
-                    data_type: "text".to_string(),
-                    resolved_schema: None,
-                    is_nullable: true,
-                    column_default: None,
-                    is_primary_key: false,
-                    is_unique: false,
-                    extra: None,
-                    comment: None,
-                    numeric_precision: None,
-                    numeric_scale: None,
-                    character_maximum_length: None,
-                    metadata_capabilities: None,
-                    enum_values: None,
-                    character_set: None,
-                    collation: None,
-                }),
-                target: None,
-                changes: Vec::new(),
-                add_position: None,
-            }]),
-            indexes: Some(vec![IndexDiff {
-                diff_type: "added".to_string(),
-                name: "idx_orders_status".to_string(),
-                source: Some(index(IndexInfo {
-                    name: "idx_orders_status".to_string(),
-                    columns: vec!["status".to_string()],
-                    is_unique: false,
-                    is_primary: false,
-                    filter: None,
-                    index_type: None,
-                    included_columns: None,
-                    comment: None,
-                    key_is_expression: Vec::new(),
-                    column_opclasses: vec![],
-                    key_options: Vec::new(),
-                    constraint_backed: false,
-                })),
-                target: None,
-                changes: Vec::new(),
-            }]),
-            foreign_keys: None,
-            triggers: None,
-            ddl: None,
-            target_ddl: None,
-            source_table_comment: None,
-            target_table_comment: None,
-            sync_sql: None,
-        }];
-
-        assert_eq!(
-            generate_schema_sync_sql(
-                &diffs,
-                &[],
-                &[],
-                &[],
-                &[],
-                DatabaseType::Postgres,
-                Some("sales"),
-                false,
-                None,
-                &[]
-            ),
-            [
-                "-- Alter table: orders",
-                "ALTER TABLE \"sales\".\"orders\"  ADD COLUMN \"status\" text;",
-                "",
-                "CREATE INDEX \"idx_orders_status\" ON \"sales\".\"orders\" (\"status\");",
-            ]
-            .join("\n")
-        );
-    }
-
-    #[test]
-    fn added_table_native_ddl_rewrites_source_schema_to_target_schema() {
-        // Issue #7249: comparing two Postgres schemas emitted the *source*
-        // schema-qualified CREATE TABLE verbatim, so the generated sync SQL
-        // referenced a schema that may not even exist on the target and
-        // failed 100% of the time.
-        let diffs = vec![TableDiff {
-            diff_type: "added".to_string(),
-            object_type: Some("table".to_string()),
-            name: "orders".to_string(),
-            ddl: Some("CREATE TABLE \"source_schema\".\"orders\" (\n  \"id\" integer\n)".to_string()),
-            ..TableDiff::default()
-        }];
-
-        let sql = generate_schema_sync_sql(
-            &diffs,
-            &[],
-            &[],
-            &[],
-            &[],
-            DatabaseType::Postgres,
-            Some("target_schema"),
-            false,
-            Some(DialectKind::Postgres),
-            &[],
-        );
-
-        assert!(sql.contains("CREATE TABLE \"target_schema\".\"orders\""), "{sql}");
-        assert!(!sql.contains("source_schema"), "{sql}");
-    }
-
-    #[test]
-    fn added_view_native_ddl_rewrites_source_schema_to_target_schema() {
-        let diffs = vec![TableDiff {
-            diff_type: "added".to_string(),
-            object_type: Some("view".to_string()),
-            name: "active_orders".to_string(),
-            ddl: Some("CREATE OR REPLACE VIEW \"source_schema\".\"active_orders\" AS\nSELECT 1".to_string()),
-            ..TableDiff::default()
-        }];
-
-        let sql = generate_schema_sync_sql(
-            &diffs,
-            &[],
-            &[],
-            &[],
-            &[],
-            DatabaseType::Postgres,
-            Some("target_schema"),
-            false,
-            Some(DialectKind::Postgres),
-            &[],
-        );
-
-        assert!(sql.contains("CREATE OR REPLACE VIEW \"target_schema\".\"active_orders\""), "{sql}");
-        assert!(!sql.contains("source_schema"), "{sql}");
-    }
-
-    #[test]
     fn added_table_unqualified_native_ddl_is_left_unchanged() {
         // MySQL-family DDL that relies on the connection's current database
         // (no schema/database qualifier) already resolves correctly wherever
@@ -10011,37 +6555,6 @@ mod tests {
         );
 
         assert!(sql.contains("CREATE TABLE `orders`"), "{sql}");
-    }
-
-    #[test]
-    fn added_table_native_ddl_rewrites_bracket_quoted_schema_with_escaped_bracket() {
-        // SQL Server escapes a literal `]` inside a bracketed identifier by
-        // doubling it (`[a]]b]` is the identifier `a]b`) — the schema segment
-        // here must still be recognized as "source_schema]" rather than the
-        // parser stopping at the first `]`.
-        let diffs = vec![TableDiff {
-            diff_type: "added".to_string(),
-            object_type: Some("table".to_string()),
-            name: "orders".to_string(),
-            ddl: Some("CREATE TABLE [source_schema]]].[orders] (\n  [id] int\n)".to_string()),
-            ..TableDiff::default()
-        }];
-
-        let sql = generate_schema_sync_sql(
-            &diffs,
-            &[],
-            &[],
-            &[],
-            &[],
-            DatabaseType::SqlServer,
-            Some("target_schema"),
-            false,
-            Some(DialectKind::SqlServer),
-            &[],
-        );
-
-        assert!(sql.contains("[target_schema].[orders]"), "{sql}");
-        assert!(!sql.contains("source_schema"), "{sql}");
     }
 
     // ========================================================================
@@ -10586,72 +7099,6 @@ mod tests {
     }
 
     #[test]
-    fn dropped_postgres_table_rollback_preserves_structured_snapshot() {
-        let table_name = "Order Items";
-        let result = rollback_removed_table_sql(
-            DatabaseType::Postgres,
-            Some("sales"),
-            Some(DialectKind::Postgres),
-            DialectKind::Postgres,
-            table_name,
-            Some("order line history"),
-            TableSchemaDetail {
-                name: table_name.to_string(),
-                columns: vec![
-                    ColumnInfo {
-                        is_primary_key: true,
-                        column_default: Some("gen_random_uuid()".to_string()),
-                        ..column("Item ID", "uuid", Some("stable row id"))
-                    },
-                    ColumnInfo {
-                        column_default: Some("'new'::text".to_string()),
-                        ..column("Status", "text", Some("workflow state"))
-                    },
-                    column("User ID", "bigint", None),
-                ],
-                indexes: vec![index(IndexInfo {
-                    name: "Order Status IDX".to_string(),
-                    columns: vec!["Status".to_string()],
-                    is_unique: true,
-                    is_primary: false,
-                    filter: Some("\"Status\" <> 'deleted'".to_string()),
-                    index_type: Some("btree".to_string()),
-                    included_columns: Some(vec!["User ID".to_string()]),
-                    comment: None,
-                    key_is_expression: Vec::new(),
-                    column_opclasses: vec![],
-                    key_options: Vec::new(),
-                    constraint_backed: false,
-                })],
-                foreign_keys: vec![foreign_key(ForeignKeyInfo {
-                    name: "Order User FK".to_string(),
-                    column: "User ID".to_string(),
-                    ref_schema: Some("auth".to_string()),
-                    ref_table: "Users".to_string(),
-                    ref_column: "ID".to_string(),
-                    on_update: None,
-                    on_delete: Some("CASCADE".to_string()),
-                })],
-                triggers: vec![],
-                ddl: Some("CREATE TABLE native_postgres_fallback (ignored int)".to_string()),
-            },
-        );
-        let rollback = result.rollback_sync_sql.unwrap();
-
-        assert!(rollback.contains("CREATE TABLE \"sales\".\"Order Items\""), "{rollback}");
-        assert!(rollback.contains("\"Item ID\" uuid NOT NULL DEFAULT gen_random_uuid()"), "{rollback}");
-        assert!(rollback.contains("PRIMARY KEY (\"Item ID\")"), "{rollback}");
-        assert!(rollback.contains("CREATE UNIQUE INDEX \"Order Status IDX\""), "{rollback}");
-        assert!(rollback.contains("USING btree"), "{rollback}");
-        assert!(rollback.contains("INCLUDE (\"User ID\")"), "{rollback}");
-        assert!(rollback.contains("WHERE \"Status\" <> 'deleted'"), "{rollback}");
-        assert!(rollback.contains("REFERENCES \"auth\".\"Users\"(\"ID\") ON DELETE CASCADE"), "{rollback}");
-        assert!(rollback.contains("COMMENT ON COLUMN \"sales\".\"Order Items\".\"Status\" IS 'workflow state'"));
-        assert!(rollback.contains("COMMENT ON TABLE \"sales\".\"Order Items\" IS 'order line history'"));
-        assert!(!rollback.contains("native_postgres_fallback"), "{rollback}");
-    }
-
-    #[test]
     fn dropped_mysql_table_rollback_preserves_defaults_comments_indexes_and_fk() {
         let table_name = "order-items";
         let result = rollback_removed_table_sql(
@@ -10712,119 +7159,6 @@ mod tests {
         assert!(rollback.contains("REFERENCES `identity`.`users`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE"));
         assert!(rollback.contains("ALTER TABLE `shop`.`order-items` COMMENT = 'order item history'"));
         assert!(!rollback.contains("native_mysql_fallback"), "{rollback}");
-    }
-
-    #[test]
-    fn dropped_sqlite_table_rollback_preserves_quoted_pk_index_fk_and_default() {
-        let table_name = "select \"items";
-        let result = rollback_removed_table_sql(
-            DatabaseType::Sqlite,
-            None,
-            Some(DialectKind::Sqlite),
-            DialectKind::Sqlite,
-            table_name,
-            None,
-            TableSchemaDetail {
-                name: table_name.to_string(),
-                columns: vec![
-                    ColumnInfo { is_primary_key: true, ..column("item \"id", "TEXT", None) },
-                    ColumnInfo { column_default: Some("'new'".to_string()), ..column("status", "TEXT", None) },
-                    column("parent id", "TEXT", None),
-                ],
-                indexes: vec![index(IndexInfo {
-                    name: "active status index".to_string(),
-                    columns: vec!["status".to_string()],
-                    is_unique: false,
-                    is_primary: false,
-                    filter: Some("status <> 'deleted'".to_string()),
-                    index_type: None,
-                    included_columns: None,
-                    comment: None,
-                    key_is_expression: Vec::new(),
-                    column_opclasses: vec![],
-                    key_options: Vec::new(),
-                    constraint_backed: false,
-                })],
-                foreign_keys: vec![foreign_key(ForeignKeyInfo {
-                    name: "parent item fk".to_string(),
-                    column: "parent id".to_string(),
-                    ref_schema: None,
-                    ref_table: "parent items".to_string(),
-                    ref_column: "id".to_string(),
-                    on_update: None,
-                    on_delete: Some("SET NULL".to_string()),
-                })],
-                triggers: vec![],
-                ddl: Some("CREATE TABLE native_sqlite_fallback (ignored int)".to_string()),
-            },
-        );
-        let rollback = result.rollback_sync_sql.unwrap();
-
-        assert!(rollback.contains("CREATE TABLE \"select \"\"items\""), "{rollback}");
-        assert!(rollback.contains("\"item \"\"id\" TEXT NOT NULL"), "{rollback}");
-        assert!(rollback.contains("\"status\" TEXT NOT NULL DEFAULT 'new'"), "{rollback}");
-        assert!(rollback.contains("PRIMARY KEY (\"item \"\"id\")"), "{rollback}");
-        assert!(rollback.contains("CONSTRAINT \"parent item fk\" FOREIGN KEY (\"parent id\")"), "{rollback}");
-        assert!(rollback.contains("REFERENCES \"parent items\"(\"id\") ON DELETE SET NULL"), "{rollback}");
-        assert!(rollback.contains("CREATE INDEX \"active status index\""), "{rollback}");
-        assert!(rollback.contains("WHERE status <> 'deleted'"), "{rollback}");
-        assert!(!rollback.contains("ALTER TABLE"), "SQLite FK must be part of CREATE TABLE: {rollback}");
-        assert!(!rollback.contains("native_sqlite_fallback"), "{rollback}");
-    }
-
-    #[test]
-    fn dropped_table_cross_dialect_rollback_uses_target_snapshot_and_syntax() {
-        let result = rollback_removed_table_sql(
-            DatabaseType::Mysql,
-            Some("archive"),
-            Some(DialectKind::Postgres),
-            DialectKind::Mysql,
-            "Audit Log",
-            None,
-            TableSchemaDetail {
-                name: "Audit Log".to_string(),
-                columns: vec![ColumnInfo {
-                    is_primary_key: true,
-                    column_default: Some("0".to_string()),
-                    ..column("Event ID", "BIGINT UNSIGNED", None)
-                }],
-                indexes: vec![],
-                foreign_keys: vec![],
-                triggers: vec![],
-                ddl: Some("CREATE TABLE native_cross_dialect_fallback (ignored int)".to_string()),
-            },
-        );
-        let rollback = result.rollback_sync_sql.unwrap();
-
-        assert!(rollback.contains("CREATE TABLE `archive`.`Audit Log`"), "{rollback}");
-        assert!(rollback.contains("`Event ID` BIGINT UNSIGNED NOT NULL DEFAULT 0 AUTO_INCREMENT"), "{rollback}");
-        assert!(!rollback.contains('"'), "rollback must use target MySQL quoting: {rollback}");
-        assert!(!rollback.contains("native_cross_dialect_fallback"), "{rollback}");
-    }
-
-    #[test]
-    fn dropped_table_rollback_uses_native_target_ddl_only_without_structured_columns() {
-        let result = rollback_removed_table_sql(
-            DatabaseType::Postgres,
-            Some("archive"),
-            Some(DialectKind::Postgres),
-            DialectKind::Postgres,
-            "legacy_table",
-            None,
-            TableSchemaDetail {
-                name: "legacy_table".to_string(),
-                columns: vec![],
-                indexes: vec![],
-                foreign_keys: vec![],
-                triggers: vec![],
-                ddl: Some("CREATE TABLE \"archive\".\"legacy_table\" (\"id\" bigint PRIMARY KEY)".to_string()),
-            },
-        );
-        let rollback = result.rollback_sync_sql.unwrap();
-
-        assert!(rollback.contains("-- Recreate table from native target DDL: legacy_table"));
-        assert!(rollback.contains("CREATE TABLE \"archive\".\"legacy_table\" (\"id\" bigint PRIMARY KEY);"));
-        assert!(!rollback.contains("CREATE TABLE \"archive\".\"legacy_table\" (\n  \n)"), "{rollback}");
     }
 
     #[test]
@@ -10959,87 +7293,6 @@ mod tests {
 
         let sql = generate_permission_sync_sql(&diffs, DatabaseType::Mysql, Some("mydb"));
         assert!(sql.contains("GRANT SELECT ON `mydb`.`orders` TO 'app_user' WITH GRANT OPTION"));
-    }
-
-    #[test]
-    fn generate_permission_sql_postgres_revoke() {
-        let diffs = vec![PermissionDiff {
-            diff_type: "removed".to_string(),
-            grantee: "old_user".to_string(),
-            object_name: "users".to_string(),
-            privilege: "INSERT".to_string(),
-            source: None,
-            target: Some(PermissionInfo {
-                grantee: "old_user".to_string(),
-                object_type: "TABLE".to_string(),
-                object_name: "users".to_string(),
-                privilege: "INSERT".to_string(),
-                is_grantable: false,
-            }),
-        }];
-
-        let sql = generate_permission_sync_sql(&diffs, DatabaseType::Postgres, Some("public"));
-        assert!(sql.contains("REVOKE INSERT ON TABLE \"public\".\"users\" FROM \"old_user\""));
-    }
-
-    #[test]
-    fn generate_permission_sql_sqlserver_uses_securable_syntax() {
-        let diffs = vec![
-            PermissionDiff {
-                diff_type: "added".into(),
-                grantee: "app]user".into(),
-                object_name: "orders".into(),
-                privilege: "SELECT".into(),
-                source: Some(PermissionInfo {
-                    grantee: "app]user".into(),
-                    object_type: "TABLE".into(),
-                    object_name: "orders".into(),
-                    privilege: "SELECT".into(),
-                    is_grantable: true,
-                }),
-                target: None,
-            },
-            PermissionDiff {
-                diff_type: "removed".into(),
-                grantee: "old_user".into(),
-                object_name: "orders".into(),
-                privilege: "UPDATE".into(),
-                source: None,
-                target: Some(PermissionInfo {
-                    grantee: "old_user".into(),
-                    object_type: "TABLE".into(),
-                    object_name: "orders".into(),
-                    privilege: "UPDATE".into(),
-                    is_grantable: false,
-                }),
-            },
-        ];
-
-        let sql = generate_permission_sync_sql(&diffs, DatabaseType::SqlServer, Some("sales"));
-        assert!(
-            sql.contains("GRANT SELECT ON OBJECT::[sales].[orders] TO [app]]user] WITH GRANT OPTION;"),
-            "GRANT: {sql}"
-        );
-        assert!(sql.contains("REVOKE UPDATE ON OBJECT::[sales].[orders] FROM [old_user];"), "REVOKE: {sql}");
-        assert!(!sql.contains(" ON TABLE "), "PostgreSQL object syntax must not leak into T-SQL: {sql}");
-
-        let qualified_diff = PermissionDiff {
-            diff_type: "added".into(),
-            grantee: "reporter".into(),
-            object_name: "[audit].[ledger]".into(),
-            privilege: "SELECT".into(),
-            source: Some(PermissionInfo {
-                grantee: "reporter".into(),
-                object_type: "TABLE".into(),
-                object_name: "[audit].[ledger]".into(),
-                privilege: "SELECT".into(),
-                is_grantable: false,
-            }),
-            target: None,
-        };
-        let qualified_sql = generate_permission_sync_sql(&[qualified_diff], DatabaseType::SqlServer, None);
-        assert!(qualified_sql.contains("OBJECT::[audit].[ledger]"), "qualified object: {qualified_sql}");
-        assert!(!qualified_sql.contains("[dbo].[[audit]]"), "do not quote a qualified name as one identifier");
     }
 
     // ========================================================================
@@ -11255,49 +7508,6 @@ mod tests {
         assert!(diffs.iter().all(|diff| diff.changes.iter().any(|change| change.starts_with("type:"))));
     }
 
-    // Regression for #7615: comparing two MySQL databases where an integer column has
-    // different EXPLICIT display widths on both sides (e.g. `int(11)` vs `int(15)`) must
-    // still be reported as a type difference. `data_type` values below are exactly what
-    // `information_schema.COLUMNS.COLUMN_TYPE` returns on a real MySQL 5.7 server for the
-    // DDL in the issue (MySQL 8.0.19+ drops these widths entirely, so this only reproduces
-    // on pre-8.0.19 servers, which is why the issue's own repro needed a specific version).
-    #[test]
-    fn mysql_same_dialect_detects_explicit_integer_display_width_mismatch() {
-        let source = vec![column("id", "int(11)", Some("ID")), column("name", "varchar(20)", Some("名称"))];
-        let target = vec![column("id", "int(15)", Some("ID")), column("name", "varchar(20)", Some("名称"))];
-
-        let diffs = diff_columns_with_dialect_options(
-            &source,
-            &target,
-            false,
-            false,
-            false,
-            0.5,
-            Some(DialectKind::Mysql),
-            Some(DialectKind::Mysql),
-        );
-
-        assert_eq!(diffs.iter().map(|diff| diff.name.as_str()).collect::<Vec<_>>(), vec!["id"]);
-        assert!(diffs[0].changes.iter().any(|change| change.starts_with("type:")), "{:?}", diffs[0].changes);
-
-        // Same scenario the maintainer's own regression test already covers must keep passing:
-        // tinyint(1) (a common MySQL boolean idiom) vs tinyint(4) (the server's own default
-        // display width for tinyint) is likewise a real, explicit difference, not noise.
-        let source = vec![column("flag", "tinyint(1)", None)];
-        let target = vec![column("flag", "tinyint(4)", None)];
-        let diffs = diff_columns_with_dialect_options(
-            &source,
-            &target,
-            false,
-            false,
-            false,
-            0.5,
-            Some(DialectKind::Mysql),
-            Some(DialectKind::Mysql),
-        );
-        assert_eq!(diffs.iter().map(|diff| diff.name.as_str()).collect::<Vec<_>>(), vec!["flag"]);
-    }
-
     #[test]
     fn mysql_modify_column_preserves_explicit_auto_increment() {
         let mut source = column("id", "int", Some("new comment"));
@@ -11340,31 +7550,6 @@ mod tests {
         assert!(sql.contains("AUTO_INCREMENT"), "MySQL ADD COLUMN must keep AUTO_INCREMENT: {sql}");
     }
 
-    #[test]
-    fn sqlserver_add_column_places_identity_after_type() {
-        let mut source = column("seq", "int", None);
-        source.extra = Some("auto_increment".to_string());
-        let diff = ColumnDiff {
-            diff_type: "added".to_string(),
-            name: "seq".to_string(),
-            source: Some(source),
-            target: None,
-            changes: vec![],
-            add_position: None,
-        };
-
-        let sql = gen_sql(wrap_table_diff("users", vec![diff]), DatabaseType::SqlServer, Some(DialectKind::Mysql));
-
-        assert!(
-            sql.contains("[seq] INT IDENTITY(1,1) NOT NULL"),
-            "SQL Server ADD COLUMN must place IDENTITY directly after the type: {sql}"
-        );
-        assert!(
-            !sql.to_uppercase().contains("NOT NULL IDENTITY"),
-            "SQL Server ADD COLUMN must not trail IDENTITY after constraints: {sql}"
-        );
-    }
-
     // -- 32. Multiple renames in one table --
     #[test]
     fn multiple_renames_in_one_table() {
@@ -11377,21 +7562,6 @@ mod tests {
         assert_eq!(renamed.len(), 2, "should detect two renames: {renamed:?}");
         assert_eq!(renamed[0].name, "new_a");
         assert_eq!(renamed[1].name, "new_b");
-    }
-
-    #[test]
-    fn multiple_renames_sql() {
-        let diffs = make_col_diffs(
-            &[("id", "int"), ("new_a", "varchar(50)"), ("new_b", "int")],
-            &[("id", "int"), ("old_a", "varchar(50)"), ("old_b", "int")],
-            true,
-        );
-        for (db, label) in [(DatabaseType::Mysql, "MySQL"), (DatabaseType::Postgres, "PG")] {
-            let sql = gen_sql(wrap_table_diff("t", diffs.clone()), db, None);
-            // Two renames → two CHANGE COLUMN / RENAME COLUMN operations
-            let _n: u64 = 2;
-            assert!(sql.contains("COLUMN"), "{label}: {sql}");
-        }
     }
 
     // -- 33. Rename threshold edge cases --
@@ -11434,24 +7604,6 @@ mod tests {
         let diffs = diff_columns_with_options(&source, &target, false, false, false, 0.5);
         let sql = gen_sql(wrap_table_diff("t", diffs), DatabaseType::Mysql, None);
         assert!(sql.contains("MODIFY COLUMN"), "default change: {sql}");
-    }
-
-    #[test]
-    fn default_value_change_postgres() {
-        let source = vec![ColumnInfo { column_default: Some("'guest'".into()), ..column("name", "varchar(50)", None) }];
-        let target = vec![ColumnInfo { column_default: None, ..column("name", "varchar(50)", None) }];
-        let diffs = diff_columns_with_options(&source, &target, false, false, false, 0.5);
-        let sql = gen_sql(wrap_table_diff("t", diffs), DatabaseType::Postgres, None);
-        assert!(sql.contains("SET DEFAULT"), "default add: {sql}");
-    }
-
-    #[test]
-    fn default_value_drop_postgres() {
-        let source = vec![ColumnInfo { column_default: None, ..column("name", "varchar(50)", None) }];
-        let target = vec![ColumnInfo { column_default: Some("'old'".into()), ..column("name", "varchar(50)", None) }];
-        let diffs = diff_columns_with_options(&source, &target, false, false, false, 0.5);
-        let sql = gen_sql(wrap_table_diff("t", diffs), DatabaseType::Postgres, None);
-        assert!(sql.contains("DROP DEFAULT"), "default drop: {sql}");
     }
 
     #[test]
@@ -11536,174 +7688,6 @@ mod tests {
     }
 
     #[test]
-    fn default_literal_leaves_non_mysql_expressions_alone() {
-        use DialectKind::{Oracle, Postgres, SqlServer};
-
-        // These dialects return a string default already quoted, so a bare token
-        // is an expression. Quoting it would silently turn a per-row value into
-        // a fixed string.
-        assert_eq!(default_literal("CURRENT_USER", "text", Postgres, None), "CURRENT_USER");
-        assert_eq!(default_literal("USER", "varchar2(30)", Oracle, None), "USER");
-        assert_eq!(default_literal("'new'::text", "text", Postgres, None), "'new'::text");
-        assert_eq!(default_literal("nextval('s'::regclass)", "integer", Postgres, None), "nextval('s'::regclass)");
-        assert_eq!(default_literal("N'guest'", "nvarchar(50)", SqlServer, None), "N'guest'");
-        assert_eq!(default_literal("('x')", "varchar(10)", SqlServer, None), "('x')");
-        assert_eq!(default_literal("NULL", "text", Postgres, None), "NULL");
-        // The same bare token on MySQL is a string, which is why the rule has to
-        // follow the source dialect rather than the value.
-        assert_eq!(default_literal("CURRENT_USER", "text", DialectKind::Mysql, None), "'CURRENT_USER'");
-    }
-
-    #[test]
-    fn sqlserver_default_literal_rewrites_cross_dialect_expressions() {
-        assert_eq!(
-            sqlserver_default_literal("CURRENT_TIMESTAMP(6)", "DATETIME2(6)", Some(DialectKind::Mysql), None),
-            "SYSDATETIME()"
-        );
-        assert_eq!(
-            sqlserver_default_literal("CURRENT_TIMESTAMP", "DATETIME2(6)", Some(DialectKind::Mysql), None),
-            "SYSDATETIME()"
-        );
-        assert_eq!(
-            sqlserver_default_literal("now()", "DATETIMEOFFSET(6)", Some(DialectKind::Postgres), None),
-            "SYSDATETIMEOFFSET()"
-        );
-        assert_eq!(
-            sqlserver_default_literal("(uuid())", "UNIQUEIDENTIFIER", Some(DialectKind::Mysql), None),
-            "NEWID()"
-        );
-        assert_eq!(sqlserver_default_literal("b'1'", "BIT", Some(DialectKind::Mysql), None), "1");
-        assert_eq!(sqlserver_default_literal("b'1010'", "BIGINT", Some(DialectKind::Mysql), None), "10");
-        assert_eq!(sqlserver_default_literal("x'DEAD'", "VARBINARY(2)", Some(DialectKind::Mysql), None), "0xDEAD");
-        assert_eq!(sqlserver_default_literal("true", "BIT", Some(DialectKind::Postgres), None), "1");
-        assert_eq!(sqlserver_default_literal("'false'::boolean", "BIT", Some(DialectKind::Postgres), None), "0");
-        assert_eq!(
-            sqlserver_default_literal("'true'::text", "NVARCHAR(16)", Some(DialectKind::Postgres), None),
-            "N'true'"
-        );
-        assert_eq!(
-            sqlserver_default_literal("'\\xCAFE'::bytea", "VARBINARY(MAX)", Some(DialectKind::Postgres), None),
-            "0xCAFE"
-        );
-        assert_eq!(
-            sqlserver_default_literal("'guest'::character varying", "NVARCHAR(64)", Some(DialectKind::Postgres), None),
-            "N'guest'"
-        );
-        assert_eq!(
-            sqlserver_default_literal("'0.00'::numeric(10,2)", "DECIMAL(10,2)", Some(DialectKind::Postgres), None),
-            "'0.00'"
-        );
-        assert_eq!(
-            sqlserver_default_literal(
-                "'guest'::character varying(20)",
-                "NVARCHAR(20)",
-                Some(DialectKind::Postgres),
-                None
-            ),
-            "N'guest'"
-        );
-        assert_eq!(
-            sqlserver_default_literal("'{a,b}'::text[]", "NVARCHAR(32)", Some(DialectKind::Postgres), None),
-            "N'{a,b}'"
-        );
-        assert_eq!(
-            sqlserver_default_literal(
-                "'guest'::\"public\".\"character varying\"(20)",
-                "NVARCHAR(20)",
-                Some(DialectKind::Postgres),
-                None
-            ),
-            "N'guest'"
-        );
-        assert_eq!(
-            sqlserver_default_literal("('中文')::text", "NVARCHAR(64)", Some(DialectKind::Postgres), None),
-            "(N'中文')"
-        );
-        assert_eq!(
-            sqlserver_default_literal(
-                "nextval('sales.order_seq'::regclass)",
-                "BIGINT",
-                Some(DialectKind::Postgres),
-                None
-            ),
-            "NEXT VALUE FOR [dbo].[order_seq]"
-        );
-        assert_eq!(
-            sqlserver_default_literal_for_schema(
-                "nextval('public.order_seq'::regclass)",
-                "BIGINT",
-                Some(DialectKind::Postgres),
-                None,
-                Some("sales")
-            ),
-            "NEXT VALUE FOR [sales].[order_seq]"
-        );
-        assert_eq!(
-            sqlserver_default_literal("CURRENT_DATE()", "DATE", Some(DialectKind::Mysql), None),
-            "CONVERT(date, GETDATE())"
-        );
-        assert_eq!(
-            sqlserver_default_literal("LOCALTIME(3)", "TIME(3)", Some(DialectKind::Postgres), None),
-            "CONVERT(time, GETDATE())"
-        );
-        assert_eq!(
-            sqlserver_default_literal("((getdate()))", "DATETIME2", Some(DialectKind::SqlServer), None),
-            "((getdate()))"
-        );
-    }
-
-    #[test]
-    fn strip_postgres_default_casts_consumes_complete_type_syntax() {
-        assert_eq!(strip_postgres_default_casts("'value'::numeric(10,2)"), "'value'");
-        assert_eq!(strip_postgres_default_casts("'value'::character varying(20)"), "'value'");
-        assert_eq!(strip_postgres_default_casts("'value'::public.\"custom_type\"(10,2)[10][]"), "'value'");
-        assert_eq!(strip_postgres_default_casts("'value'::\"sch\"\"ema\".\"ty\"\"pe\"(4)[]"), "'value'");
-        assert_eq!(strip_postgres_default_casts("'value'::timestamp(3) without time zone"), "'value'");
-        assert_eq!(strip_postgres_default_casts("'value'::double precision"), "'value'");
-        assert_eq!(strip_postgres_default_casts("'value'::interval day to second(6)"), "'value'");
-        assert_eq!(strip_postgres_default_casts("nextval('orders.id'::regclass)"), "nextval('orders.id')");
-        assert_eq!(strip_postgres_default_casts("'1'::text::integer"), "'1'");
-    }
-
-    #[test]
-    fn strip_postgres_default_casts_preserves_expression_boundaries() {
-        assert_eq!(strip_postgres_default_casts("(true::boolean AND false)"), "(true AND false)");
-        assert_eq!(strip_postgres_default_casts("1::int IS DISTINCT FROM 2"), "1 IS DISTINCT FROM 2");
-        assert_eq!(
-            strip_postgres_default_casts("CURRENT_TIMESTAMP::timestamp AT TIME ZONE 'UTC'"),
-            "CURRENT_TIMESTAMP AT TIME ZONE 'UTC'"
-        );
-        assert_eq!(strip_postgres_default_casts("'x'::text COLLATE \"C\""), "'x' COLLATE \"C\"");
-        assert_eq!(strip_postgres_default_casts("1::integer IN (1,2)"), "1 IN (1,2)");
-        assert_eq!(strip_postgres_default_casts("\"fn::name\"()::integer"), "\"fn::name\"()");
-        assert_eq!(strip_postgres_default_casts("$$a::int$$::text"), "$$a::int$$");
-        assert_eq!(strip_postgres_default_casts("$tag$a::int$tag$::text"), "$tag$a::int$tag$");
-        assert_eq!(strip_postgres_default_casts(r"E'a\'::int'::text"), r"E'a\'::int'");
-    }
-
-    #[test]
-    fn strip_postgres_default_casts_leaves_malformed_types_unchanged() {
-        for malformed in [
-            "x::",
-            "x::numeric(10",
-            "x::numeric(10::int",
-            "x::numeric(10,2)garbage",
-            "x::numeric(10)(20)",
-            "x::\"unterminated",
-            "x::\"foo\"bar",
-            "x::schema.",
-            "x::text[bad]",
-            "x::text[bad::int]",
-            "x::text[++]]",
-            "x::text[1+2]",
-            "x::text[-1]",
-            "x::text[]garbage",
-        ] {
-            assert_eq!(strip_postgres_default_casts(malformed), malformed);
-        }
-    }
-
-    #[test]
     fn default_literal_handles_set_and_binary_boundaries() {
         use DialectKind::Mysql;
 
@@ -11728,15 +7712,6 @@ mod tests {
         assert!(!diffs.is_empty(), "should detect order changes");
         assert!(diffs.iter().all(|d| d.diff_type == "modified"), "all should be modified");
         assert!(diffs.iter().all(|d| d.changes.iter().any(|c| c.starts_with("order:"))), "all order changes");
-    }
-
-    #[test]
-    fn column_order_changes_with_source_dialect() {
-        let source = vec![column("id", "int(11)", None), column("name", "varchar(50)", None)];
-        let target = vec![column("name", "text", None), column("id", "int", None)];
-        let diffs = diff_columns_with_options(&source, &target, false, true, false, 0.5);
-        let sql = gen_sql(wrap_table_diff("t", diffs), DatabaseType::Postgres, Some(DialectKind::Mysql));
-        assert!(sql.contains("INTEGER"), "type converted: {sql}");
     }
 
     // -- 36. prepare_schema_diff integration with source_dialect --
@@ -11796,100 +7771,6 @@ mod tests {
     }
 
     #[test]
-    fn prepare_schema_diff_integration_cross_dialect() {
-        let options = SchemaDiffPreparationOptions {
-            source_tables: vec![TableInfo {
-                name: "t".into(),
-                table_type: "BASE TABLE".into(),
-                valid: None,
-                comment: None,
-                parent_schema: None,
-                parent_name: None,
-            }],
-            target_tables: vec![TableInfo {
-                name: "t".into(),
-                table_type: "BASE TABLE".into(),
-                valid: None,
-                comment: None,
-                parent_schema: None,
-                parent_name: None,
-            }],
-            source_details: vec![TableSchemaDetail {
-                name: "t".into(),
-                columns: vec![column("flag", "tinyint", None), column("name2", "varchar(50)", None)],
-                indexes: vec![],
-                foreign_keys: vec![],
-                triggers: vec![],
-                ddl: None,
-            }],
-            target_details: vec![TableSchemaDetail {
-                name: "t".into(),
-                columns: vec![column("flag", "smallint", None), column("name", "varchar(50)", None)],
-                indexes: vec![],
-                foreign_keys: vec![],
-                triggers: vec![],
-                ddl: None,
-            }],
-            database_type: DatabaseType::Postgres,
-            detect_renames: true,
-            rename_threshold: 0.5,
-            source_dialect: Some(DialectKind::Mysql),
-            target_dialect: Some(DialectKind::Postgres),
-            ..Default::default()
-        };
-        let result = prepare_schema_diff(options);
-        let sql = &result.sync_sql;
-        assert!(sql.contains("RENAME COLUMN"), "PG rename: {sql}");
-        assert!(sql.contains("SMALLINT"), "tinyint→SMALLINT: {sql}");
-        assert!(!sql.contains('`'), "PG no backticks: {sql}");
-    }
-
-    // -- 37. Index + column rename combined --
-    #[test]
-    fn index_and_rename_combined() {
-        let col_diffs =
-            make_col_diffs(&[("id", "int"), ("name2", "varchar(50)")], &[("id", "int"), ("name", "varchar(50)")], true);
-        let table_diff = TableDiff {
-            diff_type: "modified".to_string(),
-            object_type: Some("table".to_string()),
-            name: "t".to_string(),
-            target_name: None,
-            columns: Some(col_diffs),
-            indexes: Some(vec![IndexDiff {
-                diff_type: "added".to_string(),
-                name: "idx_name".to_string(),
-                source: Some(index(IndexInfo {
-                    name: "idx_name".to_string(),
-                    columns: vec!["name2".to_string()],
-                    is_unique: false,
-                    is_primary: false,
-                    filter: None,
-                    index_type: None,
-                    included_columns: None,
-                    comment: None,
-                    key_is_expression: Vec::new(),
-                    column_opclasses: vec![],
-                    key_options: Vec::new(),
-                    constraint_backed: false,
-                })),
-                target: None,
-                changes: vec![],
-            }]),
-            foreign_keys: None,
-            triggers: None,
-            ddl: None,
-            target_ddl: None,
-            source_table_comment: None,
-            target_table_comment: None,
-            sync_sql: None,
-        };
-        let sql =
-            generate_schema_sync_sql(&[table_diff], &[], &[], &[], &[], DatabaseType::Postgres, None, false, None, &[]);
-        assert!(sql.contains("RENAME COLUMN"), "rename: {sql}");
-        assert!(sql.contains("CREATE INDEX"), "index: {sql}");
-    }
-
-    #[test]
     fn index_and_rename_combined_mysql() {
         let col_diffs =
             make_col_diffs(&[("id", "int"), ("name2", "varchar(50)")], &[("id", "int"), ("name", "varchar(50)")], true);
@@ -11933,73 +7814,6 @@ mod tests {
         assert!(sql.contains("DROP INDEX"), "drop index: {sql}");
     }
 
-    // -- 38. diff_columns_with_compatibility cross-dialect --
-    #[test]
-    fn diff_columns_with_compatibility_cross_dialect() {
-        let source = vec![column("id", "int(11)", None)];
-        let target = vec![column("id", "integer", None)];
-        let (_diffs, warnings) = diff_columns_with_compatibility(
-            &source,
-            &target,
-            false,
-            false,
-            DialectKind::Mysql,
-            DialectKind::Postgres,
-            0.5,
-            &[],
-        );
-        // int(11)→integer should be compatible
-        let has_warning = warnings.iter().any(|w| w.column_name == "id");
-        assert!(!has_warning, "int(11)→integer should be compatible");
-    }
-
-    #[test]
-    fn diff_columns_with_compatibility_warning() {
-        let source = vec![column("id", "int", None)];
-        let target = vec![column("id", "text", None)];
-        let (_diffs, warnings) = diff_columns_with_compatibility(
-            &source,
-            &target,
-            false,
-            false,
-            DialectKind::Mysql,
-            DialectKind::Postgres,
-            0.9,
-            &[],
-        );
-        let has_warning = warnings.iter().any(|w| w.column_name == "id");
-        assert!(has_warning, "int→text should generate warning");
-    }
-
-    // -- 39. Type mapping prefix matching edge cases --
-    #[test]
-    fn convert_type_prefix_matches_parameterized() {
-        use crate::sql_dialect::descriptor::TypeMappingMatrix;
-        let matrix = TypeMappingMatrix::for_dialects(DialectKind::Mysql, DialectKind::Postgres);
-        let (result, _) = matrix.convert_type("tinyint(1)");
-        assert_eq!(result, "BOOLEAN", "tinyint(1) → BOOLEAN");
-        // tinyint(4) matches TINYINT prefix rule → SMALLINT (not BOOLEAN)
-        let (result, _) = matrix.convert_type("tinyint(4)");
-        assert_eq!(result, "SMALLINT", "tinyint(4) → SMALLINT");
-    }
-
-    #[test]
-    fn convert_type_unknown_type_passthrough() {
-        use crate::sql_dialect::descriptor::TypeMappingMatrix;
-        let matrix = TypeMappingMatrix::for_dialects(DialectKind::Mysql, DialectKind::Postgres);
-        let (result, requires_cast) = matrix.convert_type("geometry");
-        assert_eq!(result, "geometry", "unknown type passthrough");
-        assert!(requires_cast, "unknown type requires cast");
-    }
-
-    #[test]
-    fn convert_type_empty_string() {
-        use crate::sql_dialect::descriptor::TypeMappingMatrix;
-        let matrix = TypeMappingMatrix::for_dialects(DialectKind::Mysql, DialectKind::Postgres);
-        let (result, _) = matrix.convert_type("");
-        assert_eq!(result, "", "empty string passthrough");
-    }
-
     // -- 40. Rollback SQL with column renames --
     #[test]
     fn rollback_graph_with_renames() {
@@ -12035,88 +7849,7 @@ mod tests {
     }
 
     #[test]
-    fn rollback_with_cross_dialect_type_conversion() {
-        let diffs = vec![TableDiff {
-            diff_type: "modified".to_string(),
-            object_type: Some("table".to_string()),
-            name: "t".to_string(),
-            target_name: None,
-            columns: Some(vec![ColumnDiff {
-                diff_type: "added".to_string(),
-                name: "id".to_string(),
-                source: Some(column("id", "int(11)", None)),
-                target: None,
-                changes: vec![],
-                add_position: None,
-            }]),
-            indexes: None,
-            foreign_keys: None,
-            triggers: None,
-            ddl: None,
-            target_ddl: None,
-            source_table_comment: None,
-            target_table_comment: None,
-            sync_sql: None,
-        }];
-        let dep_graph = DependencyGraph::build(&[], &[]);
-        let graph = RollbackGraph::from_forward_diffs(&diffs, &[], &dep_graph);
-        let rollback_sql = generate_rollback_sync_sql(&graph, DatabaseType::Postgres, None, false);
-        assert!(rollback_sql.contains("DROP COLUMN"), "rollback add→drop: {rollback_sql}");
-    }
-
-    // -- 41. Multiple MySQL→PG type conversion in combined SQL --
-    #[test]
-    fn cross_dialect_multiple_type_conversions_in_one_alter() {
-        let diffs = make_col_diffs(
-            &[("a1", "tinyint"), ("b1", "mediumint"), ("c1", "float"), ("d1", "double"), ("e1", "datetime")],
-            &[],
-            false,
-        );
-        let sql = gen_sql(wrap_table_diff("t", diffs), DatabaseType::Postgres, Some(DialectKind::Mysql));
-        assert!(sql.contains("SMALLINT"), "tinyint→SMALLINT: {sql}");
-        assert!(sql.contains("INTEGER"), "mediumint→INTEGER: {sql}");
-        assert!(sql.contains("REAL"), "float→REAL: {sql}");
-        assert!(sql.contains("DOUBLE PRECISION"), "double→DOUBLE PRECISION: {sql}");
-        assert!(sql.contains("TIMESTAMP"), "datetime→TIMESTAMP: {sql}");
-    }
-
-    // -- 42. ADD COLUMN with default value --
-    #[test]
-    fn add_column_with_default_value() {
-        let source = vec![ColumnInfo { column_default: Some("0".into()), ..column("status", "int", None) }];
-        let target: Vec<ColumnInfo> = vec![];
-        let diffs = diff_columns_with_options(&source, &target, false, false, false, 0.5);
-        for (db, label) in [(DatabaseType::Mysql, "MySQL"), (DatabaseType::Postgres, "PG")] {
-            let sql = gen_sql(wrap_table_diff("t", diffs.clone()), db, None);
-            assert!(sql.contains("DEFAULT 0"), "{label} default: {sql}");
-        }
-    }
-
-    // -- 43. Comment changes for non-MySQL databases --
-    #[test]
-    fn column_comment_change_non_mysql() {
-        let source = vec![column("name", "text", Some("new comment"))];
-        let target = vec![column("name", "text", Some("old comment"))];
-        let diffs = diff_columns_with_options(&source, &target, false, false, false, 0.5);
-        let sql = gen_sql(wrap_table_diff("t", diffs), DatabaseType::Postgres, None);
-        assert!(sql.contains("COMMENT ON COLUMN"), "PG comment: {sql}");
-    }
-
-    #[test]
-    fn schema_diff_comment_sql_uses_shared_literal_escaping() {
-        let cases = [("hello", "'hello'"), ("O'Reilly", "'O''Reilly'"), ("", "''"), ("中文注释", "'中文注释'")];
-
-        for (comment, literal) in cases {
-            assert_eq!(
-                column_comment_sql("users", "display_name", comment, DatabaseType::Postgres, Some("public")),
-                vec![format!("COMMENT ON COLUMN \"public\".\"users\".\"display_name\" IS {literal};")]
-            );
-        }
-    }
-
-    #[test]
     fn table_comment_change_mysql() {
-        let _diffs: Vec<ColumnDiff> = vec![];
         let table_diff = TableDiff {
             diff_type: "modified".to_string(),
             object_type: Some("table".to_string()),
@@ -12212,17 +7945,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn column_length_change_generates_modify_sql() {
-        let s = vec![column("name", "varchar(255)", None)];
-        let t = vec![column("name", "varchar(100)", None)];
-        let diffs = diff_columns_with_options(&s, &t, false, false, false, 0.5);
-        for (db, label) in [(DatabaseType::Mysql, "MySQL"), (DatabaseType::Postgres, "PG")] {
-            let sql = gen_sql(wrap_table_diff("t", diffs.clone()), db, None);
-            assert!(sql.contains("varchar(255)"), "{label} length: {sql}");
-        }
-    }
-
     // -- 48. Column comment changes with ignore_comments option --
     #[test]
     fn column_comment_change_detected() {
@@ -12253,7 +7975,6 @@ mod tests {
 
     #[test]
     fn table_comment_change_mysql_sql() {
-        let _diffs: Vec<ColumnDiff> = vec![];
         let table_diff = TableDiff {
             diff_type: "modified".to_string(),
             object_type: Some("table".to_string()),
@@ -12712,53 +8433,6 @@ mod tests {
         assert!(diffs[0].changes.iter().any(|change| change == "update: NO ACTION → CASCADE"));
     }
 
-    #[test]
-    fn modified_foreign_key_sql_preserves_reference_schema_and_actions() {
-        let table_diff = TableDiff {
-            diff_type: "modified".into(),
-            object_type: Some("table".into()),
-            name: "orders".into(),
-            target_name: None,
-            columns: None,
-            indexes: None,
-            foreign_keys: Some(vec![ForeignKeyDiff {
-                diff_type: "modified".into(),
-                name: "orders_user_fk".into(),
-                source: Some(foreign_key(ForeignKeyInfo {
-                    name: "orders_user_fk".into(),
-                    column: "user_id".into(),
-                    ref_schema: Some("identity".into()),
-                    ref_table: "users".into(),
-                    ref_column: "id".into(),
-                    on_update: Some("CASCADE".into()),
-                    on_delete: Some("SET NULL".into()),
-                })),
-                target: None,
-                changes: vec![],
-            }]),
-            triggers: None,
-            ddl: None,
-            target_ddl: None,
-            source_table_comment: None,
-            target_table_comment: None,
-            sync_sql: None,
-        };
-        let sql = generate_schema_sync_sql(
-            &[table_diff],
-            &[],
-            &[],
-            &[],
-            &[],
-            DatabaseType::Postgres,
-            Some("sales"),
-            false,
-            None,
-            &[],
-        );
-        assert!(sql.contains("REFERENCES \"identity\".\"users\" (\"id\")"), "schema: {sql}");
-        assert!(sql.contains("ON DELETE SET NULL ON UPDATE CASCADE"), "actions: {sql}");
-    }
-
     // -- Regression: issue #7287 --
     // MySQL's information_schema always fills REFERENCED_TABLE_SCHEMA with the literal
     // database name, even for a foreign key that just self-references a table in its own
@@ -12944,100 +8618,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn column_index_fk_combined_diff() {
-        let col_diffs = make_col_diffs(
-            &[("id", "int"), ("name2", "varchar(100)")],
-            &[("id", "int"), ("name", "varchar(50)")],
-            true,
-        );
-        let table_diff = TableDiff {
-            diff_type: "modified".to_string(),
-            object_type: Some("table".to_string()),
-            name: "t".to_string(),
-            target_name: None,
-            columns: Some(col_diffs),
-            indexes: Some(vec![
-                IndexDiff {
-                    diff_type: "added".to_string(),
-                    name: "idx_name".into(),
-                    source: Some(index(IndexInfo {
-                        name: "idx_name".into(),
-                        columns: vec!["name2".into()],
-                        is_unique: false,
-                        is_primary: false,
-                        filter: None,
-                        index_type: Some("BTREE".into()),
-                        included_columns: None,
-                        comment: None,
-                        key_is_expression: Vec::new(),
-                        column_opclasses: vec![],
-                        key_options: Vec::new(),
-                        constraint_backed: false,
-                    })),
-                    target: None,
-                    changes: vec![],
-                },
-                IndexDiff {
-                    diff_type: "removed".to_string(),
-                    name: "idx_old".into(),
-                    source: None,
-                    target: Some(index(IndexInfo {
-                        name: "idx_old".into(),
-                        columns: vec!["name".into()],
-                        is_unique: false,
-                        is_primary: false,
-                        filter: None,
-                        index_type: None,
-                        included_columns: None,
-                        comment: None,
-                        key_is_expression: Vec::new(),
-                        column_opclasses: vec![],
-                        key_options: Vec::new(),
-                        constraint_backed: false,
-                    })),
-                    changes: vec![],
-                },
-            ]),
-            foreign_keys: Some(vec![ForeignKeyDiff {
-                diff_type: "modified".to_string(),
-                name: "fk_ref".into(),
-                source: Some(foreign_key(ForeignKeyInfo {
-                    name: "fk_ref".into(),
-                    column: "id".into(),
-                    ref_schema: None,
-                    ref_table: "users".into(),
-                    ref_column: "id".into(),
-                    on_update: None,
-                    on_delete: Some("CASCADE".into()),
-                })),
-                target: Some(foreign_key(ForeignKeyInfo {
-                    name: "fk_ref".into(),
-                    column: "id".into(),
-                    ref_schema: None,
-                    ref_table: "users".into(),
-                    ref_column: "id".into(),
-                    on_update: None,
-                    on_delete: Some("SET NULL".into()),
-                })),
-                changes: vec!["delete: SET NULL → CASCADE".into()],
-            }]),
-            triggers: None,
-            ddl: None,
-            target_ddl: None,
-            source_table_comment: None,
-            target_table_comment: None,
-            sync_sql: None,
-        };
-        let sql =
-            generate_schema_sync_sql(&[table_diff], &[], &[], &[], &[], DatabaseType::Postgres, None, false, None, &[]);
-        assert!(sql.contains("RENAME COLUMN"), "rename: {sql}");
-        assert!(sql.contains("CREATE INDEX"), "add index: {sql}");
-        assert!(sql.contains("DROP INDEX"), "drop index: {sql}");
-        assert!(sql.contains("DROP CONSTRAINT"), "fk drop: {sql}");
-        assert!(sql.contains("ADD CONSTRAINT"), "fk add: {sql}");
-    }
-
     // -- 56. Column order changes with comment option --
     #[test]
     fn column_order_ignored_when_disabled_but_comment_detected() {
@@ -13046,16 +8626,6 @@ mod tests {
         let diffs = diff_columns_with_options(&s, &t, false, false, false, 0.5);
         // order compare disabled, so only comment change on "a" should be detected
         assert!(!diffs.is_empty(), "comment change should be detected: {diffs:?}");
-    }
-
-    // -- 57. Type conversion with precision types (decimal, numeric) --
-    #[test]
-    fn decimal_type_conversion_mysql_to_postgres() {
-        use crate::sql_dialect::descriptor::TypeMappingMatrix;
-        let matrix = TypeMappingMatrix::for_dialects(DialectKind::Mysql, DialectKind::Postgres);
-        // decimal is not in the mapping rules → passes through
-        let (result, _) = matrix.convert_type("decimal(10,2)");
-        assert_eq!(result, "decimal(10,2)", "decimal passthrough");
     }
 
     // -- 58. Column diff with all attributes different --
@@ -13186,43 +8756,10 @@ mod tests {
         run_test(false, true);
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    //  Cross-dialect CREATE TABLE tests (all 11×11 pairs)
-    // ═══════════════════════════════════════════════════════════════
-
-    fn _dialect_from_db(db: DatabaseType) -> DialectKind {
-        DialectKind::from_database_type(db)
-    }
-
-    fn all_kinds() -> Vec<DialectKind> {
-        vec![
-            DialectKind::Mysql,
-            DialectKind::Postgres,
-            DialectKind::Sqlite,
-            DialectKind::SqlServer,
-            DialectKind::Oracle,
-            DialectKind::H2,
-            DialectKind::ClickHouse,
-            DialectKind::DuckDb,
-            DialectKind::ManticoreSearch,
-            DialectKind::Informix,
-            DialectKind::Questdb,
-        ]
-    }
-
     fn kind_to_db(kind: DialectKind) -> Option<DatabaseType> {
         match kind {
             DialectKind::Mysql => Some(DatabaseType::Mysql),
-            DialectKind::Postgres => Some(DatabaseType::Postgres),
-            DialectKind::Sqlite => Some(DatabaseType::Sqlite),
-            DialectKind::SqlServer => Some(DatabaseType::SqlServer),
-            DialectKind::Oracle => Some(DatabaseType::Oracle),
-            DialectKind::H2 => Some(DatabaseType::H2),
-            DialectKind::ClickHouse => Some(DatabaseType::ClickHouse),
-            DialectKind::DuckDb => Some(DatabaseType::DuckDb),
-            DialectKind::ManticoreSearch => Some(DatabaseType::ManticoreSearch),
-            DialectKind::Informix => Some(DatabaseType::Informix),
-            DialectKind::Questdb => Some(DatabaseType::Questdb),
+
             _ => None,
         }
     }
@@ -13231,89 +8768,12 @@ mod tests {
         ColumnInfo { is_primary_key: true, ..column(name, data_type, None) }
     }
 
-    fn _make_added_table_detail(
-        name: &str,
-        columns: Vec<ColumnInfo>,
-        indexes: Vec<IndexInfo>,
-        fks: Vec<ForeignKeyInfo>,
-        ddl: Option<&str>,
-    ) -> TableSchemaDetail {
-        TableSchemaDetail {
-            name: name.to_string(),
-            columns,
-            indexes,
-            foreign_keys: fks,
-            triggers: vec![],
-            ddl: ddl.map(|s| s.to_string()),
-        }
-    }
-
-    fn _prepare_create_table(
-        columns: Vec<ColumnInfo>,
-        indexes: Vec<IndexInfo>,
-        fks: Vec<ForeignKeyInfo>,
-        source_kind: DialectKind,
-        target_kind: DialectKind,
-        ddl: Option<&str>,
-    ) -> String {
-        let Some(db) = kind_to_db(target_kind) else { return String::new() };
-        let _src_db = kind_to_db(source_kind).unwrap_or(DatabaseType::Mysql);
-        let options = SchemaDiffPreparationOptions {
-            source_tables: vec![TableInfo {
-                name: "t".into(),
-                table_type: "BASE TABLE".into(),
-                valid: None,
-                comment: None,
-                parent_schema: None,
-                parent_name: None,
-            }],
-            target_tables: vec![],
-            source_details: vec![_make_added_table_detail("t", columns, indexes, fks, ddl)],
-            target_details: vec![],
-            source_functions: vec![],
-            target_functions: vec![],
-            source_sequences: vec![],
-            target_sequences: vec![],
-            source_rules: vec![],
-            target_rules: vec![],
-            source_owners: vec![],
-            target_owners: vec![],
-            database_type: db,
-            target_schema: None,
-            ignore_comments: false,
-            cascade_delete: false,
-            compare_column_order: false,
-            compare_charset: true,
-            ignore_table_name_case: false,
-            ignore_column_name_case: false,
-            detect_renames: false,
-            detect_table_renames: false,
-            rename_threshold: 0.5,
-            enable_rollback: false,
-            source_dialect: Some(source_kind),
-            target_dialect: Some(target_kind),
-            batch_patterns: vec![],
-            compatibility_threshold: 0.5,
-            source_permissions: vec![],
-            target_permissions: vec![],
-            shard_strategy: None,
-            resource_constraint: None,
-            field_mappings: vec![],
-            table_mappings: vec![],
-        };
-        let result = prepare_schema_diff(options);
-        result.sync_sql
-    }
-
     fn check_identifiers(sql: &str, tgt: DialectKind) {
         match tgt {
-            DialectKind::Mysql | DialectKind::ManticoreSearch => {
+            DialectKind::Mysql => {
                 assert!(sql.contains('`'), "{tgt:?} should use backticks");
             }
-            DialectKind::Oracle => {
-                assert!(!sql.contains('`'), "Oracle no backticks");
-                assert!(!sql.contains('"'), "Oracle no double-quotes");
-            }
+
             _ => {
                 assert!(!sql.contains('`'), "{tgt:?} should NOT use backticks: {sql}");
             }
@@ -13321,133 +8781,18 @@ mod tests {
     }
 
     fn check_no_mysql_residue(sql: &str, tgt: DialectKind) {
-        if !matches!(tgt, DialectKind::Mysql | DialectKind::ManticoreSearch) {
+        if !matches!(tgt, DialectKind::Mysql) {
             assert!(!sql.contains("ENGINE="), "residual ENGINE= in {tgt:?}: {sql}");
             assert!(!sql.contains("CHARSET"), "residual CHARSET in {tgt:?}: {sql}");
         }
     }
 
-    #[test]
-    fn mysql_to_access_create_table_uses_access_types_and_counter() {
-        let columns = vec![
-            ColumnDiff {
-                diff_type: "added".into(),
-                name: "id".into(),
-                source: Some(ColumnInfo {
-                    name: "id".into(),
-                    data_type: "int(11)".into(),
-                    is_nullable: false,
-                    is_primary_key: true,
-                    is_unique: false,
-                    extra: Some("auto_increment".into()),
-                    ..Default::default()
-                }),
-                target: None,
-                changes: vec![],
-                add_position: None,
-            },
-            ColumnDiff {
-                diff_type: "added".into(),
-                name: "name2".into(),
-                source: Some(ColumnInfo {
-                    name: "name2".into(),
-                    data_type: "varchar(120)".into(),
-                    is_nullable: false,
-                    ..Default::default()
-                }),
-                target: None,
-                changes: vec![],
-                add_position: None,
-            },
-            ColumnDiff {
-                diff_type: "added".into(),
-                name: "del_flag".into(),
-                source: Some(ColumnInfo {
-                    name: "del_flag".into(),
-                    data_type: "tinyint(2)".into(),
-                    is_nullable: false,
-                    ..Default::default()
-                }),
-                target: None,
-                changes: vec![],
-                add_position: None,
-            },
-            ColumnDiff {
-                diff_type: "added".into(),
-                name: "create_at".into(),
-                source: Some(ColumnInfo {
-                    name: "create_at".into(),
-                    data_type: "datetime".into(),
-                    is_nullable: true,
-                    ..Default::default()
-                }),
-                target: None,
-                changes: vec![],
-                add_position: None,
-            },
-        ];
-        let indexes = vec![IndexDiff {
-            diff_type: "added".into(),
-            name: "idx_del_flag".into(),
-            source: Some(IndexInfo {
-                name: "idx_del_flag".into(),
-                columns: vec!["del_flag".into()],
-                is_unique: false,
-                is_primary: false,
-                index_type: None,
-                filter: None,
-                included_columns: None,
-                comment: None,
-                key_is_expression: Vec::new(),
-                column_opclasses: vec![],
-                key_options: Vec::new(),
-                constraint_backed: false,
-            }),
-            target: None,
-            changes: vec![],
-        }];
-        let (sql, missing) = generate_create_table_sql(
-            "tb_user",
-            &columns,
-            &indexes,
-            &[],
-            None,
-            DatabaseType::Access,
-            None,
-            Some(DialectKind::Mysql),
-            &[],
-            &[],
-        );
-        assert!(missing.is_empty(), "{missing:?}");
-        assert!(sql.contains("COUNTER"), "Access PK should use COUNTER: {sql}");
-        assert!(!sql.contains("IDENTITY"), "Access must not emit SQL Server IDENTITY: {sql}");
-        assert!(!sql.contains("int(11)"), "MySQL display width must be stripped: {sql}");
-        assert!(sql.contains("TEXT(120)") || sql.contains("TEXT (120)"), "varchar→TEXT(n): {sql}");
-        assert!(
-            sql.contains("BYTE") || sql.contains("\"del_flag\" BYTE") || sql.to_ascii_uppercase().contains("BYTE"),
-            "tinyint→BYTE: {sql}"
-        );
-        assert!(sql.to_ascii_uppercase().contains("DATETIME"), "datetime stays DATETIME: {sql}");
-        assert!(sql.contains("CREATE INDEX"), "index: {sql}");
-    }
-
     fn check_auto_increment(sql: &str, tgt: DialectKind) {
         match tgt {
-            DialectKind::Mysql | DialectKind::ManticoreSearch => {
+            DialectKind::Mysql => {
                 assert!(sql.contains("AUTO_INCREMENT"), "{tgt:?} should have AUTO_INCREMENT: {sql}");
             }
-            DialectKind::Postgres => {
-                assert!(sql.contains("SEQUENCE"), "{tgt:?} should use SEQUENCE: {sql}");
-            }
-            DialectKind::SqlServer => {
-                assert!(sql.contains("IDENTITY"), "{tgt:?} should use IDENTITY: {sql}");
-            }
-            DialectKind::Oracle => {
-                assert!(
-                    sql.contains("GENERATED BY DEFAULT AS IDENTITY"),
-                    "{tgt:?} should use GENERATED BY DEFAULT AS IDENTITY: {sql}"
-                );
-            }
+
             _ => {
                 // Other dialects may or may not have auto-increment
             }
@@ -13456,23 +8801,6 @@ mod tests {
 
     fn check_type_conversion(sql: &str, src: DialectKind, tgt: DialectKind) {
         match (src, tgt) {
-            (DialectKind::Mysql, DialectKind::Postgres) => {
-                assert!(sql.contains("INTEGER"), "int→INTEGER in PG: {sql}");
-                // Only check if source has these types (S2 has tinyint, datetime)
-                if sql.contains("tinyint") || sql.contains("TINYINT") {
-                    assert!(sql.contains("SMALLINT"), "tinyint→SMALLINT in PG: {sql}");
-                }
-                if sql.contains("datetime") || sql.contains("DATETIME") {
-                    assert!(sql.contains("TIMESTAMP"), "datetime→TIMESTAMP in PG: {sql}");
-                }
-            }
-            (DialectKind::Mysql, DialectKind::Sqlite) => {
-                assert!(sql.contains("INTEGER"), "int→INTEGER in SQLite: {sql}");
-                if sql.contains("datetime") || sql.contains("DATETIME") {
-                    assert!(sql.contains("TEXT"), "datetime→TEXT in SQLite: {sql}");
-                }
-            }
-            (DialectKind::Postgres, DialectKind::Mysql) if sql.contains("text") || sql.contains("TEXT") => {}
             _ => {}
         }
     }
@@ -13480,7 +8808,7 @@ mod tests {
     fn check_table_sql_structure(sql: &str, tgt: DialectKind) {
         assert!(sql.contains("CREATE TABLE"), "{tgt:?} missing CREATE TABLE");
         match tgt {
-            DialectKind::Mysql | DialectKind::ManticoreSearch => {
+            DialectKind::Mysql => {
                 assert!(sql.contains("PRIMARY KEY"), "{tgt:?} missing PK");
             }
             _ => {
@@ -13518,7 +8846,7 @@ mod tests {
 
     fn s1_table_diff(src_kind: DialectKind, tgt_kind: DialectKind) -> TableDiff {
         let Some(_db) = kind_to_db(tgt_kind) else { panic!("no db for {tgt_kind:?}") };
-        let is_mysql_tgt = matches!(tgt_kind, DialectKind::Mysql | DialectKind::ManticoreSearch);
+        let is_mysql_tgt = matches!(tgt_kind, DialectKind::Mysql);
         let ddl = if is_mysql_tgt {
             Some("CREATE TABLE `t` (`id` int NOT NULL AUTO_INCREMENT, `name` varchar(100) NOT NULL, PRIMARY KEY (`id`)) ENGINE=InnoDB".into())
         } else if src_kind == tgt_kind {
@@ -13548,7 +8876,7 @@ mod tests {
 
     #[test]
     fn cross_dialect_s1_all_pairs_simple_table() {
-        let kinds = all_kinds();
+        let kinds = vec![DialectKind::Mysql];
         for src in &kinds {
             for tgt in &kinds {
                 let Some(db) = kind_to_db(*tgt) else { continue };
@@ -13560,148 +8888,6 @@ mod tests {
                 check_no_mysql_residue(&sql, *tgt);
                 check_auto_increment(&sql, *tgt);
                 check_type_conversion(&sql, *src, *tgt);
-            }
-        }
-    }
-
-    // -- S2: full table (multiple types, index) --
-    fn s2_diffs() -> (Vec<ColumnDiff>, Vec<IndexDiff>) {
-        let cols = vec![
-            ColumnDiff {
-                diff_type: "added".into(),
-                name: "id".into(),
-                source: Some(ColumnInfo { extra: Some("auto_increment".into()), ..col_pk("id", "int") }),
-                target: None,
-                changes: vec![],
-                add_position: None,
-            },
-            ColumnDiff {
-                diff_type: "added".into(),
-                name: "title".into(),
-                source: Some(ColumnInfo {
-                    name: "title".into(),
-                    data_type: "varchar(200)".into(),
-                    is_nullable: false,
-                    ..column("title", "varchar(200)", None)
-                }),
-                target: None,
-                changes: vec![],
-                add_position: None,
-            },
-            ColumnDiff {
-                diff_type: "added".into(),
-                name: "body".into(),
-                source: Some(ColumnInfo {
-                    name: "body".into(),
-                    data_type: "text".into(),
-                    is_nullable: true,
-                    ..column("body", "text", None)
-                }),
-                target: None,
-                changes: vec![],
-                add_position: None,
-            },
-            ColumnDiff {
-                diff_type: "added".into(),
-                name: "views".into(),
-                source: Some(ColumnInfo {
-                    name: "views".into(),
-                    data_type: "int".into(),
-                    is_nullable: true,
-                    column_default: Some("0".into()),
-                    ..column("views", "int", None)
-                }),
-                target: None,
-                changes: vec![],
-                add_position: None,
-            },
-            ColumnDiff {
-                diff_type: "added".into(),
-                name: "is_pub".into(),
-                source: Some(ColumnInfo {
-                    name: "is_pub".into(),
-                    data_type: "tinyint".into(),
-                    is_nullable: true,
-                    ..column("is_pub", "tinyint", None)
-                }),
-                target: None,
-                changes: vec![],
-                add_position: None,
-            },
-            ColumnDiff {
-                diff_type: "added".into(),
-                name: "created".into(),
-                source: Some(ColumnInfo {
-                    name: "created".into(),
-                    data_type: "datetime".into(),
-                    is_nullable: true,
-                    ..column("created", "datetime", None)
-                }),
-                target: None,
-                changes: vec![],
-                add_position: None,
-            },
-        ];
-        let idxs = vec![IndexDiff {
-            diff_type: "added".into(),
-            name: "idx_views".into(),
-            source: Some(IndexInfo {
-                name: "idx_views".into(),
-                columns: vec!["views".into()],
-                is_unique: false,
-                is_primary: false,
-                filter: None,
-                index_type: None,
-                included_columns: None,
-                comment: None,
-                key_is_expression: Vec::new(),
-                column_opclasses: vec![],
-                key_options: Vec::new(),
-                constraint_backed: false,
-            }),
-            target: None,
-            changes: vec![],
-        }];
-        (cols, idxs)
-    }
-
-    #[test]
-    fn cross_dialect_s2_full_table() {
-        let kinds = all_kinds();
-        for src in &kinds {
-            for tgt in &kinds {
-                let Some(db) = kind_to_db(*tgt) else { continue };
-                let src_dialect = if src == tgt { None } else { Some(*src) };
-                let (cols, idxs) = s2_diffs();
-                let td = TableDiff {
-                    diff_type: "added".into(),
-                    object_type: Some("table".into()),
-                    name: "t".into(),
-                    target_name: None,
-                    columns: Some(cols),
-                    indexes: Some(idxs),
-                    foreign_keys: None,
-                    triggers: None,
-                    ddl: None,
-                    target_ddl: None,
-                    source_table_comment: None,
-                    target_table_comment: None,
-                    sync_sql: None,
-                };
-                let sql = generate_schema_sync_sql(&[td], &[], &[], &[], &[], db, None, false, src_dialect, &[]);
-                check_table_sql_structure(&sql, *tgt);
-                check_identifiers(&sql, *tgt);
-                check_no_mysql_residue(&sql, *tgt);
-                check_auto_increment(&sql, *tgt);
-                check_type_conversion(&sql, *src, *tgt);
-                match tgt {
-                    DialectKind::Mysql | DialectKind::ManticoreSearch => {
-                        assert!(sql.contains("KEY "), "{tgt:?} index missing: {sql}");
-                    }
-                    _ => {
-                        assert!(sql.contains("CREATE INDEX"), "{tgt:?} CREATE INDEX missing: {sql}");
-                    }
-                }
             }
         }
     }
@@ -13751,7 +8937,7 @@ mod tests {
 
     #[test]
     fn cross_dialect_s3_foreign_key_table() {
-        let kinds = all_kinds();
+        let kinds = vec![DialectKind::Mysql];
         for src in &kinds {
             for tgt in &kinds {
                 let Some(db) = kind_to_db(*tgt) else { continue };
@@ -13780,403 +8966,6 @@ mod tests {
                 assert!(sql.contains("REFERENCES"), "{tgt:?} REFERENCES missing: {sql}");
             }
         }
-    }
-
-    // -- source_dialect=None: verify original DDL preservation --
-    fn _prepare_create_table_no_dialect(
-        columns: Vec<ColumnInfo>,
-        indexes: Vec<IndexInfo>,
-        target_kind: DialectKind,
-        ddl: Option<&str>,
-    ) -> String {
-        let Some(db) = kind_to_db(target_kind) else { return String::new() };
-        let options = SchemaDiffPreparationOptions {
-            source_tables: vec![TableInfo {
-                name: "t".into(),
-                table_type: "BASE TABLE".into(),
-                valid: None,
-                comment: None,
-                parent_schema: None,
-                parent_name: None,
-            }],
-            target_tables: vec![],
-            source_details: vec![_make_added_table_detail("t", columns, indexes, vec![], ddl)],
-            target_details: vec![],
-            database_type: db,
-            ..Default::default()
-        };
-        let result = prepare_schema_diff(options);
-        result.sync_sql
-    }
-
-    #[test]
-    fn cross_dialect_none_source_dialect_original_ddl() {
-        let kinds = all_kinds();
-        for tgt in &kinds {
-            let Some(db) = kind_to_db(*tgt) else { continue };
-            let is_mysql_tgt = matches!(tgt, DialectKind::Mysql | DialectKind::ManticoreSearch);
-            let ddl_str = "CREATE TABLE `t` (`id` int NOT NULL AUTO_INCREMENT, `name` varchar(100) NOT NULL, PRIMARY KEY (`id`)) ENGINE=InnoDB";
-            let td = TableDiff {
-                diff_type: "added".into(),
-                object_type: Some("table".into()),
-                name: "t".into(),
-                target_name: None,
-                columns: Some(s1_diffs()),
-                indexes: None,
-                foreign_keys: None,
-                triggers: None,
-                ddl: Some(ddl_str.into()),
-                target_ddl: None,
-                source_table_comment: None,
-                target_table_comment: None,
-                sync_sql: None,
-            };
-            let sql = generate_schema_sync_sql(&[td], &[], &[], &[], &[], db, None, false, None, &[]);
-            check_table_sql_structure(&sql, *tgt);
-            if is_mysql_tgt {
-                assert!(sql.contains("ENGINE=InnoDB"), "original DDL preserved for {tgt:?}");
-            } else {
-                assert!(!sql.contains("ENGINE="), "ENGINE stripped for {tgt:?}: {sql}");
-            }
-        }
-    }
-
-    // -- Reverse cross-dialect: non-MySQL source → MySQL target --
-    #[test]
-    fn cross_dialect_postgres_source_to_mysql_target() {
-        let src = DialectKind::Postgres;
-        let tgt = DialectKind::Mysql;
-        let Some(db) = kind_to_db(tgt) else { return };
-        let cols = vec![
-            ColumnDiff {
-                diff_type: "added".into(),
-                name: "id".into(),
-                source: Some(col_pk("id", "integer")),
-                target: None,
-                changes: vec![],
-                add_position: None,
-            },
-            ColumnDiff {
-                diff_type: "added".into(),
-                name: "label".into(),
-                source: Some(ColumnInfo {
-                    name: "label".into(),
-                    data_type: "text".into(),
-                    is_nullable: false,
-                    ..column("label", "text", None)
-                }),
-                target: None,
-                changes: vec![],
-                add_position: None,
-            },
-        ];
-        let td = TableDiff {
-            diff_type: "added".into(),
-            object_type: Some("table".into()),
-            name: "t".into(),
-            target_name: None,
-            columns: Some(cols),
-            indexes: None,
-            foreign_keys: None,
-            triggers: None,
-            ddl: None,
-            target_ddl: None,
-            source_table_comment: None,
-            target_table_comment: None,
-            sync_sql: None,
-        };
-        let sql = generate_schema_sync_sql(&[td], &[], &[], &[], &[], db, None, false, Some(src), &[]);
-        check_table_sql_structure(&sql, tgt);
-        check_identifiers(&sql, tgt);
-        check_type_conversion(&sql, src, tgt);
-        assert!(sql.contains("AUTO_INCREMENT"), "MySQL auto_increment: {sql}");
-        assert!(sql.contains("LONGTEXT"), "text→LONGTEXT in MySQL: {sql}");
-    }
-
-    #[test]
-    fn cross_dialect_sqlserver_source_to_postgres_target() {
-        let src = DialectKind::SqlServer;
-        let tgt = DialectKind::Postgres;
-        let Some(db) = kind_to_db(tgt) else { return };
-        let cols = vec![
-            ColumnDiff {
-                diff_type: "added".into(),
-                name: "id".into(),
-                source: Some(col_pk("id", "int")),
-                target: None,
-                changes: vec![],
-                add_position: None,
-            },
-            ColumnDiff {
-                diff_type: "added".into(),
-                name: "data".into(),
-                source: Some(ColumnInfo {
-                    name: "data".into(),
-                    data_type: "nvarchar(255)".into(),
-                    is_nullable: true,
-                    ..column("data", "nvarchar(255)", None)
-                }),
-                target: None,
-                changes: vec![],
-                add_position: None,
-            },
-        ];
-        let td = TableDiff {
-            diff_type: "added".into(),
-            object_type: Some("table".into()),
-            name: "t".into(),
-            target_name: None,
-            columns: Some(cols),
-            indexes: None,
-            foreign_keys: None,
-            triggers: None,
-            ddl: None,
-            target_ddl: None,
-            source_table_comment: None,
-            target_table_comment: None,
-            sync_sql: None,
-        };
-        let sql = generate_schema_sync_sql(&[td], &[], &[], &[], &[], db, None, false, Some(src), &[]);
-        check_table_sql_structure(&sql, tgt);
-        check_identifiers(&sql, tgt);
-        // No mapping rules for SQL Server→PG → types pass through
-        assert!(sql.contains("nvarchar(255)"), "passthrough nvarchar: {sql}");
-    }
-
-    #[test]
-    fn cross_dialect_clickhouse_source_to_mysql_target() {
-        let src = DialectKind::ClickHouse;
-        let tgt = DialectKind::Mysql;
-        let Some(db) = kind_to_db(tgt) else { return };
-        let cols = vec![
-            ColumnDiff {
-                diff_type: "added".into(),
-                name: "id".into(),
-                source: Some(col_pk("id", "Int32")),
-                target: None,
-                changes: vec![],
-                add_position: None,
-            },
-            ColumnDiff {
-                diff_type: "added".into(),
-                name: "data".into(),
-                source: Some(ColumnInfo {
-                    name: "data".into(),
-                    data_type: "String".into(),
-                    is_nullable: true,
-                    ..column("data", "String", None)
-                }),
-                target: None,
-                changes: vec![],
-                add_position: None,
-            },
-        ];
-        let td = TableDiff {
-            diff_type: "added".into(),
-            object_type: Some("table".into()),
-            name: "t".into(),
-            target_name: None,
-            columns: Some(cols),
-            indexes: None,
-            foreign_keys: None,
-            triggers: None,
-            ddl: None,
-            target_ddl: None,
-            source_table_comment: None,
-            target_table_comment: None,
-            sync_sql: None,
-        };
-        let sql = generate_schema_sync_sql(&[td], &[], &[], &[], &[], db, None, false, Some(src), &[]);
-        check_table_sql_structure(&sql, tgt);
-        check_identifiers(&sql, tgt);
-        // No mapping rules → types pass through
-        assert!(sql.contains("Int32"), "passthrough Int32: {sql}");
-        assert!(sql.contains("String"), "passthrough String: {sql}");
-    }
-
-    #[test]
-    fn mysql_to_postgres_direct_generate() {
-        let diffs = vec![
-            ColumnDiff {
-                diff_type: "added".into(),
-                name: "id".into(),
-                source: Some(col_pk("id", "int")),
-                target: None,
-                changes: vec![],
-                add_position: None,
-            },
-            ColumnDiff {
-                diff_type: "added".into(),
-                name: "name".into(),
-                source: Some(ColumnInfo {
-                    name: "name".into(),
-                    data_type: "varchar(100)".into(),
-                    is_nullable: false,
-                    ..column("name", "varchar(100)", None)
-                }),
-                target: None,
-                changes: vec![],
-                add_position: None,
-            },
-        ];
-        let table_diff = TableDiff {
-            diff_type: "added".into(),
-            object_type: Some("table".into()),
-            name: "t".into(),
-            target_name: None,
-            columns: Some(diffs),
-            indexes: None,
-            foreign_keys: None,
-            triggers: None,
-            ddl: Some("CREATE TABLE `t` (`id` int NOT NULL AUTO_INCREMENT, PRIMARY KEY (`id`)) ENGINE=InnoDB".into()),
-            target_ddl: None,
-            source_table_comment: None,
-            target_table_comment: None,
-            sync_sql: None,
-        };
-        let sql = generate_schema_sync_sql(
-            &[table_diff],
-            &[],
-            &[],
-            &[],
-            &[],
-            DatabaseType::Postgres,
-            None,
-            false,
-            Some(DialectKind::Mysql),
-            &[],
-        );
-        assert!(!sql.contains('`'), "PG SQL should not have backticks: {sql}");
-        assert!(sql.contains("INTEGER"), "int→INTEGER: {sql}");
-        assert!(!sql.contains("ENGINE="), "no MySQL ENGINE: {sql}");
-    }
-
-    // -- FieldMapping apply_with_params tests --
-
-    #[test]
-    fn field_mapping_preserve_params() {
-        let mappings = vec![FieldMapping {
-            source_type: "VARCHAR".into(),
-            target_type: "VARCHAR2".into(),
-            param_strategy: ParamStrategy::Preserve,
-            custom_params: None,
-        }];
-        let result = FieldMapping::apply_with_params(&mappings, "VARCHAR(255)", DialectKind::Oracle);
-        assert_eq!(result, Some("VARCHAR2(255)".to_string()));
-    }
-
-    #[test]
-    fn field_mapping_strip_params() {
-        let mappings = vec![FieldMapping {
-            source_type: "VARCHAR".into(),
-            target_type: "TEXT".into(),
-            param_strategy: ParamStrategy::Strip,
-            custom_params: None,
-        }];
-        let result = FieldMapping::apply_with_params(&mappings, "VARCHAR(255)", DialectKind::Oracle);
-        assert_eq!(result, Some("TEXT".to_string()));
-    }
-
-    #[test]
-    fn field_mapping_custom_params() {
-        let mappings = vec![FieldMapping {
-            source_type: "VARCHAR".into(),
-            target_type: "VARCHAR2".into(),
-            param_strategy: ParamStrategy::Custom,
-            custom_params: Some("(500)".to_string()),
-        }];
-        let result = FieldMapping::apply_with_params(&mappings, "VARCHAR(255)", DialectKind::Oracle);
-        assert_eq!(result, Some("VARCHAR2(500)".to_string()));
-    }
-
-    #[test]
-    fn field_mapping_custom_empty_params_falls_back() {
-        let mappings = vec![FieldMapping {
-            source_type: "VARCHAR".into(),
-            target_type: "TEXT".into(),
-            param_strategy: ParamStrategy::Custom,
-            custom_params: Some("".to_string()),
-        }];
-        let result = FieldMapping::apply_with_params(&mappings, "VARCHAR(255)", DialectKind::Oracle);
-        assert_eq!(result, Some("TEXT".to_string()));
-    }
-
-    #[test]
-    fn field_mapping_no_match_returns_none() {
-        let mappings = vec![FieldMapping {
-            source_type: "INT".into(),
-            target_type: "INTEGER".into(),
-            param_strategy: ParamStrategy::Preserve,
-            custom_params: None,
-        }];
-        let result = FieldMapping::apply_with_params(&mappings, "VARCHAR(255)", DialectKind::Oracle);
-        assert_eq!(result, None);
-    }
-
-    #[test]
-    fn field_mapping_preserve_with_yaml_char_type() {
-        crate::sql_dialect::dialect_loader::register_core_dialects();
-        let mappings = vec![FieldMapping {
-            source_type: "VARCHAR".into(),
-            target_type: "CHAR".into(),
-            param_strategy: ParamStrategy::Preserve,
-            custom_params: None,
-        }];
-        let result = FieldMapping::apply_with_params(&mappings, "VARCHAR(200)", DialectKind::Oracle);
-        assert_eq!(
-            result,
-            Some("CHAR(200)".to_string()),
-            "Preserve should keep params for CHAR which has has_length in Oracle YAML"
-        );
-    }
-
-    #[test]
-    fn field_mapping_mysql_varchar_to_postgres_character_keeps_params() {
-        crate::sql_dialect::dialect_loader::register_core_dialects();
-        let mappings = vec![FieldMapping {
-            source_type: "VARCHAR".into(),
-            target_type: "character".into(),
-            param_strategy: ParamStrategy::Preserve,
-            custom_params: None,
-        }];
-        let result = FieldMapping::apply_with_params(&mappings, "varchar(120)", DialectKind::Postgres);
-        assert_eq!(
-            result,
-            Some("character(120)".to_string()),
-            "Preserve should keep (120) for PostgreSQL CHARACTER which has has_length in YAML"
-        );
-    }
-
-    #[test]
-    fn field_mapping_custom_params_without_parens_is_normalized() {
-        let mappings = vec![FieldMapping {
-            source_type: "VARCHAR".into(),
-            target_type: "character".into(),
-            param_strategy: ParamStrategy::Custom,
-            custom_params: Some("100".to_string()),
-        }];
-        let result = FieldMapping::apply_with_params(&mappings, "VARCHAR(120)", DialectKind::Postgres);
-        assert_eq!(
-            result,
-            Some("character(100)".to_string()),
-            "Custom params without parentheses should be wrapped as (100)"
-        );
-    }
-
-    #[test]
-    fn field_mapping_custom_params_with_parens_preserved() {
-        let mappings = vec![FieldMapping {
-            source_type: "VARCHAR".into(),
-            target_type: "character".into(),
-            param_strategy: ParamStrategy::Custom,
-            custom_params: Some("(100)".to_string()),
-        }];
-        let result = FieldMapping::apply_with_params(&mappings, "VARCHAR(120)", DialectKind::Postgres);
-        assert_eq!(
-            result,
-            Some("character(100)".to_string()),
-            "Custom params already wrapped in parentheses should be kept as-is"
-        );
     }
 
     #[test]
@@ -14294,170 +9083,6 @@ mod tests {
     }
 
     #[test]
-    fn oracle_to_mysql_date_column_does_not_gain_an_invalid_length() {
-        // Oracle's DATA_LENGTH is populated for every column, DATE included
-        // (byte length, e.g. 7) — not just character types. Splicing it in
-        // would send `DATE(7)` to MySQL, which is a syntax error there (real
-        // MySQL 8.4.6 verified); the pre-fix behavior of passing `DATE`
-        // through untouched was already correct.
-        let mut source_col = column("created_on", "DATE", None);
-        source_col.character_maximum_length = Some(7);
-        let diff = ColumnDiff {
-            diff_type: "added".to_string(),
-            name: "created_on".to_string(),
-            source: Some(source_col),
-            target: None,
-            changes: vec![],
-            add_position: None,
-        };
-        let sql = gen_sql(wrap_table_diff("t", vec![diff]), DatabaseType::Mysql, Some(DialectKind::Oracle));
-        assert!(!sql.contains("DATE(7)"), "must not turn a valid DATE column into invalid DDL: {sql}");
-    }
-
-    #[test]
-    fn cross_dialect_add_column_uses_known_character_maximum_length_not_a_generic_default() {
-        // Kingbase's MySQL-compatible introspection can report a bare
-        // `varchar`/`character varying` (no length in the type string)
-        // while still exposing the real length via `character_maximum_length`
-        // on the same ColumnInfo. Silently defaulting to 255 in that case
-        // would trade a loud syntax error for a quiet wrong-schema bug
-        // (issue #8011 review).
-        let mut source_col = column("bio", "character varying", None);
-        source_col.character_maximum_length = Some(1000);
-        let diff = ColumnDiff {
-            diff_type: "added".to_string(),
-            name: "bio".to_string(),
-            source: Some(source_col),
-            target: None,
-            changes: vec![],
-            add_position: None,
-        };
-        let sql = gen_sql(wrap_table_diff("t", vec![diff]), DatabaseType::Mysql, Some(DialectKind::Postgres));
-        assert!(sql.contains("(1000)"), "expected the real reported length to be preserved: {sql}");
-        assert!(
-            !sql.contains("(255)"),
-            "must not silently fall back to the generic default when the real length is known: {sql}"
-        );
-    }
-
-    #[test]
-    fn postgres_creates_sequences_before_tables_that_reference_them() {
-        let table_diff = TableDiff {
-            diff_type: "added".into(),
-            object_type: Some("table".into()),
-            name: "events".into(),
-            target_name: None,
-            ddl: Some(
-                "CREATE TABLE public.events (id bigint NOT NULL DEFAULT nextval('public.events_id_seq'::regclass))"
-                    .into(),
-            ),
-            ..TableDiff::default()
-        };
-        let sequence_diff = SequenceDiff {
-            diff_type: "added".into(),
-            name: "events_id_seq".into(),
-            source: Some(SequenceInfo {
-                name: "events_id_seq".into(),
-                data_type: "bigint".into(),
-                start_value: "1".into(),
-                min_value: "1".into(),
-                max_value: "9223372036854775807".into(),
-                increment: "1".into(),
-                cycle: false,
-                last_value: None,
-            }),
-            target: None,
-            changes: vec![],
-        };
-
-        let sql = generate_schema_sync_sql(
-            &[table_diff],
-            &[],
-            &[sequence_diff],
-            &[],
-            &[],
-            DatabaseType::Postgres,
-            Some("public"),
-            false,
-            Some(DialectKind::Postgres),
-            &[],
-        );
-
-        let sequence_position = sql.find("CREATE SEQUENCE").expect("sequence DDL");
-        let table_position = sql.find("CREATE TABLE public.events").expect("table DDL");
-        assert!(sequence_position < table_position, "{sql}");
-    }
-
-    #[test]
-    fn postgres_drops_sequences_after_dependent_tables() {
-        let table_diff = TableDiff {
-            diff_type: "removed".into(),
-            object_type: Some("table".into()),
-            name: "events".into(),
-            target_name: None,
-            ..TableDiff::default()
-        };
-        let sequence_diff = SequenceDiff {
-            diff_type: "removed".into(),
-            name: "events_id_seq".into(),
-            source: None,
-            target: None,
-            changes: vec![],
-        };
-
-        let sql = generate_schema_sync_sql(
-            &[table_diff],
-            &[],
-            &[sequence_diff],
-            &[],
-            &[],
-            DatabaseType::Postgres,
-            Some("public"),
-            false,
-            Some(DialectKind::Postgres),
-            &[],
-        );
-
-        let table_position = sql.find("DROP TABLE").expect("table DDL");
-        let sequence_position = sql.find("DROP SEQUENCE").expect("sequence DDL");
-        assert!(table_position < sequence_position, "{sql}");
-    }
-
-    #[test]
-    fn postgres_sync_sql_preserves_zero_timestamp_precision() {
-        let table_diff = TableDiff {
-            diff_type: "modified".into(),
-            object_type: Some("table".into()),
-            name: "events".into(),
-            target_name: None,
-            columns: Some(vec![ColumnDiff {
-                diff_type: "modified".into(),
-                name: "created_at".into(),
-                source: Some(column("created_at", "timestamp(0) without time zone", None)),
-                target: Some(column("created_at", "timestamp without time zone", None)),
-                changes: vec!["type: timestamp without time zone → timestamp(0) without time zone".into()],
-                add_position: None,
-            }]),
-            ..TableDiff::default()
-        };
-
-        let sql = generate_schema_sync_sql(
-            &[table_diff],
-            &[],
-            &[],
-            &[],
-            &[],
-            DatabaseType::Postgres,
-            Some("public"),
-            false,
-            Some(DialectKind::Postgres),
-            &[],
-        );
-
-        assert!(sql.contains("ALTER COLUMN \"created_at\" TYPE timestamp(0)"), "{sql}");
-    }
-
-    #[test]
     fn detects_changed_common_mysql_view_definitions() {
         let options = common_mysql_view_options(
             Some("CREATE ALGORITHM=UNDEFINED DEFINER=`viewer_a`@`%` SQL SECURITY DEFINER VIEW `source_db`.`active_orders` AS select `source_db`.`orders`.`id` AS `id` from `source_db`.`orders` where (`source_db`.`orders`.`active` = 1)"),
@@ -14530,20 +9155,6 @@ mod tests {
         ] {
             assert!(view_definitions_differ(ddl, &changed, Some(DialectKind::Mysql), Some(DialectKind::Mysql)));
         }
-    }
-
-    #[test]
-    fn common_view_comparison_requires_two_ddls_and_matching_mysql_dialects() {
-        for (source, target) in [(None, Some("CREATE VIEW v AS SELECT 1")), (Some("CREATE VIEW v AS SELECT 1"), None)] {
-            assert!(prepare_schema_diff(common_mysql_view_options(source, target)).diffs.is_empty());
-        }
-
-        let mut cross_dialect = common_mysql_view_options(
-            Some("CREATE VIEW `app`.`active_orders` AS SELECT 1"),
-            Some("CREATE VIEW active_orders AS SELECT 2"),
-        );
-        cross_dialect.target_dialect = Some(DialectKind::Postgres);
-        assert!(prepare_schema_diff(cross_dialect).diffs.is_empty());
     }
 
     #[test]
@@ -14627,34 +9238,6 @@ mod tests {
     }
 
     #[test]
-    fn cross_dialect_sync_sql_does_not_reuse_view_ddl() {
-        let view_diff = TableDiff {
-            diff_type: "added".into(),
-            object_type: Some("view".into()),
-            name: "active_users".into(),
-            target_name: None,
-            ddl: Some("CREATE VIEW `active_users` AS SELECT `id` FROM `users`".into()),
-            ..TableDiff::default()
-        };
-
-        let sql = generate_schema_sync_sql(
-            &[view_diff],
-            &[],
-            &[],
-            &[],
-            &[],
-            DatabaseType::Postgres,
-            Some("public"),
-            false,
-            Some(DialectKind::Mysql),
-            &[],
-        );
-
-        assert!(!sql.contains("CREATE VIEW `active_users`"), "{sql}");
-        assert!(sql.contains("Source view definition cannot be reused across different SQL dialects"), "{sql}");
-    }
-
-    #[test]
     fn same_dialect_sync_sql_keeps_diagnostic_without_view_ddl() {
         let view_diff = TableDiff {
             diff_type: "added".into(),
@@ -14678,121 +9261,6 @@ mod tests {
         );
 
         assert!(sql.contains("Source view definition is not available from this driver yet"), "{sql}");
-    }
-
-    #[test]
-    fn postgres_function_sequence_rule_owner_use_profile_templates() {
-        let fn_diff = FunctionDiff {
-            diff_type: "added".into(),
-            name: "f1".into(),
-            source: Some(FunctionInfo {
-                name: "f1".into(),
-                function_type: "FUNCTION".into(),
-                data_type: "int".into(),
-                definition: "RETURNS int LANGUAGE sql AS $$ SELECT 1 $$".into(),
-                arguments: "".into(),
-            }),
-            target: None,
-            changes: vec![],
-        };
-        let seq_diff = SequenceDiff {
-            diff_type: "added".into(),
-            name: "s1".into(),
-            source: Some(SequenceInfo {
-                name: "s1".into(),
-                data_type: "bigint".into(),
-                start_value: "1".into(),
-                min_value: "1".into(),
-                max_value: "100".into(),
-                increment: "1".into(),
-                cycle: false,
-                last_value: None,
-            }),
-            target: None,
-            changes: vec![],
-        };
-        let rule_diff = RuleDiff {
-            diff_type: "removed".into(),
-            name: "r1".into(),
-            source: Some(RuleInfo {
-                name: "r1".into(),
-                table_name: "t1".into(),
-                definition: "CREATE RULE r1 AS ON INSERT TO t1 DO NOTHING".into(),
-            }),
-            target: None,
-            changes: vec![],
-        };
-        let owner_diff = OwnerDiff {
-            diff_type: "modified".into(),
-            object_name: "t1".into(),
-            source: Some(OwnerInfo { object_name: "t1".into(), object_type: "TABLE".into(), owner: "app".into() }),
-            target: Some(OwnerInfo { object_name: "t1".into(), object_type: "TABLE".into(), owner: "old".into() }),
-            changes: vec![],
-        };
-
-        let sql = generate_schema_sync_sql(
-            &[],
-            &[fn_diff],
-            &[seq_diff],
-            &[rule_diff],
-            &[owner_diff],
-            DatabaseType::Postgres,
-            Some("public"),
-            true,
-            None,
-            &[],
-        );
-        assert!(sql.contains("CREATE OR REPLACE FUNCTION"), "{sql}");
-        assert!(sql.contains("CREATE SEQUENCE"), "{sql}");
-        assert!(sql.contains("NO CYCLE"), "{sql}");
-        assert!(sql.contains("DROP RULE IF EXISTS r1 ON"), "{sql}");
-        assert!(sql.contains("OWNER TO app"), "{sql}");
-        assert!(sql.contains("CASCADE"), "{sql}");
-    }
-
-    #[test]
-    fn postgres_function_sync_reuses_native_functiondef_header_once() {
-        let function = |arguments: &str, definition: &str| FunctionDiff {
-            diff_type: "added".into(),
-            name: "armor".into(),
-            source: Some(FunctionInfo {
-                name: "armor".into(),
-                function_type: "FUNCTION".into(),
-                data_type: "text".into(),
-                definition: definition.into(),
-                arguments: arguments.into(),
-            }),
-            target: None,
-            changes: vec![],
-        };
-        let diffs = [
-            function(
-                "bytea",
-                "CREATE OR REPLACE FUNCTION armor(bytea)\n RETURNS text\n LANGUAGE c\n IMMUTABLE PARALLEL SAFE STRICT\nAS '$libdir/pgcrypto', $function$pg_armor$function$\n",
-            ),
-            function(
-                "bytea, text[], text[]",
-                "CREATE OR REPLACE FUNCTION armor(bytea, text[], text[])\n RETURNS text\n LANGUAGE c\nAS '$libdir/pgcrypto', $function$pg_armor$function$\n",
-            ),
-        ];
-
-        let sql = generate_schema_sync_sql(
-            &[],
-            &diffs,
-            &[],
-            &[],
-            &[],
-            DatabaseType::Postgres,
-            Some("public"),
-            false,
-            None,
-            &[],
-        );
-
-        assert_eq!(sql.matches("CREATE OR REPLACE FUNCTION").count(), 2, "{sql}");
-        assert!(sql.contains("CREATE OR REPLACE FUNCTION \"public\".\"armor\"(bytea)\n RETURNS text"), "{sql}");
-        assert!(sql.contains("CREATE OR REPLACE FUNCTION \"public\".\"armor\"(bytea, text[], text[])\n"), "{sql}");
-        assert!(sql.contains("$function$pg_armor$function$;"), "{sql}");
     }
 
     #[test]
@@ -15064,148 +9532,6 @@ mod tests {
         })
     }
 
-    fn oracle_table_pair(
-        columns: Vec<ColumnInfo>,
-        source_indexes: Vec<IndexInfo>,
-        target_indexes: Vec<IndexInfo>,
-    ) -> SchemaDiffPreparationOptions {
-        SchemaDiffPreparationOptions {
-            source_tables: vec![table_info("cmp_autoname", "TABLE")],
-            target_tables: vec![table_info("cmp_autoname", "TABLE")],
-            source_details: vec![TableSchemaDetail {
-                name: "cmp_autoname".to_string(),
-                columns: columns.clone(),
-                indexes: source_indexes,
-                foreign_keys: Vec::new(),
-                triggers: Vec::new(),
-                ddl: None,
-            }],
-            target_details: vec![TableSchemaDetail {
-                name: "cmp_autoname".to_string(),
-                columns,
-                indexes: target_indexes,
-                foreign_keys: Vec::new(),
-                triggers: Vec::new(),
-                ddl: None,
-            }],
-            database_type: DatabaseType::Oracle,
-            ..Default::default()
-        }
-    }
-
-    fn single_column_table_pair(source_column: ColumnInfo, target_column: ColumnInfo) -> SchemaDiffPreparationOptions {
-        SchemaDiffPreparationOptions {
-            source_tables: vec![table_info("cmp_autoname", "TABLE")],
-            target_tables: vec![table_info("cmp_autoname", "TABLE")],
-            source_details: vec![TableSchemaDetail {
-                name: "cmp_autoname".to_string(),
-                columns: vec![source_column],
-                indexes: Vec::new(),
-                foreign_keys: Vec::new(),
-                triggers: Vec::new(),
-                ddl: None,
-            }],
-            target_details: vec![TableSchemaDetail {
-                name: "cmp_autoname".to_string(),
-                columns: vec![target_column],
-                indexes: Vec::new(),
-                foreign_keys: Vec::new(),
-                triggers: Vec::new(),
-                ddl: None,
-            }],
-            database_type: DatabaseType::Oracle,
-            ..Default::default()
-        }
-    }
-
-    /// #9261：Oracle 给未命名的 PRIMARY KEY/UNIQUE 约束自动取的索引名（`SYS_C<编号>`）
-    /// 是对象级的，两张结构完全相同的表也必然不同。按签名配对后不能再报出这对凭空
-    /// 多出/消失的索引。
-    #[test]
-    fn server_generated_index_names_do_not_report_index_churn() {
-        let result = prepare_schema_diff(oracle_table_pair(
-            vec![
-                typed_column("id", "NUMBER", Some(10), Some(0), Some(0)),
-                typed_column("code", "VARCHAR2", None, None, Some(20)),
-            ],
-            vec![named_index("SYS_C008146", &["code"], true)],
-            vec![named_index("SYS_C008149", &["code"], true)],
-        ));
-
-        assert!(result.diffs.is_empty(), "{:?}", result.diffs);
-    }
-
-    /// 兜底只覆盖「服务器自己命名」的索引：用户命名的索引改名仍然要报出来。
-    #[test]
-    fn differently_named_user_indexes_still_report_index_churn() {
-        let result = prepare_schema_diff(oracle_table_pair(
-            vec![typed_column("code", "VARCHAR2", None, None, Some(20))],
-            vec![named_index("IDX_CODE", &["code"], false)],
-            vec![named_index("IDX_CODE_OLD", &["code"], false)],
-        ));
-
-        assert_eq!(result.diffs.len(), 1, "{:?}", result.diffs);
-        let indexes = result.diffs[0].indexes.as_ref().expect("index diff");
-        assert_eq!(indexes.len(), 2, "{indexes:?}");
-        assert!(indexes.iter().any(|diff| diff.diff_type == "added" && diff.name == "IDX_CODE"));
-        assert!(indexes.iter().any(|diff| diff.diff_type == "removed" && diff.name == "IDX_CODE_OLD"));
-    }
-
-    /// 名字是服务器生成的、但定义不同（列不一样），必须仍然报差异。
-    #[test]
-    fn server_generated_index_with_a_different_definition_is_still_a_difference() {
-        let result = prepare_schema_diff(oracle_table_pair(
-            vec![
-                typed_column("code", "VARCHAR2", None, None, Some(20)),
-                typed_column("other_code", "VARCHAR2", None, None, Some(20)),
-            ],
-            vec![named_index("SYS_C008146", &["code"], true)],
-            vec![named_index("SYS_C008149", &["other_code"], true)],
-        ));
-
-        assert_eq!(result.diffs.len(), 1, "{:?}", result.diffs);
-        assert!(result.diffs[0].indexes.as_ref().is_some_and(|indexes| indexes.len() == 2));
-    }
-
-    /// #9261：Oracle 报的 `NUMBER` 不带精度，`NUMBER(10,2)` 与 `NUMBER(12,2)` 的类型串
-    /// 一模一样，差别只在 data_precision/data_scale 里 —— 必须能比较出来。
-    #[test]
-    fn reported_numeric_precision_changes_are_detected() {
-        let result = prepare_schema_diff(single_column_table_pair(
-            typed_column("amt", "NUMBER", Some(10), Some(2), Some(0)),
-            typed_column("amt", "NUMBER", Some(12), Some(2), Some(0)),
-        ));
-
-        assert_eq!(result.diffs.len(), 1, "{:?}", result.diffs);
-        let columns = result.diffs[0].columns.as_ref().expect("column diff");
-        assert_eq!(columns.len(), 1);
-        assert_eq!(columns[0].changes, vec!["type: NUMBER(12,2) → NUMBER(10,2)".to_string()]);
-    }
-
-    /// 字符长度同理：驱动把它放在 character_maximum_length 里。
-    #[test]
-    fn reported_character_length_changes_are_detected() {
-        let result = prepare_schema_diff(single_column_table_pair(
-            typed_column("name", "VARCHAR2", None, None, Some(40)),
-            typed_column("name", "VARCHAR2", None, None, Some(20)),
-        ));
-
-        assert_eq!(result.diffs.len(), 1, "{:?}", result.diffs);
-        let columns = result.diffs[0].columns.as_ref().expect("column diff");
-        assert_eq!(columns[0].changes, vec!["type: VARCHAR2(20) → VARCHAR2(40)".to_string()]);
-    }
-
-    /// 驱动根本没报精度/长度时不能臆造差异（两侧都为空 => 相等）。
-    #[test]
-    fn columns_without_reported_parameters_do_not_invent_a_difference() {
-        let result = prepare_schema_diff(single_column_table_pair(
-            typed_column("amt", "NUMBER", None, None, None),
-            typed_column("amt", "NUMBER", None, None, None),
-        ));
-
-        assert!(result.diffs.is_empty(), "{:?}", result.diffs);
-    }
-
     /// MySQL 的 `int` 也会带 numeric_precision，但 `int(10)` 不是它的声明类型（跨方言会
     /// 变成非法 DDL），所以整数族不在拼接白名单里。
     #[test]
@@ -15235,223 +9561,5 @@ mod tests {
 
         assert!(result.diffs.is_empty(), "{:?}", result.diffs);
         assert_eq!(declared_column_type(&typed_column("id", "int", Some(10), Some(0), None)), "int");
-    }
-
-    fn oracle_column(
-        name: &str,
-        data_type: &str,
-        numeric_precision: Option<i32>,
-        numeric_scale: Option<i32>,
-        character_maximum_length: Option<i32>,
-        is_nullable: bool,
-        column_default: Option<&str>,
-    ) -> ColumnInfo {
-        ColumnInfo {
-            is_nullable,
-            column_default: column_default.map(str::to_string),
-            ..typed_column(name, data_type, numeric_precision, numeric_scale, character_maximum_length)
-        }
-    }
-
-    fn oracle_column_pair(source: Vec<ColumnInfo>, target: Vec<ColumnInfo>) -> SchemaDiffPreparationOptions {
-        SchemaDiffPreparationOptions {
-            source_tables: vec![table_info("cmp_grammar", "TABLE")],
-            target_tables: vec![table_info("cmp_grammar", "TABLE")],
-            source_details: vec![TableSchemaDetail {
-                name: "cmp_grammar".to_string(),
-                columns: source,
-                indexes: Vec::new(),
-                foreign_keys: Vec::new(),
-                triggers: Vec::new(),
-                ddl: None,
-            }],
-            target_details: vec![TableSchemaDetail {
-                name: "cmp_grammar".to_string(),
-                columns: target,
-                indexes: Vec::new(),
-                foreign_keys: Vec::new(),
-                triggers: Vec::new(),
-                ddl: None,
-            }],
-            database_type: DatabaseType::Oracle,
-            source_dialect: Some(DialectKind::Oracle),
-            target_dialect: Some(DialectKind::Oracle),
-            ..Default::default()
-        }
-    }
-
-    /// Oracle 没有 `ADD COLUMN`/`MODIFY COLUMN`，列变更子句要写成 `ADD (定义)` /
-    /// `MODIFY (定义)`；定义内部 `DEFAULT` 又必须排在 `NOT NULL` 前面，否则 11g 直接
-    /// 报 ORA-00907（都是真机实测过的语法）。
-    #[test]
-    fn oracle_column_clauses_follow_the_oracle_grammar() {
-        let result = prepare_schema_diff(oracle_column_pair(
-            vec![
-                oracle_column("amt", "NUMBER", Some(12), Some(2), Some(0), false, None),
-                oracle_column("label", "VARCHAR2", None, None, Some(20), false, Some("'x'")),
-            ],
-            vec![oracle_column("amt", "NUMBER", Some(10), Some(2), Some(0), false, None)],
-        ));
-
-        let sql = result.sync_sql;
-        assert!(sql.contains("ADD (LABEL VARCHAR2(20) DEFAULT 'x' NOT NULL)"), "{sql}");
-        assert!(sql.contains("MODIFY (AMT NUMBER(12,2) NOT NULL)"), "{sql}");
-        assert!(!sql.contains("ADD COLUMN"), "{sql}");
-        assert!(!sql.contains("MODIFY COLUMN"), "{sql}");
-        assert!(!sql.contains("ALTER COLUMN"), "{sql}");
-        let add = sql.lines().find(|line| line.contains("ADD (")).expect("ADD clause");
-        let default_at = add.find("DEFAULT").expect("default literal");
-        let not_null_at = add.find("NOT NULL").expect("not null");
-        assert!(default_at < not_null_at, "DEFAULT must precede NOT NULL: {sql}");
-    }
-
-    /// 把列改成可空时，Oracle 重述定义的 `MODIFY (列 定义)` **不会**去掉已有的
-    /// `NOT NULL`（11g 实测），所以生成的语句必须显式写 `NULL`，否则脚本报成功但约束还在。
-    #[test]
-    fn oracle_modify_spells_null_when_dropping_not_null() {
-        let with_type_change = prepare_schema_diff(oracle_column_pair(
-            vec![oracle_column("amt", "NUMBER", Some(12), Some(2), Some(0), true, None)],
-            vec![oracle_column("amt", "NUMBER", Some(10), Some(2), Some(0), false, None)],
-        ));
-        let sql = with_type_change.sync_sql;
-        assert!(sql.contains("MODIFY (AMT NUMBER(12,2) NULL)"), "{sql}");
-        assert!(!sql.contains("NOT NULL"), "{sql}");
-
-        let nullability_only = prepare_schema_diff(oracle_column_pair(
-            vec![oracle_column("amt", "NUMBER", Some(10), Some(2), Some(0), true, None)],
-            vec![oracle_column("amt", "NUMBER", Some(10), Some(2), Some(0), false, None)],
-        ));
-        let sql = nullability_only.sync_sql;
-        assert!(sql.contains("MODIFY (AMT NUMBER(10,2) NULL)"), "{sql}");
-    }
-
-    fn oracle_view_options(source_ddl: Option<&str>, target_ddl: Option<&str>) -> SchemaDiffPreparationOptions {
-        SchemaDiffPreparationOptions {
-            source_tables: vec![table_info("v_change", "VIEW")],
-            target_tables: vec![table_info("v_change", "VIEW")],
-            source_details: vec![schema_detail("v_change", source_ddl)],
-            target_details: vec![schema_detail("v_change", target_ddl)],
-            database_type: DatabaseType::Oracle,
-            source_dialect: Some(DialectKind::Oracle),
-            target_dialect: Some(DialectKind::Oracle),
-            ..Default::default()
-        }
-    }
-
-    /// #9261：`DBMS_METADATA` 抓到的 Oracle 视图文本里 owner 出现在头部
-    /// （`CREATE OR REPLACE FORCE VIEW "DBX_TEST"."V_SAME"`）和每一处限定名上，两张不同
-    /// schema 的**同一张**视图必然处处不同 —— 归一化 owner 之后不能再报差异。
-    #[test]
-    fn oracle_views_with_different_owners_compare_equal() {
-        let result = prepare_schema_diff(oracle_view_options(
-            Some(
-                "CREATE OR REPLACE FORCE VIEW \"DBX_TEST\".\"V_SAME\" (\"ID\", \"NAME\", \"AMT\") AS\n  SELECT ID, NAME, AMT FROM DBX_TEST.CMP_SAME;",
-            ),
-            Some(
-                "CREATE OR REPLACE FORCE VIEW \"DBX_TGT\".\"V_SAME\" (\"ID\",\"NAME\",\"AMT\") AS\n  SELECT   ID,\n    NAME,\n    AMT\n  FROM DBX_TGT.CMP_SAME",
-            ),
-        ));
-
-        assert!(result.diffs.is_empty(), "{:?}", result.diffs);
-    }
-
-    /// 真正不同（列少了、条件不同）的视图仍然要报出来。
-    #[test]
-    fn oracle_views_with_a_different_definition_are_reported() {
-        let result = prepare_schema_diff(oracle_view_options(
-            Some(
-                "CREATE OR REPLACE FORCE VIEW \"DBX_TEST\".\"V_CHANGE\" (\"ID\", \"NAME\", \"AMT\") AS\n  SELECT ID, NAME, AMT FROM DBX_TEST.CMP_SAME;",
-            ),
-            Some(
-                "CREATE OR REPLACE FORCE VIEW \"DBX_TGT\".\"V_CHANGE\" (\"ID\", \"NAME\") AS\n  SELECT ID, NAME FROM DBX_TGT.CMP_SAME;",
-            ),
-        ));
-
-        assert_eq!(result.diffs.len(), 1, "{:?}", result.diffs);
-        assert_eq!(result.diffs[0].object_type.as_deref(), Some("view"));
-        assert_eq!(result.diffs[0].diff_type, "modified");
-    }
-
-    /// 字符串字面量里的 `'DBX_TEST.CMP_SAME'` 不是限定名：归一化只改 owner 的限定引用，
-    /// 字面量原样保留 —— 所以两侧字面量不同时，视图仍然算不同。
-    #[test]
-    fn oracle_view_owner_normalization_leaves_literals_alone() {
-        let source = "CREATE OR REPLACE FORCE VIEW \"DBX_TEST\".\"V_LIT\" AS SELECT 'DBX_TEST.CMP_SAME' AS TAG, ID FROM DBX_TEST.CMP_SAME";
-        let target = "CREATE OR REPLACE FORCE VIEW \"DBX_TGT\".\"V_LIT\" AS SELECT 'DBX_TEST.CMP_SAME' AS TAG, ID FROM DBX_TGT.CMP_SAME";
-
-        let normalized = normalize_oracle_view_ddl(source);
-        // 只有头部 owner 和 `FROM` 后面的限定名被替换，字面量原样保留。
-        assert!(normalized.contains("'DBX_TEST.CMP_SAME' AS TAG"), "{normalized}");
-        assert_eq!(normalized.matches("__dbx_schema__").count(), 2, "{normalized}");
-        assert_eq!(normalized, normalize_oracle_view_ddl(target), "{normalized}");
-
-        // 字面量真的不一样时仍然是差异（说明字面量没有被一起改写掉）。
-        let changed_literal = target.replace("'DBX_TEST.CMP_SAME' AS TAG", "'DBX_TGT.CMP_SAME' AS TAG");
-        assert_ne!(normalized, normalize_oracle_view_ddl(&changed_literal));
-    }
-
-    /// dbx 自己生成的脚本只改写视图头，落库后目标视图的正文可能仍限定源 schema；这时两侧
-    /// 必须判为相同，否则脚本执行完差异也不会消失。只有第三个 schema 的限定名才算差异。
-    #[test]
-    fn oracle_views_whose_body_keeps_the_other_schema_compare_equal() {
-        let source =
-            "CREATE OR REPLACE FORCE VIEW \"DBX_TEST\".\"V_NEW\" (\"ID\") AS \n  select id from DBX_TEST.CMP_OK;";
-        let target =
-            "CREATE OR REPLACE FORCE VIEW \"DBX_TGT\".\"V_NEW\" (\"ID\") AS \n  select id from DBX_TEST.CMP_OK;";
-        let oracle = (Some(DialectKind::Oracle), Some(DialectKind::Oracle));
-        assert!(!view_definitions_differ(source, target, oracle.0, oracle.1));
-
-        // 目标侧按自己的 schema 写正文，同样不能算差异。
-        let target_self = target.replace("from DBX_TEST.CMP_OK", "from DBX_TGT.CMP_OK");
-        assert!(!view_definitions_differ(source, &target_self, oracle.0, oracle.1));
-
-        // 第三个 schema 的限定名不在归一化范围内：正文确实不同时仍然报差异。
-        let other_schema = target.replace("from DBX_TEST.CMP_OK", "from DBX_OTHER.CMP_OK");
-        assert!(view_definitions_differ(source, &other_schema, oracle.0, oracle.1));
-        let changed_body = target.replace("select id from", "select id, name from");
-        assert!(view_definitions_differ(source, &changed_body, oracle.0, oracle.1));
-    }
-
-    /// 跨方言的视图文本本来就不是同一种 SQL，不参与比较。
-    #[test]
-    fn oracle_view_text_is_not_compared_across_dialects() {
-        assert!(!view_definitions_differ(
-            "CREATE OR REPLACE FORCE VIEW \"DBX_TEST\".\"V_SAME\" AS SELECT 1 FROM DUAL",
-            "CREATE ALGORITHM=UNDEFINED VIEW `v_same` AS select 1",
-            Some(DialectKind::Mysql),
-            Some(DialectKind::Oracle),
-        ));
-    }
-
-    /// Oracle 的视图头带 `FORCE`，生成的脚本要把它改写成目标 schema，否则会在源 schema
-    /// 上建视图（或因为权限直接失败）。
-    #[test]
-    fn added_oracle_view_native_ddl_rewrites_source_schema_to_target_schema() {
-        let diffs = vec![TableDiff {
-            diff_type: "added".to_string(),
-            object_type: Some("view".to_string()),
-            name: "V_NEW".to_string(),
-            ddl: Some(
-                "CREATE OR REPLACE FORCE VIEW \"DBX_TEST\".\"V_NEW\" (\"ID\") AS\n  SELECT ID FROM DBX_TEST.CMP_SAME"
-                    .to_string(),
-            ),
-            ..TableDiff::default()
-        }];
-
-        let sql = generate_schema_sync_sql(
-            &diffs,
-            &[],
-            &[],
-            &[],
-            &[],
-            DatabaseType::Oracle,
-            Some("DBX_TGT"),
-            false,
-            Some(DialectKind::Oracle),
-            &[],
-        );
-
-        assert!(sql.contains("CREATE OR REPLACE FORCE VIEW DBX_TGT.V_NEW"), "{sql}");
-        assert!(!sql.contains("DBX_TEST.V_NEW"), "{sql}");
     }
 }

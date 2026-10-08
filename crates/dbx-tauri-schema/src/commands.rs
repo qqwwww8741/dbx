@@ -23,13 +23,6 @@ where
     }
 }
 
-/// Resolve a non-internal catalog for dispatch to the Doris multi-catalog path.
-/// Thin wrapper around the shared dbx-core resolver so the Tauri and HTTP
-/// backends stay in sync.
-async fn external_doris_catalog(state: &AppState, connection_id: &str, catalog: Option<&str>) -> Option<String> {
-    dbx_core::schema::resolve_external_doris_catalog(state, connection_id, catalog).await
-}
-
 #[tauri::command]
 pub async fn list_databases(
     state: State<'_, Arc<AppState>>,
@@ -53,92 +46,6 @@ pub async fn list_database_storage(
     databases: Vec<String>,
 ) -> Result<Vec<db::DatabaseStorageInfo>, String> {
     dbx_core::schema::list_database_storage_core(&state, &connection_id, &databases).await
-}
-
-#[tauri::command]
-pub async fn list_xugu_tablespaces(
-    state: State<'_, Arc<AppState>>,
-    connection_id: String,
-    database: Option<String>,
-) -> Result<Vec<db::XuguTablespaceInfo>, String> {
-    dbx_core::schema::list_xugu_tablespaces_core(&state, &connection_id, database.as_deref()).await
-}
-
-#[tauri::command]
-pub async fn get_sqlserver_completion_context(
-    state: State<'_, Arc<AppState>>,
-    connection_id: String,
-    database: String,
-) -> Result<db::sqlserver::SqlServerCompletionContext, String> {
-    dbx_core::schema::get_sqlserver_completion_context_core(&state, &connection_id, &database).await
-}
-
-#[tauri::command]
-pub async fn list_doris_catalogs(
-    state: State<'_, Arc<AppState>>,
-    connection_id: String,
-) -> Result<Vec<db::CatalogInfo>, String> {
-    dbx_core::schema::list_doris_catalogs_core(&state, &connection_id).await
-}
-
-#[tauri::command]
-pub async fn list_doris_catalog_databases(
-    state: State<'_, Arc<AppState>>,
-    connection_id: String,
-    catalog: String,
-) -> Result<Vec<db::DatabaseInfo>, String> {
-    dbx_core::schema::list_doris_catalog_databases_core(&state, &connection_id, &catalog).await
-}
-
-#[tauri::command]
-pub async fn list_sqlserver_linked_servers(
-    state: State<'_, Arc<AppState>>,
-    connection_id: String,
-) -> Result<Vec<db::LinkedServerInfo>, String> {
-    dbx_core::schema::list_sqlserver_linked_servers_core(&state, &connection_id).await
-}
-
-#[tauri::command]
-pub async fn list_sqlserver_linked_server_catalogs(
-    state: State<'_, Arc<AppState>>,
-    connection_id: String,
-    server: String,
-) -> Result<Vec<db::DatabaseInfo>, String> {
-    dbx_core::schema::list_sqlserver_linked_server_catalogs_core(&state, &connection_id, &server).await
-}
-
-#[tauri::command]
-pub async fn list_sqlserver_linked_server_schemas(
-    state: State<'_, Arc<AppState>>,
-    connection_id: String,
-    server: String,
-    catalog: String,
-) -> Result<Vec<String>, String> {
-    dbx_core::schema::list_sqlserver_linked_server_schemas_core(&state, &connection_id, &server, &catalog).await
-}
-
-#[tauri::command]
-pub async fn list_sqlserver_linked_server_tables(
-    state: State<'_, Arc<AppState>>,
-    connection_id: String,
-    server: String,
-    catalog: String,
-    schema: String,
-    filter: Option<String>,
-    limit: Option<usize>,
-    offset: Option<usize>,
-) -> Result<Vec<db::TableInfo>, String> {
-    dbx_core::schema::list_sqlserver_linked_server_tables_core(
-        &state,
-        &connection_id,
-        &server,
-        &catalog,
-        &schema,
-        filter.as_deref(),
-        limit,
-        offset,
-    )
-    .await
 }
 
 #[tauri::command]
@@ -188,20 +95,7 @@ pub async fn list_tables(
     catalog: Option<String>,
     table_name_filter: Option<dbx_core::schema::TableNameFilter>,
 ) -> Result<Vec<db::TableInfo>, String> {
-    if let Some(catalog) = external_doris_catalog(&state, &connection_id, catalog.as_deref()).await {
-        return dbx_core::schema::list_doris_catalog_tables_core(
-            &state,
-            &connection_id,
-            &catalog,
-            &database,
-            filter.as_deref(),
-            limit,
-            offset,
-            object_types.as_deref(),
-            table_name_filter.as_ref(),
-        )
-        .await;
-    }
+    {}
     dbx_core::schema::list_tables_core(
         &state,
         &connection_id,
@@ -225,16 +119,7 @@ pub async fn get_table_comment(
     table: String,
     catalog: Option<String>,
 ) -> Result<Option<String>, String> {
-    if let Some(catalog) = external_doris_catalog(&state, &connection_id, catalog.as_deref()).await {
-        return dbx_core::schema::get_doris_catalog_table_comment_core(
-            &state,
-            &connection_id,
-            &catalog,
-            &database,
-            &table,
-        )
-        .await;
-    }
+    {}
     dbx_core::schema::get_table_comment_core(&state, &connection_id, &database, &schema, &table).await
 }
 
@@ -266,39 +151,7 @@ pub async fn list_objects(
     let app = Arc::clone(state.inner());
     let operation_app = Arc::clone(&app);
     run_cancellable(&app, execution_id, async move {
-        if let Some(catalog) = external_doris_catalog(&operation_app, &connection_id, catalog.as_deref()).await {
-            let tables = dbx_core::schema::list_doris_catalog_tables_core(
-                &operation_app,
-                &connection_id,
-                &catalog,
-                &database,
-                filter.as_deref(),
-                limit,
-                offset,
-                object_types.as_deref(),
-                table_name_filter.as_ref(),
-            )
-            .await?;
-            return Ok(tables
-                .into_iter()
-                .map(|table| db::ObjectInfo {
-                    name: table.name,
-                    object_type: table.table_type,
-                    schema: Some(database.clone()),
-                    valid: None,
-                    signature: None,
-                    comment: table.comment,
-                    created_at: None,
-                    updated_at: None,
-                    parent_schema: table.parent_schema,
-                    parent_name: table.parent_name,
-                    custom_type_kind: None,
-                    has_members: None,
-                    trigger: None,
-                    xugu_type_members_expandable: None,
-                })
-                .collect());
-        }
+        {}
         dbx_core::schema::list_objects_core(
             &operation_app,
             &connection_id,
@@ -379,17 +232,6 @@ pub async fn get_event_info(
 }
 
 #[tauri::command]
-pub async fn get_custom_type_details(
-    state: State<'_, Arc<AppState>>,
-    connection_id: String,
-    database: String,
-    schema: String,
-    name: String,
-) -> Result<db::CustomTypeDetails, String> {
-    dbx_core::schema::get_custom_type_details_core(&state, &connection_id, &database, &schema, &name).await
-}
-
-#[tauri::command]
 pub async fn get_columns(
     state: State<'_, Arc<AppState>>,
     connection_id: String,
@@ -399,10 +241,7 @@ pub async fn get_columns(
     catalog: Option<String>,
     client_session_id: Option<String>,
 ) -> Result<Vec<db::ColumnInfo>, String> {
-    if let Some(catalog) = external_doris_catalog(&state, &connection_id, catalog.as_deref()).await {
-        return dbx_core::schema::get_doris_catalog_columns_core(&state, &connection_id, &catalog, &database, &table)
-            .await;
-    }
+    {}
     dbx_core::schema::get_columns_core_for_session(
         &state,
         &connection_id,
@@ -435,17 +274,6 @@ pub async fn get_all_columns(
 }
 
 #[tauri::command]
-pub async fn get_sqlserver_column_metadata(
-    state: State<'_, Arc<AppState>>,
-    connection_id: String,
-    database: String,
-    schema: String,
-    table: String,
-) -> Result<Vec<db::sqlserver::SqlServerColumnMetadata>, String> {
-    dbx_core::schema::get_sqlserver_column_metadata_core(&state, &connection_id, &database, &schema, &table).await
-}
-
-#[tauri::command]
 pub async fn list_indexes(
     state: State<'_, Arc<AppState>>,
     connection_id: String,
@@ -454,10 +282,7 @@ pub async fn list_indexes(
     table: String,
     catalog: Option<String>,
 ) -> Result<Vec<db::IndexInfo>, String> {
-    if let Some(catalog) = external_doris_catalog(&state, &connection_id, catalog.as_deref()).await {
-        return dbx_core::schema::list_doris_catalog_indexes_core(&state, &connection_id, &catalog, &database, &table)
-            .await;
-    }
+    {}
     dbx_core::schema::list_indexes_core(&state, &connection_id, &database, &schema, &table).await
 }
 
@@ -470,12 +295,7 @@ pub async fn list_reference_key_columns(
     table: String,
     catalog: Option<String>,
 ) -> Result<Vec<String>, String> {
-    if let Some(catalog) = external_doris_catalog(&state, &connection_id, catalog.as_deref()).await {
-        let indexes =
-            dbx_core::schema::list_doris_catalog_indexes_core(&state, &connection_id, &catalog, &database, &table)
-                .await?;
-        return Ok(dbx_core::schema::reference_key_columns_from_indexes(&indexes));
-    }
+    {}
     dbx_core::schema::list_reference_key_columns_core(&state, &connection_id, &database, &schema, &table).await
 }
 
@@ -488,12 +308,7 @@ pub async fn list_reference_keys(
     table: String,
     catalog: Option<String>,
 ) -> Result<Vec<dbx_core::schema::ReferenceKeyInfo>, String> {
-    if let Some(catalog) = external_doris_catalog(&state, &connection_id, catalog.as_deref()).await {
-        let indexes =
-            dbx_core::schema::list_doris_catalog_indexes_core(&state, &connection_id, &catalog, &database, &table)
-                .await?;
-        return Ok(dbx_core::schema::reference_keys_from_indexes(&indexes));
-    }
+    {}
     dbx_core::schema::list_reference_keys_core(&state, &connection_id, &database, &schema, &table).await
 }
 
@@ -506,16 +321,7 @@ pub async fn list_foreign_keys(
     table: String,
     catalog: Option<String>,
 ) -> Result<Vec<db::ForeignKeyInfo>, String> {
-    if let Some(catalog) = external_doris_catalog(&state, &connection_id, catalog.as_deref()).await {
-        return dbx_core::schema::list_doris_catalog_foreign_keys_core(
-            &state,
-            &connection_id,
-            &catalog,
-            &database,
-            &table,
-        )
-        .await;
-    }
+    {}
     dbx_core::schema::list_foreign_keys_core(&state, &connection_id, &database, &schema, &table).await
 }
 
@@ -531,9 +337,7 @@ pub async fn list_foreign_keys_for_database(
     let app = Arc::clone(state.inner());
     let operation_app = Arc::clone(&app);
     run_cancellable(&app, execution_id, async move {
-        if external_doris_catalog(&operation_app, &connection_id, catalog.as_deref()).await.is_some() {
-            return Ok(std::collections::HashMap::new());
-        }
+        {}
         dbx_core::schema::list_foreign_keys_for_database_core(&operation_app, &connection_id, &database, &schema).await
     })
     .await
@@ -548,10 +352,7 @@ pub async fn list_triggers(
     table: String,
     catalog: Option<String>,
 ) -> Result<Vec<db::TriggerInfo>, String> {
-    if let Some(catalog) = external_doris_catalog(&state, &connection_id, catalog.as_deref()).await {
-        return dbx_core::schema::list_doris_catalog_triggers_core(&state, &connection_id, &catalog, &database, &table)
-            .await;
-    }
+    {}
     dbx_core::schema::list_triggers_core(&state, &connection_id, &database, &schema, &table).await
 }
 
@@ -635,10 +436,7 @@ pub async fn get_table_ddl(
     include_postgres_access: Option<bool>,
     portable: Option<bool>,
 ) -> Result<String, String> {
-    if let Some(catalog) = external_doris_catalog(&state, &connection_id, catalog.as_deref()).await {
-        return dbx_core::schema::get_doris_catalog_table_ddl_core(&state, &connection_id, &catalog, &database, &table)
-            .await;
-    }
+    {}
     if portable.unwrap_or(false) {
         dbx_core::schema::get_table_export_ddl_core(&state, &connection_id, &database, &schema, &table, object_type)
             .await
@@ -700,32 +498,4 @@ pub async fn get_table_owner(
     table: String,
 ) -> Result<Option<String>, String> {
     dbx_core::schema::get_table_owner_core(&state, &connection_id, &database, &schema, &table).await
-}
-
-#[tauri::command]
-pub async fn list_extensions(
-    state: State<'_, Arc<AppState>>,
-    connection_id: String,
-    database: String,
-    schema: Option<String>,
-) -> Result<Vec<db::ExtensionInfo>, String> {
-    dbx_core::schema::list_extensions_core(&state, &connection_id, &database, schema.as_deref()).await
-}
-
-#[tauri::command]
-pub async fn list_available_extensions(
-    state: State<'_, Arc<AppState>>,
-    connection_id: String,
-    database: String,
-) -> Result<Vec<db::ExtensionInfo>, String> {
-    dbx_core::schema::list_available_extensions_core(&state, &connection_id, &database).await
-}
-
-#[tauri::command]
-pub async fn list_event_triggers(
-    state: State<'_, Arc<AppState>>,
-    connection_id: String,
-    database: String,
-) -> Result<Vec<db::EventTriggerInfo>, String> {
-    dbx_core::schema::list_event_triggers_core(&state, &connection_id, &database).await
 }

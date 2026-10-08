@@ -3,33 +3,16 @@ import { formatSqlLayout, type SqlLayoutOptions } from "@/lib/sql/layout";
 import { looksLikeXml } from "@/lib/sql/autoFormat";
 import { compressCypherText, formatCypherText } from "@/lib/sql/cypherFormatter";
 
-export type SqlFormatDialect = "mysql" | "postgres" | "sqlite" | "sqlserver" | "oracle" | "clickhouse" | "dameng" | "duckdb" | "cypher" | "generic";
+export type SqlFormatDialect = "mysql" | "cypher" | "generic";
 
 export const MAX_SQL_FORMAT_CHARS = 1_000_000;
-
-type SqlFormatterModule = typeof import("sql-formatter");
 
 // sql-formatter classifies ClickHouse date-part abbreviations as reserved
 // keywords even where ClickHouse accepts them as ordinary identifiers. Keep
 // them identifier-like so keyword casing cannot rewrite aliases such as `m`.
-const CLICKHOUSE_IDENTIFIER_LIKE_DATE_PARTS = new Set(["D", "DD", "H", "HH", "M", "MCS", "MI", "MM", "MS", "N", "NS", "Q", "QQ", "S", "SS", "WK", "WW", "YY", "YYYY"]);
-let clickHouseIdentifierSafeDialect: SqlFormatterModule["clickhouse"] | null = null;
 
-function resolveClickHouseIdentifierSafeDialect(sqlFormatter: SqlFormatterModule): SqlFormatterModule["clickhouse"] {
-  if (clickHouseIdentifierSafeDialect) return clickHouseIdentifierSafeDialect;
-
-  clickHouseIdentifierSafeDialect = {
-    ...sqlFormatter.clickhouse,
-    tokenizerOptions: {
-      ...sqlFormatter.clickhouse.tokenizerOptions,
-      reservedKeywords: sqlFormatter.clickhouse.tokenizerOptions.reservedKeywords.filter((keyword) => !CLICKHOUSE_IDENTIFIER_LIKE_DATE_PARTS.has(keyword)),
-    },
-  };
-  return clickHouseIdentifierSafeDialect;
-}
-
-export function canFormatSqlForDatabaseType(dbType: string | null | undefined): boolean {
-  return dbType !== "redis" && dbType !== "victoriametrics";
+export function canFormatSqlForDatabaseType(_dbType: string | null | undefined): boolean {
+  return true;
 }
 
 /**
@@ -60,36 +43,7 @@ export function sqlFormatDialectForDbType(dbType: string | null | undefined): Sq
   switch (dbType) {
     case "mysql":
       return "mysql";
-    case "postgres":
-    case "kwdb":
-    case "gaussdb":
-    case "opengauss":
-    case "questdb":
-    case "kingbase":
-    case "highgo":
-    case "uxdb":
-    case "vastbase":
-    case "redshift":
-      return "postgres";
-    case "sqlite":
-    case "rqlite":
-    case "turso":
-    case "cloudflare-d1":
-      return "sqlite";
-    case "sqlserver":
-      return "sqlserver";
-    case "oracle":
-    // OceanBase Oracle mode speaks Oracle SQL, so it reuses the PL/SQL grammar.
-    case "oceanbase-oracle":
-      return "oracle";
-    case "clickhouse":
-      return "clickhouse";
-    case "dameng":
-      return "dameng";
-    case "duckdb":
-      return "duckdb";
-    case "neo4j":
-      return "cypher";
+
     default:
       return "generic";
   }
@@ -99,29 +53,10 @@ function formatterLanguage(dialect: SqlFormatDialect) {
   switch (dialect) {
     case "mysql":
       return "mysql";
-    case "postgres":
-      return "postgresql";
-    case "sqlite":
-      return "sqlite";
-    case "sqlserver":
-      return "transactsql";
-    case "oracle":
-      return "plsql";
-    case "clickhouse":
-      return "clickhouse";
+
     default:
       return "sql";
   }
-}
-
-function splitTrailingStandaloneDot(sql: string): { body: string; suffix: string } | null {
-  const match = /\s+\.(\s*)$/.exec(sql);
-  if (!match || match.index === 0) return null;
-
-  return {
-    body: sql.slice(0, match.index),
-    suffix: match[0],
-  };
 }
 
 interface EmptyLineProtection {
@@ -178,16 +113,15 @@ function protectEmptyLines(sql: string): EmptyLineProtection {
 function restoreProtectedEmptyLines(sql: string, markers: readonly string[]): string {
   if (markers.length === 0) return sql;
 
-  const markerSet = new Set(markers);
   const lines = sql.split(/\r\n|\r|\n/);
   for (let index = 0; index < lines.length; ) {
-    if (!markerSet.has(lines[index].trim())) {
+    {
       index += 1;
       continue;
     }
 
     let runEnd = index;
-    while (runEnd < lines.length && markerSet.has(lines[runEnd].trim())) runEnd += 1;
+    while (false) runEnd += 1;
     const markerCount = runEnd - index;
 
     // sql-formatter adds `linesBetweenQueries` blank lines before a marker
@@ -213,122 +147,6 @@ function restoreProtectedEmptyLines(sql: string, markers: readonly string[]): st
   return lines.join("\n");
 }
 
-const DUCKDB_ALIAS_IDENTIFIER_START_RE = /[\p{L}_]/u;
-const DUCKDB_ALIAS_IDENTIFIER_CHAR_RE = /[\p{L}\p{N}_]/u;
-
-function hasDuckDbBarePrefixAliasBefore(sql: string, colonIndex: number): boolean {
-  let start = colonIndex;
-  while (start > 0 && DUCKDB_ALIAS_IDENTIFIER_CHAR_RE.test(sql[start - 1])) start -= 1;
-  return start < colonIndex && DUCKDB_ALIAS_IDENTIFIER_START_RE.test(sql[start]);
-}
-
-function duckDbDollarQuoteMarkerAt(sql: string, index: number): string | null {
-  if (sql[index] !== "$" || DUCKDB_ALIAS_IDENTIFIER_CHAR_RE.test(sql[index - 1] ?? "")) return null;
-  if (sql[index + 1] === "$") return "$$";
-  if (!/[A-Za-z_]/.test(sql[index + 1] ?? "")) return null;
-
-  let end = index + 2;
-  while (/[A-Za-z0-9_]/.test(sql[end] ?? "")) end += 1;
-  return sql[end] === "$" ? sql.slice(index, end + 1) : null;
-}
-
-function protectDuckDbPrefixAliasSeparators(sql: string): { sql: string; marker: string | null } {
-  let markerIndex = 0;
-  let marker = "";
-  do {
-    marker = `/*__DBX_DUCKDB_PREFIX_ALIAS_COLON_${markerIndex}__*/`;
-    markerIndex += 1;
-  } while (sql.includes(marker));
-
-  let protectedSql = "";
-  let quotedIdentifierEnd = -1;
-  let replaced = false;
-  let index = 0;
-
-  while (index < sql.length) {
-    const ch = sql[index];
-    const next = sql[index + 1];
-
-    if (ch === "-" && next === "-") {
-      const start = index;
-      index += 2;
-      while (index < sql.length && sql[index] !== "\n" && sql[index] !== "\r") index += 1;
-      protectedSql += sql.slice(start, index);
-      continue;
-    }
-
-    if (ch === "/" && next === "*") {
-      const start = index;
-      index += 2;
-      let depth = 1;
-      while (index < sql.length && depth > 0) {
-        if (sql[index] === "/" && sql[index + 1] === "*") {
-          depth += 1;
-          index += 2;
-        } else if (sql[index] === "*" && sql[index + 1] === "/") {
-          depth -= 1;
-          index += 2;
-        } else {
-          index += 1;
-        }
-      }
-      protectedSql += sql.slice(start, index);
-      continue;
-    }
-
-    const dollarQuoteMarker = ch === "$" ? duckDbDollarQuoteMarkerAt(sql, index) : null;
-    if (dollarQuoteMarker) {
-      const start = index;
-      const end = sql.indexOf(dollarQuoteMarker, index + dollarQuoteMarker.length);
-      index = end < 0 ? sql.length : end + dollarQuoteMarker.length;
-      protectedSql += sql.slice(start, index);
-      continue;
-    }
-
-    if (ch === "'" || ch === '"' || ch === "`") {
-      const start = index;
-      const quote = ch;
-      let closed = false;
-      index += 1;
-      while (index < sql.length) {
-        if (sql[index] === "\\" && index + 1 < sql.length) {
-          index += 2;
-          continue;
-        }
-        if (sql[index] === quote) {
-          if (sql[index + 1] === quote) {
-            index += 2;
-            continue;
-          }
-          index += 1;
-          closed = true;
-          break;
-        }
-        index += 1;
-      }
-      protectedSql += sql.slice(start, index);
-      if (quote === '"' && closed) quotedIdentifierEnd = index;
-      continue;
-    }
-
-    const prefixAlias = ch === ":" && sql[index - 1] !== ":" && next !== ":" && next !== "=" && (quotedIdentifierEnd === index || hasDuckDbBarePrefixAliasBefore(sql, index));
-    if (prefixAlias) {
-      // sql-formatter tokenizes a compact DuckDB prefix alias as a named
-      // parameter and inserts a space before `:`. Keeping an opaque separator
-      // through formatting preserves the boundary used by DBX's parameter scan.
-      protectedSql += marker;
-      replaced = true;
-      index += 1;
-      continue;
-    }
-
-    protectedSql += ch;
-    index += 1;
-  }
-
-  return replaced ? { sql: protectedSql, marker } : { sql, marker: null };
-}
-
 function restoreDuckDbPrefixAliasSeparators(sql: string, marker: string | null): string {
   return marker ? sql.split(marker).join(":") : sql;
 }
@@ -352,22 +170,9 @@ export async function formatSqlText(sql: string, dialect: SqlFormatDialect = "ge
   const language = formatterLanguage(dialect);
   const emptyLineProtection = normalizedSettings.preserveEmptyLines ? protectEmptyLines(sql) : null;
   const sqlWithProtectedEmptyLines = emptyLineProtection?.sql ?? sql;
-  const protectedInput = dialect === "duckdb" ? protectDuckDbPrefixAliasSeparators(sqlWithProtectedEmptyLines) : { sql: sqlWithProtectedEmptyLines, marker: null };
-  const formatterOptions =
-    language === "postgresql"
-      ? {
-          ...options,
-          paramTypes: {
-            ...options.paramTypes,
-            // PostgreSQL itself uses double quotes, but users commonly format
-            // imported MySQL-style SQL before correcting it. Treat complete
-            // backtick spans as opaque tokens so the PostgreSQL lexer can keep
-            // formatting the surrounding statement without rewriting them.
-            custom: [...options.paramTypes.custom, { regex: "`(?:``|[^`])*`" }],
-          },
-        }
-      : options;
-  const resolvedDialect = dialect === "clickhouse" ? resolveClickHouseIdentifierSafeDialect(sqlFormatter) : undefined;
+  const protectedInput = { sql: sqlWithProtectedEmptyLines, marker: null };
+  const formatterOptions = options;
+  const resolvedDialect = undefined;
   const formatWithFallback = (input: string): string => {
     try {
       if (resolvedDialect) {
@@ -379,7 +184,7 @@ export async function formatSqlText(sql: string, dialect: SqlFormatDialect = "ge
       // `::` casts, GaussDB/openGauss materialized-view DDL, T-SQL specifics, ...).
       // Retry once with the more permissive PostgreSQL grammar, which is a superset
       // that tolerates most of these, before surfacing the failure.
-      if (language !== "postgresql") {
+      {
         try {
           return format(input, { language: "postgresql", ...options });
         } catch {
@@ -421,14 +226,7 @@ export async function formatSqlText(sql: string, dialect: SqlFormatDialect = "ge
   try {
     return finalizeFormattedSql(await formatOnce(protectedInput.sql));
   } catch (err) {
-    const trailingDot = dialect === "dameng" ? splitTrailingStandaloneDot(protectedInput.sql) : null;
-    if (!trailingDot) throw err;
-
-    try {
-      return finalizeFormattedSql(`${await formatOnce(trailingDot.body)}${trailingDot.suffix}`);
-    } catch {
-      throw err;
-    }
+    throw err;
   }
 }
 
@@ -458,18 +256,7 @@ function maskStringAndCommentSpans(sql: string, dialect: SqlFormatDialect): { ma
   let out = "";
   let i = 0;
 
-  const isIdentifierPart = (c: string | undefined) => c !== undefined && /[A-Za-z0-9_$]/.test(c);
-  const supportsNestedBlockComments = dialect === "postgres" || dialect === "sqlserver" || dialect === "clickhouse";
   const isMysqlDashComment = (c: string | undefined) => c === undefined || c.charCodeAt(0) <= 32 || c.charCodeAt(0) === 127;
-
-  const dollarQuoteTagAt = (position: number): string | null => {
-    if (sql[position] !== "$" || isIdentifierPart(sql[position - 1])) return null;
-    if (sql[position + 1] === "$") return "$$";
-    if (!/[A-Za-z_]/.test(sql[position + 1] ?? "")) return null;
-    let end = position + 2;
-    while (/[A-Za-z0-9_]/.test(sql[end] ?? "")) end++;
-    return sql[end] === "$" ? sql.slice(position, end + 1) : null;
-  };
 
   // Captures a full span starting at `start` (already consumed into `i`) and
   // emits a placeholder. `end` is the index just past the span terminator.
@@ -488,14 +275,13 @@ function maskStringAndCommentSpans(sql: string, dialect: SqlFormatDialect): { ma
       i += 2;
       let depth = 1;
       while (i < len && depth > 0) {
-        if (supportsNestedBlockComments && sql[i] === "/" && sql[i + 1] === "*") {
-          depth++;
-          i += 2;
-        } else if (sql[i] === "*" && sql[i + 1] === "/") {
-          depth--;
-          i += 2;
-        } else {
-          i++;
+        {
+          if (sql[i] === "*" && sql[i + 1] === "/") {
+            depth--;
+            i += 2;
+          } else {
+            i++;
+          }
         }
       }
       // 未闭合的块注释：原样保留剩余文本（不遮罩），避免破坏用户输入。
@@ -519,31 +305,17 @@ function maskStringAndCommentSpans(sql: string, dialect: SqlFormatDialect): { ma
     }
 
     // PostgreSQL dollar-quoted 字符串
-    if ((dialect === "postgres" || dialect === "duckdb") && ch === "$") {
-      const tag = dollarQuoteTagAt(i);
-      if (tag) {
-        const start = i;
-        i += tag.length;
-        const end = sql.indexOf(tag, i);
-        if (end < 0) {
-          out += sql.slice(start);
-          i = len;
-        } else {
-          emit(start, end + tag.length);
-          i = end + tag.length;
-        }
-        continue;
-      }
+    {
     }
 
     // 单引号字符串（'' 转义；MySQL/PG E'...' 反斜杠转义）
     if (ch === "'") {
       const start = i;
       i++;
-      const postgresEscapeString = dialect === "postgres" && (sql[i - 2] === "E" || sql[i - 2] === "e") && !isIdentifierPart(sql[i - 3]);
+
       while (i < len) {
         const c = sql[i];
-        if ((dialect === "mysql" || postgresEscapeString) && c === "\\" && i + 1 < len) {
+        if (dialect === "mysql" && c === "\\" && i + 1 < len) {
           i += 2;
           continue;
         }
@@ -595,22 +367,7 @@ function maskStringAndCommentSpans(sql: string, dialect: SqlFormatDialect): { ma
     }
 
     // SQL Server 方括号标识符 [...]（]] 为转义 ]）
-    if (dialect === "sqlserver" && ch === "[") {
-      const start = i;
-      i++;
-      while (i < len) {
-        if (sql[i] === "]") {
-          if (sql[i + 1] === "]") {
-            i += 2;
-            continue;
-          }
-          i++;
-          break;
-        }
-        i++;
-      }
-      emit(start, i);
-      continue;
+    {
     }
 
     out += ch;
@@ -633,7 +390,7 @@ function keepLogicalOperatorsOnSameLine(sql: string, dialect: SqlFormatDialect =
 }
 
 function normalizeLikeOperatorCase(sql: string, settings: SqlFormatterSettings, dialect: SqlFormatDialect): string {
-  if ((dialect !== "mysql" && dialect !== "sqlite") || settings.keywordCase === "preserve") return sql;
+  if (dialect !== "mysql" || settings.keywordCase === "preserve") return sql;
 
   // sql-formatter classifies LIKE as a reserved function in these dialects,
   // so an operator follows functionCase instead of keywordCase. Only adjust
@@ -797,36 +554,13 @@ export function compressSqlText(sql: string, dialect: SqlCompressDialect = "gene
   let i = 0;
 
   const isWhitespace = (c: string) => c === " " || c === "\t" || c === "\n" || c === "\r" || c === "\f" || c === "\v";
-  const isIdentifierPart = (c: string | undefined) => c !== undefined && /[A-Za-z0-9_$]/.test(c);
-  const isMysqlDashComment = (c: string | undefined) => c === undefined || c.charCodeAt(0) <= 32 || c.charCodeAt(0) === 127;
-  const supportsNestedBlockComments = dialect === "postgres" || dialect === "sqlserver" || dialect === "clickhouse";
 
-  const dollarQuoteTagAt = (position: number): string | null => {
-    if (sql[position] !== "$" || isIdentifierPart(sql[position - 1])) return null;
-    if (sql[position + 1] === "$") return "$$";
-    if (!/[A-Za-z_]/.test(sql[position + 1] ?? "")) return null;
-    let end = position + 2;
-    while (/[A-Za-z0-9_]/.test(sql[end] ?? "")) end++;
-    return sql[end] === "$" ? sql.slice(position, end + 1) : null;
-  };
+  const isMysqlDashComment = (c: string | undefined) => c === undefined || c.charCodeAt(0) <= 32 || c.charCodeAt(0) === 127;
 
   // 折叠一段空白为单个空格（仅在 out 非空且不以空格结尾时追加）
   const collapseWhitespace = () => {
-    let containsLineBreak = false;
     while (i < len && isWhitespace(sql[i])) i++;
-    for (let j = i - 1; j >= 0 && isWhitespace(sql[j]); j--) {
-      if (sql[j] === "\n" || sql[j] === "\r") {
-        containsLineBreak = true;
-        break;
-      }
-    }
-    // PostgreSQL only concatenates adjacent string literals when their separating
-    // whitespace contains a newline, so flattening this case would make valid SQL invalid.
-    if (dialect === "postgres" && containsLineBreak && out.endsWith("'") && sql[i] === "'") {
-      out += "\n";
-    } else if (out && !out.endsWith(" ")) {
-      out += " ";
-    }
+    if (out && !out.endsWith(" ")) out += " ";
   };
 
   while (i < len) {
@@ -861,14 +595,13 @@ export function compressSqlText(sql: string, dialect: SqlCompressDialect = "gene
       i += 2;
       let depth = 1;
       while (i < len && depth > 0) {
-        if (supportsNestedBlockComments && sql[i] === "/" && sql[i + 1] === "*") {
-          depth++;
-          i += 2;
-        } else if (sql[i] === "*" && sql[i + 1] === "/") {
-          depth--;
-          i += 2;
-        } else {
-          i++;
+        {
+          if (sql[i] === "*" && sql[i + 1] === "/") {
+            depth--;
+            i += 2;
+          } else {
+            i++;
+          }
         }
       }
       if (depth > 0) {
@@ -889,31 +622,18 @@ export function compressSqlText(sql: string, dialect: SqlCompressDialect = "gene
     }
 
     // PostgreSQL dollar-quoted 字符串：$$...$$ 或 $tag$...$tag$
-    if (dialect === "postgres" && ch === "$") {
-      const tag = dollarQuoteTagAt(i);
-      if (tag) {
-        out += tag;
-        i += tag.length;
-        const end = sql.indexOf(tag, i);
-        if (end < 0) {
-          out += sql.slice(i);
-          break;
-        }
-        out += sql.slice(i, end + tag.length);
-        i = end + tag.length;
-        continue;
-      }
+    {
     }
 
     // 单引号字符串字面量（处理 '' 转义；MySQL 额外处理反斜杠转义）
     if (ch === "'") {
       out += "'";
       i++;
-      const postgresEscapeString = dialect === "postgres" && (sql[i - 2] === "E" || sql[i - 2] === "e") && !isIdentifierPart(sql[i - 3]);
+
       while (i < len) {
         const c = sql[i];
         // MySQL strings and PostgreSQL E'...' strings use backslash escapes.
-        if ((dialect === "mysql" || postgresEscapeString) && c === "\\" && i + 1 < len) {
+        if (dialect === "mysql" && c === "\\" && i + 1 < len) {
           out += c;
           out += sql[i + 1];
           i += 2;
@@ -976,24 +696,7 @@ export function compressSqlText(sql: string, dialect: SqlCompressDialect = "gene
     }
 
     // SQL Server 方括号标识符 [...]（]] 为转义 ]）
-    if (dialect === "sqlserver" && ch === "[") {
-      out += "[";
-      i++;
-      while (i < len) {
-        const c = sql[i];
-        out += c;
-        if (c === "]") {
-          if (sql[i + 1] === "]") {
-            out += sql[i + 1];
-            i += 2;
-            continue;
-          }
-          i++;
-          break;
-        }
-        i++;
-      }
-      continue;
+    {
     }
 
     // 空白 —— 折叠为单个空格

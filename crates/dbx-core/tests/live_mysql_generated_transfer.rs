@@ -78,10 +78,9 @@ async fn run_mysql_generated_only_transfer() {
     let pool = mysql::connect(&url, Duration::from_secs(10)).await.unwrap();
     let directory = tempfile::tempdir().unwrap();
     let storage = Storage::open(&directory.path().join("state.db")).await.unwrap();
-    let state = Arc::new(AppState::new_with_plugin_and_agent_dir_and_app_version(
+    let state = Arc::new(AppState::new_with_plugin_dir_and_app_version(
         storage,
         directory.path().join("plugins"),
-        directory.path().join("agents"),
         env!("CARGO_PKG_VERSION"),
     ));
     state.configs.write().await.insert(config.id.clone(), config);

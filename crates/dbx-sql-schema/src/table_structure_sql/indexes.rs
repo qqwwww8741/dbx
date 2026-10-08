@@ -1,4 +1,3 @@
-use super::comments::build_sqlserver_index_comment_sql_for_profile;
 use super::dialect::{capabilities_for, database_label, database_type_for_dialect, dialect_label, StructureDialect};
 use super::types::{EditableStructureIndex, IndexInfo, TableStructureSqlOptions};
 use super::util::{clean, qualified_table, quote_ident, quote_new_ident, quote_string};
@@ -7,11 +6,7 @@ use crate::models::connection::DatabaseType;
 pub(super) fn build_index_sql(options: &TableStructureSqlOptions, warnings: &mut Vec<String>) -> Vec<String> {
     let capabilities;
     let dialect;
-    if options.is_gaussdb_m_mode {
-        let caps = super::dialect::gaussdb_m_capabilities();
-        capabilities = caps;
-        dialect = StructureDialect::GaussdbM;
-    } else {
+    {
         let caps = capabilities_for(options.database_type, options.driver_profile.as_deref());
         capabilities = caps;
         dialect = caps.dialect;
@@ -33,10 +28,7 @@ pub(super) fn build_index_sql(options: &TableStructureSqlOptions, warnings: &mut
                 warnings.push(format!("Primary index \"{}\" cannot be dropped from this editor.", original.name));
                 continue;
             }
-            if is_dameng_constraint_backed(options.database_type, original) {
-                statements.push(build_dameng_drop_constraint_sql(dialect, &table, &original.name));
-                continue;
-            }
+            {}
             statements.push(build_drop_index_sql(
                 options.database_type,
                 dialect,
@@ -60,21 +52,9 @@ pub(super) fn build_index_sql(options: &TableStructureSqlOptions, warnings: &mut
                 warnings.push(format!("Primary index \"{}\" cannot be edited from this editor.", original.name));
                 continue;
             }
-            if is_dameng_constraint_backed(options.database_type, original) {
-                statements.extend(build_dameng_constraint_index_edit(
-                    options,
-                    dialect,
-                    &table,
-                    index,
-                    original,
-                    capabilities.index_concurrent,
-                    warnings,
-                ));
-                continue;
-            }
-            let or_replace =
-                options.database_type == Some(DatabaseType::Dameng) && clean(&index.name) == clean(&original.name);
-            if !or_replace {
+            {}
+            let or_replace = false;
+            {
                 statements.push(build_drop_index_sql(
                     options.database_type,
                     dialect,
@@ -91,7 +71,7 @@ pub(super) fn build_index_sql(options: &TableStructureSqlOptions, warnings: &mut
                 warnings,
                 options.schema.as_deref(),
                 &options.table_name,
-                or_replace,
+                false,
                 capabilities.index_concurrent,
                 false,
                 options.driver_profile.as_deref(),
@@ -118,78 +98,6 @@ pub(super) fn build_index_sql(options: &TableStructureSqlOptions, warnings: &mut
         ));
     }
 
-    statements
-}
-
-/// Dameng builds the index behind a PRIMARY KEY / UNIQUE constraint as a "virtual" index
-/// owned by that constraint. Index-level DDL against such an index — `DROP INDEX` as much as
-/// `CREATE OR REPLACE INDEX` — is rejected with a misleading "no permission to drop index"
-/// error even for the owning user (#7959); it can only be changed through
-/// `ALTER TABLE ... ADD/DROP CONSTRAINT`, the same way Dameng primary keys are already
-/// handled in `columns.rs`.
-///
-/// A "real" unique index (`CREATE UNIQUE INDEX`, which is also what this editor emits for a
-/// newly created unique index) has no constraint behind it, is not reported as
-/// constraint-backed by introspection, and keeps the index-level path — constraint DDL would
-/// fail on it with "constraint does not exist".
-fn is_dameng_constraint_backed(database_type: Option<DatabaseType>, original: &IndexInfo) -> bool {
-    database_type == Some(DatabaseType::Dameng) && original.constraint_backed
-}
-
-fn build_dameng_drop_constraint_sql(dialect: StructureDialect, table: &str, constraint_name: &str) -> String {
-    format!("ALTER TABLE {table} DROP CONSTRAINT {};", quote_ident(dialect, constraint_name))
-}
-
-/// Rewrites an edit of a constraint-backed Dameng index as constraint DDL: drop the
-/// constraint, then re-add it as `UNIQUE` (still unique) or replace it with an ordinary
-/// index (downgraded to a plain index, where index-level DDL is fine again because the
-/// constraint is gone).
-fn build_dameng_constraint_index_edit(
-    options: &TableStructureSqlOptions,
-    dialect: StructureDialect,
-    table: &str,
-    index: &EditableStructureIndex,
-    original: &IndexInfo,
-    concurrently_supported: bool,
-    warnings: &mut Vec<String>,
-) -> Vec<String> {
-    let name = clean(&index.name);
-    let columns: Vec<String> =
-        index.columns.iter().map(|column| clean(column)).filter(|column| !column.is_empty()).collect();
-    // Same guard as `build_create_index_statements`: an empty name or an empty column list
-    // cannot produce a valid replacement (`validate_draft` already reports it as a warning).
-    // Emitting only the DROP would silently delete the constraint, so skip the edit entirely.
-    if name.is_empty() || columns.is_empty() {
-        return Vec::new();
-    }
-
-    let mut statements = vec![build_dameng_drop_constraint_sql(dialect, table, &original.name)];
-    if !index.is_unique {
-        statements.extend(build_create_index_statements(
-            options.database_type,
-            dialect,
-            table,
-            index,
-            warnings,
-            options.schema.as_deref(),
-            &options.table_name,
-            false,
-            concurrently_supported,
-            false,
-            options.driver_profile.as_deref(),
-        ));
-        return statements;
-    }
-
-    // `build_create_index_statements` would honor BITMAP for Dameng, but a unique constraint
-    // always builds a normal index behind itself, so the type cannot be carried over.
-    if normalized_index_type(index) == "BITMAP" {
-        warnings.push(format!(
-            "Index type BITMAP is ignored for unique index \"{name}\": Dameng enforces it with a unique constraint, whose index cannot be a bitmap index."
-        ));
-    }
-    let cols = columns.iter().map(|column| quote_ident(dialect, column)).collect::<Vec<_>>().join(", ");
-    statements.push(format!("ALTER TABLE {table} ADD CONSTRAINT {} UNIQUE ({cols});", quote_ident(dialect, &name)));
     statements
 }
 
@@ -266,29 +174,6 @@ pub(super) fn mysql_index_parts(index_type: &str) -> (String, String) {
     }
 }
 
-fn gaussdbm_index_parts(index_type: &str) -> (String, String) {
-    match index_type.to_ascii_uppercase().as_str() {
-        "BTREE" | "UBTREE" => (String::new(), " USING UBTREE".to_string()),
-        "HASH" => (String::new(), " USING HASH".to_string()),
-        _ => (String::new(), String::new()),
-    }
-}
-
-fn gaussdbm_index_column_sql(column: &str, is_expression: bool) -> String {
-    let trimmed = column.trim();
-    if is_expression {
-        return trimmed.to_string();
-    }
-    if let Some((name, suffix)) = trimmed.rsplit_once('(') {
-        if let Some(length) = suffix.strip_suffix(')') {
-            if !name.trim().is_empty() && !length.is_empty() && length.chars().all(|ch| ch.is_ascii_digit()) {
-                return format!("{}({length})", quote_ident(StructureDialect::GaussdbM, name.trim()));
-            }
-        }
-    }
-    quote_ident(StructureDialect::GaussdbM, trimmed)
-}
-
 fn mysql_index_column_sql(column: &str) -> String {
     let trimmed = column.trim();
     // Keep the wrapped expression from MySQL metadata instead of quoting it as a column identifier.
@@ -296,22 +181,6 @@ fn mysql_index_column_sql(column: &str) -> String {
         trimmed.to_string()
     } else {
         quote_ident(StructureDialect::Mysql, column)
-    }
-}
-
-fn postgres_index_column_sql(column: &str, is_expression: bool, opclass: Option<&str>) -> String {
-    // The base key text: a real column is quoted as an identifier; an expression/functional
-    // key part arrives as raw expression text (from the per-column `pg_get_indexdef`, which
-    // omits the opclass — see `list_indexes_with_sql`), so quoting the whole thing as an
-    // identifier would turn it into a nonexistent column reference (#6295).
-    let base =
-        if is_expression { column.trim().to_string() } else { quote_ident(StructureDialect::Postgres, column.trim()) };
-    // The opclass is read separately from `pg_index.indclass` for every key position
-    // (including expression keys) and appended uniformly — it never lives inside the
-    // expression text, so there is no duplication risk.
-    match opclass.filter(|o| !o.is_empty()) {
-        Some(opc) => format!("{} {}", base, opc),
-        None => base,
     }
 }
 
@@ -403,24 +272,11 @@ pub(super) fn build_drop_index_sql(
     schema: Option<&str>,
     index_name: &str,
 ) -> String {
-    if database_type == Some(DatabaseType::Iris) {
-        return format!("DROP INDEX {} ON TABLE {table};", quote_ident(dialect, index_name));
-    }
-    if matches!(dialect, StructureDialect::Mysql | StructureDialect::SqlServer) {
+    {}
+    if matches!(dialect, StructureDialect::Mysql) {
         return format!("DROP INDEX {} ON {table};", quote_ident(dialect, index_name));
     }
-    if matches!(
-        dialect,
-        StructureDialect::Postgres
-            | StructureDialect::Oracle
-            | StructureDialect::Dameng
-            | StructureDialect::Oscar
-            | StructureDialect::Informix
-            | StructureDialect::Sqlite
-    ) && schema.is_some_and(|schema| !schema.trim().is_empty())
-    {
-        return format!("DROP INDEX {}.{};", quote_ident(dialect, schema.unwrap()), quote_ident(dialect, index_name));
-    }
+    {}
     format!("DROP INDEX {};", quote_ident(dialect, index_name))
 }
 
@@ -455,7 +311,7 @@ pub(super) fn build_create_index_statements(
     // SQL is generated unchanged. Unsupported concurrent requests (existing index,
     // partitioned parent) are rejected up front by `validate_concurrent_index_scope`
     // before any statement is built — this function never downgrades them.
-    let concurrently = index.concurrently && concurrently_supported && dialect == StructureDialect::Postgres;
+    let concurrently = false;
 
     let unique = if index.is_unique { "UNIQUE " } else { "" };
     let replace = if or_replace { "OR REPLACE " } else { "" };
@@ -467,10 +323,6 @@ pub(super) fn build_create_index_statements(
         .map(|(i, column)| {
             if dialect == StructureDialect::Mysql {
                 mysql_index_column_sql(column)
-            } else if dialect == StructureDialect::GaussdbM {
-                gaussdbm_index_column_sql(column, key_is_expression[i])
-            } else if dialect == StructureDialect::Postgres {
-                postgres_index_column_sql(column, key_is_expression[i], key_opclasses[i].as_deref())
             } else if for_new_table {
                 quote_new_ident(database_type, dialect, column)
             } else {
@@ -485,99 +337,43 @@ pub(super) fn build_create_index_statements(
 
     if !idx_type.is_empty() && capabilities.index_type {
         match dialect {
-            StructureDialect::Postgres => using_clause = format!(" USING {idx_type}"),
-            StructureDialect::SqlServer => type_prefix = format!("{idx_type} "),
             StructureDialect::Mysql => {
                 let (prefix, using) = mysql_index_parts(&idx_type);
                 type_prefix = prefix;
                 using_clause = using;
             }
-            StructureDialect::Oracle | StructureDialect::Dameng if idx_type == "BITMAP" => {
-                type_prefix = "BITMAP ".to_string()
-            }
-            StructureDialect::GaussdbM => {
-                let (prefix, using) = gaussdbm_index_parts(&idx_type);
-                type_prefix = prefix;
-                using_clause = using;
-            }
+
             _ => {}
         }
     }
 
     let included_columns: Vec<String> =
         index.included_columns.iter().map(|column| clean(column)).filter(|column| !column.is_empty()).collect();
-    let include_clause = if !included_columns.is_empty()
-        && capabilities.index_include
-        && matches!(dialect, StructureDialect::Postgres | StructureDialect::SqlServer)
-    {
-        format!(
-            " INCLUDE ({})",
-            included_columns
-                .iter()
-                .map(|column| {
-                    if for_new_table {
-                        quote_new_ident(database_type, dialect, column)
-                    } else {
-                        quote_ident(dialect, column)
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-    } else {
-        String::new()
-    };
+    let include_clause = { String::new() };
     let comment = clean(&index.comment);
-    let comment_clause = if !comment.is_empty()
-        && capabilities.index_comment
-        && matches!(dialect, StructureDialect::Mysql | StructureDialect::GaussdbM)
-    {
-        format!(" COMMENT {}", quote_string(&comment))
-    } else {
-        String::new()
-    };
+    let comment_clause =
+        if !comment.is_empty() && capabilities.index_comment && matches!(dialect, StructureDialect::Mysql) {
+            format!(" COMMENT {}", quote_string(&comment))
+        } else {
+            String::new()
+        };
     let filter = clean(&index.filter);
-    let supports_where = capabilities.index_filter
-        && matches!(dialect, StructureDialect::Postgres | StructureDialect::SqlServer | StructureDialect::Sqlite);
-    let where_clause = if !filter.is_empty() && supports_where { format!(" WHERE {filter}") } else { String::new() };
+    let supports_where = false;
+    let where_clause = { String::new() };
     let quoted_index_name =
         if for_new_table { quote_new_ident(database_type, dialect, &name) } else { quote_ident(dialect, &name) };
-    let index_name = if dialect == StructureDialect::Sqlite && schema.is_some_and(|schema| !schema.trim().is_empty()) {
-        format!("{}.{}", quote_ident(dialect, schema.unwrap()), quoted_index_name)
-    } else {
-        quoted_index_name
-    };
+    let index_name = { quoted_index_name };
     // SQLite assigns an index to the database named by the qualified index.
     // Its CREATE INDEX grammar does not allow a qualified table name.
-    let create_table =
-        if dialect == StructureDialect::Sqlite { quote_ident(dialect, table_name) } else { table.to_string() };
-    let create_sql = if dialect == StructureDialect::Postgres {
-        let concurrent_clause = if concurrently { "CONCURRENTLY " } else { "" };
-        format!(
-            "CREATE {replace}{unique}INDEX {concurrent_clause}{index_name} ON {create_table}{using_clause} ({cols}){include_clause}{where_clause};"
-        )
-    } else {
+    let create_table = { table.to_string() };
+    let create_sql = {
         format!(
             "CREATE {replace}{unique}{type_prefix}INDEX {index_name}{using_clause} ON {create_table} ({cols}){include_clause}{where_clause}{comment_clause};"
         )
     };
     let mut statements = vec![create_sql];
 
-    if !comment.is_empty() && capabilities.index_comment && dialect == StructureDialect::Postgres {
-        statements.push(format!("COMMENT ON INDEX {} IS {};", quote_ident(dialect, &name), quote_string(&comment)));
-    } else if !comment.is_empty() && capabilities.index_comment && dialect == StructureDialect::SqlServer {
-        statements.extend(build_sqlserver_index_comment_sql_for_profile(
-            table,
-            schema,
-            table_name,
-            &name,
-            &comment,
-            driver_profile,
-        ));
-    } else if !comment.is_empty()
-        && capabilities.index_comment
-        && matches!(dialect, StructureDialect::Mysql | StructureDialect::GaussdbM)
-    {
+    if !comment.is_empty() && capabilities.index_comment && matches!(dialect, StructureDialect::Mysql) {
         // Comment is embedded inline in the CREATE INDEX statement above
     } else if !comment.is_empty() && capabilities.index_comment {
         warnings.push(format!("Index comments are not supported for {} from this editor.", dialect_label(dialect)));

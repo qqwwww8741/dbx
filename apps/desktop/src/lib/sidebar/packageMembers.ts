@@ -1,4 +1,4 @@
-import type { CompletionAssistantCandidate, DatabaseType, TreeNode, TreeNodeType } from "@/types/database";
+import type { CompletionAssistantCandidate, DatabaseType, TreeNode } from "@/types/database";
 
 const PACKAGE_MEMBER_GROUP_MARKER = ":members:";
 
@@ -11,26 +11,6 @@ export function packageMemberGroupOwnerId(node: TreeNode): string | null {
 
 export function markPackageNodesExpandable(nodes: TreeNode[]): TreeNode[] {
   return nodes.map((node) => (node.type === "package" ? { ...node, children: node.children ?? [] } : node));
-}
-
-function packageMemberGroup(packageNode: TreeNode, type: "procedure" | "function", children: TreeNode[]): TreeNode {
-  const isProcedureGroup = type === "procedure";
-  const groupType: TreeNodeType = isProcedureGroup ? "group-procedures" : "group-functions";
-  return {
-    id: `${packageNode.id}:members:${type}s`,
-    label: isProcedureGroup ? "tree.procedures" : "tree.functions",
-    type: groupType,
-    objectName: packageNode.objectName || packageNode.label,
-    parentName: packageNode.objectName || packageNode.label,
-    parentSchema: packageNode.schema,
-    parentType: "package",
-    connectionId: packageNode.connectionId,
-    database: packageNode.database,
-    schema: packageNode.schema,
-    objectCount: children.length,
-    isExpanded: false,
-    children,
-  };
 }
 
 function packageMemberNode(packageNode: TreeNode, kind: "procedure" | "function", name: string, signature: string): TreeNode {
@@ -52,7 +32,7 @@ function packageMemberNode(packageNode: TreeNode, kind: "procedure" | "function"
   };
 }
 
-export function buildPackageMemberNodes(packageNode: TreeNode, candidates: readonly CompletionAssistantCandidate[], databaseType?: DatabaseType): TreeNode[] {
+export function buildPackageMemberNodes(packageNode: TreeNode, candidates: readonly CompletionAssistantCandidate[], _databaseType?: DatabaseType): TreeNode[] {
   const seen = new Set<string>();
   const members: TreeNode[] = [];
   const procedures: TreeNode[] = [];
@@ -75,10 +55,7 @@ export function buildPackageMemberNodes(packageNode: TreeNode, candidates: reado
   // Xugu presents package specifications and bodies as one logical package.
   // Keep the richer member folders scoped to Xugu so Oracle and other package
   // providers retain their existing flat member tree.
-  if (databaseType !== "xugu") return members;
-
-  const groups: TreeNode[] = [];
-  if (procedures.length > 0) groups.push(packageMemberGroup(packageNode, "procedure", procedures));
-  if (functions.length > 0) groups.push(packageMemberGroup(packageNode, "function", functions));
-  return groups;
+  {
+    return members;
+  }
 }

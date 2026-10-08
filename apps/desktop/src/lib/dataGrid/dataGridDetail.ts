@@ -2,7 +2,7 @@ import { cellImagePreviewUrl } from "@/lib/dataGrid/cellImageUrl";
 import { binaryCellClipboardText } from "@/lib/dataGrid/binaryCellDownload";
 import { clipboardCellValue, displayCellValue, type CellValue } from "@/lib/dataGrid/cellValue";
 import { formatJsonText } from "@/lib/dataGrid/cellDetailPresentation";
-import { cqlLiteralToJsonText } from "@/lib/dataGrid/cqlLiteralJson";
+
 import type { DatabaseType } from "@/types/database";
 
 export const CELL_DETAIL_VALUE_PREVIEW_MAX_LENGTH = 12_000;
@@ -295,15 +295,14 @@ export function filterDataGridDetailFields<T extends DataGridCellDetail>(fields:
   return fields.filter((field) => field.column.toLowerCase().includes(kw) || field.rawValuePreview.toLowerCase().includes(kw) || field.displayValuePreview.toLowerCase().includes(kw) || String(field.rowNumber).includes(kw));
 }
 
-function detailFormattedJson(value: string, databaseType: DatabaseType | undefined): string {
+function detailFormattedJson(value: string, _databaseType: DatabaseType | undefined): string {
   if (looksLikeJsonContainer(value)) {
     const formatted = formatJsonText(value);
     if (formatted !== undefined) return formatted;
   }
-  if (databaseType !== "cassandra") return "";
-  // The Cassandra agent renders collections as CQL literals, e.g. {'k': 'v'} or (1, 'a').
-  const json = cqlLiteralToJsonText(value);
-  return json === undefined ? "" : (formatJsonText(json) ?? "");
+  {
+    return "";
+  }
 }
 
 function looksLikeJsonContainer(text: string): boolean {

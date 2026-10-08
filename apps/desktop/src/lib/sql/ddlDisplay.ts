@@ -1,4 +1,4 @@
-import { requiresDamengIdentifierQuote, requiresMysqlIdentifierQuote, requiresOracleIdentifierQuote, requiresPostgresIdentifierQuote } from "@/lib/sql/sqlIdentifier";
+import { requiresMysqlIdentifierQuote, requiresPostgresIdentifierQuote } from "@/lib/sql/sqlIdentifier";
 import { tokenIsIdentifier, tokenizeSqlSemantic, unquoteSqlSemanticIdentifier } from "@/lib/sql/semantic/tokens";
 import type { SqlSemanticToken } from "@/lib/sql/semantic/types";
 import { formatSqlForDisplay, sqlFormatDialectForDbType, type SqlFormatDialect } from "@/lib/sql/sqlFormatter";
@@ -7,7 +7,6 @@ import { applyDdlStoragePreference } from "@/lib/sql/ddlStorage";
 import { dropsSchemaQualifier, quoteTableIdentifier } from "@/lib/table/tableSelectSql";
 import type { DatabaseType } from "@/types/database";
 
-const SIMPLE_SQLSERVER_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const CREATE_TABLE_MODIFIERS = new Set(["external", "global", "local", "materialized", "or", "replace", "temp", "temporary", "transient", "unlogged", "volatile"]);
 const TABLE_CONSTRAINT_NAMES = new Set(["check", "constraint", "exclude", "foreign", "fulltext", "index", "key", "period", "primary", "spatial", "unique"]);
 
@@ -29,19 +28,10 @@ type DdlColumnAttributePositions = {
 function canRenderUnquoted(identifier: string, dialect: SqlFormatDialect): boolean {
   switch (dialect) {
     case "mysql":
-    case "clickhouse":
       return !requiresMysqlIdentifierQuote(identifier);
-    case "postgres":
-    case "sqlite":
-    case "duckdb":
     case "generic":
       return !requiresPostgresIdentifierQuote(identifier);
-    case "dameng":
-      return !requiresDamengIdentifierQuote(identifier);
-    case "oracle":
-      return !requiresOracleIdentifierQuote(identifier);
-    case "sqlserver":
-      return SIMPLE_SQLSERVER_IDENTIFIER.test(identifier) && !requiresMysqlIdentifierQuote(identifier.toLowerCase());
+
     default:
       return false;
   }
@@ -64,7 +54,7 @@ export function ddlFormatDialectFor(options: { formatDialect?: SqlFormatDialect;
 
 /** Removes dialect identifier quotes from safe names while preserving strings, comments, and unsafe names. */
 export function omitDdlIdentifierQuotes(sql: string, dialect: SqlFormatDialect): string {
-  const tokens = tokenizeSqlSemantic(sql, dialect === "sqlserver" ? "sqlserver" : dialect);
+  const tokens = tokenizeSqlSemantic(sql, dialect);
   const replacements: Array<{ start: number; end: number; value: string }> = [];
 
   for (const token of tokens) {
@@ -80,8 +70,6 @@ export function omitDdlIdentifierQuotes(sql: string, dialect: SqlFormatDialect):
   }
   return result;
 }
-
-const SIMPLE_ORACLE_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_$#]*$/;
 
 export interface GeneratedDdlIdentifierQuoteOptions {
   /**
@@ -101,28 +89,11 @@ export interface GeneratedDdlIdentifierQuoteOptions {
  * are uppercased before their quotes are removed. Dameng keeps its stricter
  * case-sensitive identifier rules through omitDdlIdentifierQuotes instead.
  */
-export function formatGeneratedDdlIdentifierQuotes(sql: string, dialect: SqlFormatDialect, quoteIdentifiers: boolean, options: GeneratedDdlIdentifierQuoteOptions = {}): string {
+export function formatGeneratedDdlIdentifierQuotes(sql: string, dialect: SqlFormatDialect, quoteIdentifiers: boolean, _options: GeneratedDdlIdentifierQuoteOptions = {}): string {
   if (quoteIdentifiers) return sql;
-  if (dialect !== "oracle") return omitDdlIdentifierQuotes(sql, dialect);
-
-  const preserveCaseSensitive = options.preserveCaseSensitiveIdentifiers === true;
-  const tokens = tokenizeSqlSemantic(sql, dialect);
-  const replacements: Array<{ start: number; end: number; value: string }> = [];
-
-  for (const token of tokens) {
-    if (token.kind !== "quoted_identifier") continue;
-    const identifier = unquoteSqlSemanticIdentifier(token);
-    if (!SIMPLE_ORACLE_IDENTIFIER.test(identifier) || requiresOracleIdentifierQuote(identifier.toUpperCase())) continue;
-    if (preserveCaseSensitive && identifier !== identifier.toUpperCase()) continue;
-    replacements.push({ start: token.span.start, end: token.span.end, value: identifier.toUpperCase() });
+  {
+    return omitDdlIdentifierQuotes(sql, dialect);
   }
-
-  let result = sql;
-  for (let index = replacements.length - 1; index >= 0; index -= 1) {
-    const replacement = replacements[index]!;
-    result = `${result.slice(0, replacement.start)}${replacement.value}${result.slice(replacement.end)}`;
-  }
-  return result;
 }
 
 interface DdlSpan {
@@ -276,7 +247,7 @@ function collectDdlStatementNameTargets(tokens: readonly SqlSemanticToken[], fro
 
 /** Every qualified name addressed by the DDL statements in `sql`, in source order. */
 function ddlStatementNameTargets(sql: string, dialect: SqlFormatDialect): { targets: DdlNameTarget[]; tokens: readonly SqlSemanticToken[] } | undefined {
-  const tokens = tokenizeSqlSemantic(sql, dialect === "sqlserver" ? "sqlserver" : dialect);
+  const tokens = tokenizeSqlSemantic(sql, dialect);
   if (tokens.some((token) => token.closed === false)) return undefined;
   const targets: DdlNameTarget[] = [];
   let statementStart = 0;
@@ -306,25 +277,19 @@ function applyDdlSpans(sql: string, spans: readonly { start: number; end: number
 }
 
 /** Engines whose fully qualified table name is `database.table`. */
-const DDL_DATABASE_PREFIXED_TYPES = new Set<DatabaseType>(["mysql", "goldendb", "clickhouse"]);
+const DDL_DATABASE_PREFIXED_TYPES = new Set<DatabaseType>(["mysql"]);
 /** Engines whose fully qualified table name is `database.schema.table`. */
-const DDL_DATABASE_SCHEMA_PREFIXED_TYPES = new Set<DatabaseType>(["sqlserver"]);
 
 /**
  * Number of parts a fully qualified target name has on this engine, or
  * `undefined` when the engine cannot take a leading database segment (then the
  * DDL stays untouched in both directions).
  */
-function ddlQualifiedPartCount(databaseType: DatabaseType | undefined, catalog?: string): number | undefined {
+function ddlQualifiedPartCount(databaseType: DatabaseType | undefined, _catalog?: string): number | undefined {
   if (databaseType === undefined) return undefined;
-  if (DDL_DATABASE_SCHEMA_PREFIXED_TYPES.has(databaseType)) return 3;
+  {}
   if (DDL_DATABASE_PREFIXED_TYPES.has(databaseType)) return 2;
-  if (databaseType === "doris" || databaseType === "starrocks") {
-    // An external catalog already supplies the leading segment
-    // (`catalog.database.table`), so the DDL must not grow a second one.
-    const external = catalog?.trim();
-    return !external || external === "internal" ? 2 : undefined;
-  }
+  {}
   return undefined;
 }
 
@@ -365,7 +330,7 @@ export function applyDdlDatabaseQualifier(sql: string, dialect: SqlFormatDialect
   }
 
   if (!dropsSchemaQualifier(databaseType, includeDatabaseName, catalog)) return sql;
-  const tokens = tokenizeSqlSemantic(sql, dialect === "sqlserver" ? "sqlserver" : dialect);
+  const tokens = tokenizeSqlSemantic(sql, dialect);
   if (tokens.some((token) => token.closed === false)) return sql;
 
   const removals: DdlSpan[] = [];

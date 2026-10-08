@@ -4,7 +4,7 @@ import { useI18n } from "vue-i18n";
 import { useConnectionStore } from "@/stores/connectionStore";
 import * as api from "@/lib/backend/api";
 import type { ColumnGenerateConfig, TableGenerateConfig } from "@/lib/dataGrid/dataGenerate";
-import { defaultGeneratorParams, displayGeneratedValue, findGeneratorKey, formatGeneratedValue, generateTableData, supportsGeneratedMultiRowValues, UniqueValueGenerationError } from "@/lib/dataGrid/dataGenerate";
+import { defaultGeneratorParams, displayGeneratedValue, findGeneratorKey, formatGeneratedValue, generateTableData, UniqueValueGenerationError } from "@/lib/dataGrid/dataGenerate";
 import { qualifiedTableName, quoteTableIdentifier } from "@/lib/table/tableSelectSql";
 import { uniqueConstraintColumns } from "@/lib/table/uniqueConstraintColumns";
 import { isTauriRuntime } from "@/lib/backend/tauriRuntime";
@@ -547,7 +547,7 @@ const generateOptions = reactive({
   timeoutSecs: 0,
   batchRows: DEFAULT_BATCH_ROWS,
 });
-const supportsExtendedInsert = computed(() => supportsGeneratedMultiRowValues(dbType.value));
+const supportsExtendedInsert = computed(() => true);
 watch(
   supportsExtendedInsert,
   (supported) => {
@@ -582,7 +582,7 @@ function sqlStatementsForTable(r: GeneratedTableResult): string[] {
   if (generateOptions.truncate) {
     stmts.push(`TRUNCATE TABLE ${targetTable};`);
   }
-  if (generateOptions.extendedInsert || !supportsGeneratedMultiRowValues(dbType.value)) {
+  if (generateOptions.extendedInsert) {
     stmts.push(...r.statements);
   } else {
     const colList = r.columns.map((c) => quoteTableIdentifier(dbType.value, c)).join(", ");

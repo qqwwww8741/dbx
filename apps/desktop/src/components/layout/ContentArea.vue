@@ -4,8 +4,7 @@ import { safeLocalStorageGet, safeLocalStorageSet } from "@/lib/backend/safeStor
 import { appendDebugLog, isDebugLoggingEnabled } from "@/lib/backend/debugLog";
 import { canReloadUnavailableDataTab, restoredDataTabReloadFilters } from "@/lib/table/tableDataRefresh";
 import { defaultViewForResult } from "@/lib/query/queryResultDefaultView";
-import { extractNeo4jNodeCells, projectNeo4jNodeResult } from "@/lib/neo4j/neo4jNodeResult";
-import { useNeo4jNodeTableResult } from "@/composables/useNeo4jNodeTableResult";
+
 import { queryResultMessages } from "@/lib/query/queryResultMessages";
 import { isQueryExecutionErrorResult } from "@/lib/query/queryResultError";
 import { hasQueryOutput as tabHasQueryOutput } from "@/lib/query/queryOutput";
@@ -102,46 +101,17 @@ function preloadDataGridComponent() {
 
 const QueryEditor = defineAsyncComponent({ loader: () => import("@/components/editor/QueryEditor.vue"), loadingComponent: QueryLoadingState, delay: 0 });
 const DataGrid = defineAsyncComponent(loadDataGridComponent);
-const RedisKeyBrowser = defineAsyncComponent(() => import("@/components/redis/RedisKeyBrowser.vue"));
-const RedisQueryConsoleOutput = defineAsyncComponent(() => import("@/components/redis/RedisQueryConsoleOutput.vue"));
-const RedisDashboard = defineAsyncComponent(() => import("@/components/redis/RedisDashboard.vue"));
-const EtcdKeyBrowser = defineAsyncComponent(() => import("@/components/etcd/EtcdKeyBrowser.vue"));
-const EtcdDashboard = defineAsyncComponent(() => import("@/components/etcd/EtcdDashboard.vue"));
-const EtcdAccessControl = defineAsyncComponent(() => import("@/components/etcd/EtcdAccessControl.vue"));
-const ZooKeeperKeyBrowser = defineAsyncComponent(() => import("@/components/zookeeper/ZooKeeperKeyBrowser.vue"));
-const ConsulOverview = defineAsyncComponent(() => import("@/components/consul/ConsulOverview.vue"));
-const ConsulWorkspace = defineAsyncComponent(() => import("@/components/consul/ConsulWorkspace.vue"));
-const DocumentBrowser = defineAsyncComponent(() => import("@/components/document/DocumentBrowser.vue"));
-const MeilisearchIndexView = defineAsyncComponent(() => import("@/components/meilisearch/MeilisearchIndexView.vue"));
-const MeilisearchSystemWorkspace = defineAsyncComponent(() => import("@/components/meilisearch/MeilisearchSystemWorkspace.vue"));
-const MongoGridFsBrowser = defineAsyncComponent(() => import("@/components/document/MongoGridFsBrowser.vue"));
-const MongoBucketBrowser = defineAsyncComponent(() => import("@/components/document/MongoBucketBrowser.vue"));
-const VectorBrowser = defineAsyncComponent(() => import("@/components/vector/VectorBrowser.vue"));
-const HBaseBrowser = defineAsyncComponent(() => import("@/components/hbase/HBaseBrowser.vue"));
-const ElasticsearchJsonResponsePanel = defineAsyncComponent(() => import("@/components/common/ElasticsearchJsonResponsePanel.vue"));
-const ElasticsearchProfilePanel = defineAsyncComponent(() => import("@/components/common/ElasticsearchProfilePanel.vue"));
-const MqAdminConsole = defineAsyncComponent(() => import("@/components/mq/MqAdminConsole.vue"));
-const MqttAdminConsole = defineAsyncComponent(() => import("@/components/mqtt/MqttAdminConsole.vue"));
-const NacosAdminConsole = defineAsyncComponent(() => import("@/components/nacos/NacosAdminConsole.vue"));
-const NacosAccessControlConsole = defineAsyncComponent(() => import("@/components/nacos/NacosAccessControlConsole.vue"));
-const NacosDashboard = defineAsyncComponent(() => import("@/components/nacos/NacosDashboard.vue"));
-const DoltVersionControl = defineAsyncComponent(() => import("@/components/dolt/DoltVersionControl.vue"));
+
 const DatabaseSearchPanel = defineAsyncComponent(() => import("@/components/search/DatabaseSearchPanel.vue"));
 const DatabaseBrowser = defineAsyncComponent(() => import("@/components/objects/DatabaseBrowser.vue"));
 const ObjectBrowser = defineAsyncComponent(() => import("@/components/objects/ObjectBrowser.vue"));
 const TableStructureEditor = defineAsyncComponent(() => import("@/components/structure/TableStructureEditor.vue"));
 const DatabaseUserAdmin = defineAsyncComponent(() => import("@/components/admin/DatabaseUserAdmin.vue"));
-const XuguUserPermissions = defineAsyncComponent(() => import("@/components/admin/XuguUserPermissions.vue"));
-const ProcessListPanel = defineAsyncComponent(() => import("@/components/admin/ProcessListPanel.vue"));
-const SqlServerActivityTracePanel = defineAsyncComponent(() => import("@/components/admin/SqlServerActivityTracePanel.vue"));
-const MySqlDashboard = defineAsyncComponent(() => import("@/components/admin/MySqlDashboard.vue"));
-const PostgresDashboard = defineAsyncComponent(() => import("@/components/admin/PostgresDashboard.vue"));
-const XuguServerDashboard = defineAsyncComponent(() => import("@/components/admin/XuguServerDashboard.vue"));
-const DamengJobAdmin = defineAsyncComponent(() => import("@/components/admin/DamengJobAdmin.vue"));
 
-const DamengUserAdmin = defineAsyncComponent(() => import("@/components/admin/DamengUserAdmin.vue"));
-const DamengRoleAdmin = defineAsyncComponent(() => import("@/components/admin/DamengRoleAdmin.vue"));
-const SolrAdmin = defineAsyncComponent(() => import("@/components/solr/SolrAdmin.vue"));
+const ProcessListPanel = defineAsyncComponent(() => import("@/components/admin/ProcessListPanel.vue"));
+
+const MySqlDashboard = defineAsyncComponent(() => import("@/components/admin/MySqlDashboard.vue"));
+
 const PluginFilesystemTab = defineAsyncComponent(() => import("@/components/plugins/PluginFilesystemTab.vue"));
 const ExplainPlanViewer = defineAsyncComponent(() => import("@/components/explain/ExplainPlanViewer.vue"));
 const QueryChart = defineAsyncComponent(() => import("@/components/chart/QueryChart.vue"));
@@ -185,9 +155,8 @@ import * as api from "@/lib/backend/api";
 import type { SqlInsertMode } from "@/lib/export/sqlInsertMode";
 import { promptExportSavePath } from "@/lib/export/exportPath";
 import { queryResultExportBaseName } from "@/lib/export/saveTextFile";
-import { applyMongoGridChangesToDocument, applyMongoGridChangesToDocumentBaseline, serializeMongoDocumentId, type MongoInputValue } from "@/lib/mongo/mongoDocumentValues";
-import { buildMongoQueryResultOperations, formatMongoQueryResultOperationPreview } from "@/lib/mongo/mongoQueryResultEditing";
-import { buildInfluxDbV1DeleteStatements, canDeleteInfluxDbV1Row, resolveInfluxDbV1DeleteTarget } from "@/lib/influxdb/influxDbV1Delete";
+
+import { buildInfluxDbV1DeleteStatements, resolveInfluxDbV1DeleteTarget } from "@/lib/influxdb/influxDbV1Delete";
 import type { DataGridSortMode } from "@/lib/dataGrid/dataGridSort";
 import { isDataGridToolbarCompact, type DataGridReloadIntent, type DataGridToolbarActionCapability } from "@/lib/dataGrid/dataGridToolbar";
 import { useTabScroll } from "@/composables/useTabScroll";
@@ -198,13 +167,13 @@ import { loadObjectDdl } from "@/lib/metadata/objectDdlCache";
 import { formatDdlForDisplay } from "@/lib/sql/ddlDisplay";
 import { sqlObjectNavigationTypeFromTableType } from "@/lib/sql/sqlNavigation";
 import type { CustomSaveHandler } from "@/composables/useDataGridEditor";
-import type { QueryMessage, QueryResult, QueryTab, RedisResultViewMode, TableInfoTab, TreeNode, VectorCollectionMeta } from "@/types/database";
+import type { QueryMessage, QueryResult, QueryTab, RedisResultViewMode, TableInfoTab } from "@/types/database";
 import type { SqlObjectNavigationTarget } from "@/lib/sql/sqlNavigation";
 import { sqlFormatDialectForDbType, type SqlFormatDialect } from "@/lib/sql/sqlFormatter";
 import { productionContextForDatabase } from "@/lib/database/productionSafety";
 import { sqlStatementParameterOptionsForCompatibility } from "@/lib/sql/sqlStatementRanges";
-import { connectionIsEffectivelyReadOnly } from "@/lib/database/readOnlyWriteAccess";
-import { isAiRedisConsoleTarget, type AiConversationBinding } from "@/lib/ai/aiConversationBinding";
+
+import { type AiConversationBinding } from "@/lib/ai/aiConversationBinding";
 
 type DataGridHandle = DataGridColumnLayoutHandle & {
   tableInfoToolbarCapability: DataGridToolbarActionCapability;
@@ -281,15 +250,6 @@ provideTabUiState(() => {
   const mode = tab.mode;
   return { snapshot: tab.uiState?.page?.[mode] ?? {}, update: (patch) => queryStore.updateTabPageUiState(tab.id, mode, patch, tab) };
 });
-const canAccessEtcdAdmin = computed(() => connectionStore.getEtcdAccessCapabilities(props.activeTab.connectionId).admin);
-watch(
-  () => [props.activeTab.connectionId, props.activeTab.mode] as const,
-  ([connectionId, mode]) => {
-    if (mode !== "etcd-dashboard" && mode !== "etcd-access-control") return;
-    void connectionStore.ensureEtcdAccessCapabilities(connectionId, { force: true, verifyHealth: false }).catch(() => undefined);
-  },
-  { immediate: true },
-);
 
 function groupedQueryReadonlyColumnIndexes(tab: QueryTab): number[] | undefined {
   if (!tab.queryAnalysis?.groupByColumns?.length || !tab.querySourceColumns || !tab.tableMeta?.primaryKeys.length) return undefined;
@@ -357,19 +317,12 @@ const dataGridRowNumberMode = computed(() => settingsStore.editorSettings.dataGr
 const resultRunDisplayMode = computed(() => settingsStore.editorSettings.resultRunDisplayMode);
 const columnWidthDensity = computed(() => settingsStore.editorSettings.columnWidthDensity);
 const tableFontSize = computed(() => settingsStore.editorSettings.tableFontSize);
-const redisKeyBrowserRef = ref<SearchableBrowserHandle>();
-const documentBrowserRef = ref<SearchableBrowserHandle>();
 
 function openDataGridExtractorConfiguration() {
   dataGridViewOptionsOpen.value = false;
   void nextTick(() => dataGridRef.value?.openExtractorConfiguration());
 }
 
-const etcdKeyBrowserRef = ref<SearchableBrowserHandle>();
-const etcdDashboardRef = ref<{ refresh?: () => boolean }>();
-const zookeeperKeyBrowserRef = ref<SearchableBrowserHandle>();
-const consulOverviewRef = ref<{ refresh?: () => boolean }>();
-const consulWorkspaceRef = ref<SearchableBrowserHandle>();
 const databaseSearchPanelRef = ref<{ focusSearch: () => boolean }>();
 const databaseBrowserRef = ref<SearchableBrowserHandle>();
 const objectBrowserRef = ref<SearchableBrowserHandle>();
@@ -393,28 +346,15 @@ const activeResultSchema = computed(() => activeResultExecutionTarget.value?.sch
 const activeEffectiveDatabaseType = computed(() => effectiveDatabaseTypeForConnection(activeResultConnection.value));
 // 表数据工具箱的「导入数据」与侧边栏、对象浏览器共用同一条能力判断：未适配导入的引擎（如 HANA）不出现入口。
 const canOpenTableImport = computed(() => supportsTableImport(activeEffectiveDatabaseType.value));
-const activeVectorConnection = computed(() => connectionStore.getConfig(props.activeTab.connectionId) ?? props.activeConnection);
+
 const activeDataTabExecutionDatabase = computed(() => dataTabExecutionDatabase(props.activeConnection, props.activeTab.database, activeDataTabTableMeta.value?.catalog));
-const activeSqlStatementParameterOptions = computed(() =>
-  sqlStatementParameterOptionsForCompatibility(activeEffectiveDatabaseType.value, activeEffectiveDatabaseType.value === "opengauss" ? connectionStore.databaseCompatibilityMode(activeResultConnectionId.value, activeResultDatabase.value) : undefined),
-);
+const activeSqlStatementParameterOptions = computed(() => sqlStatementParameterOptionsForCompatibility(activeEffectiveDatabaseType.value, undefined));
 const activeProductionContext = computed(() => productionContextForDatabase(props.activeConnection, props.activeTab.database));
 const productionSessionDetail = computed(() => {
   if (!activeProductionContext.value.active) return "";
   if (activeProductionContext.value.reason === "connection") return t("production.connection");
   return activeProductionContext.value.databases.join(", ") || t("production.databases");
 });
-
-function findNodeInTree(nodes: TreeNode[], id: string): TreeNode | undefined {
-  for (const node of nodes) {
-    if (node.id === id) return node;
-    if (node.children) {
-      const found = findNodeInTree(node.children, id);
-      if (found) return found;
-    }
-  }
-  return undefined;
-}
 
 function setDataGridRenderMode(value: "canvas" | "dom") {
   settingsStore.updateEditorSettings({ dataGridRenderMode: value });
@@ -458,19 +398,9 @@ function increaseTableFontSize() {
  *  comment or `schema.table`) names exports, matching the result tab (#9894). */
 const activeQueryResultExportBaseName = computed(() => queryResultExportBaseName(props.activeTab.result?.sourceLabel, props.activeTab.title));
 
-const activeTabDimension = computed(() => {
-  const tab = props.activeTab;
-  if (!tab.connectionId || tab.mode !== "vector") return undefined;
-  const isMilvus = connectionStore.getConfig(tab.connectionId)?.db_type === "milvus";
-  const suffix = isMilvus && tab.database ? `${tab.database}:${tab.sql}` : tab.sql;
-  const nodeId = `${tab.connectionId}:__vector_collection:${suffix}`;
-  const meta = findNodeInTree(connectionStore.treeNodes, nodeId)?.meta;
-  return meta && "dimension" in meta ? (meta as VectorCollectionMeta).dimension : undefined;
-});
-
 const activeSqlFormatDialect = computed<SqlFormatDialect>(() => sqlFormatDialectForDbType(activeEffectiveDatabaseType.value));
 
-const editorDialect = computed<"mysql" | "postgres" | "sqlserver">(() => codeMirrorSqlDialect(activeEffectiveDatabaseType.value));
+const editorDialect = computed<"mysql">(() => codeMirrorSqlDialect(activeEffectiveDatabaseType.value));
 const editorSyntaxDialect = computed<CodeMirrorSqlDialectName>(() => codeMirrorSqlDialectForConnection(props.activeConnection));
 
 const shortcutModifier = computed(() => (navigator.platform.toLowerCase().includes("mac") ? "Cmd" : "Ctrl"));
@@ -525,7 +455,7 @@ const tabularResults = computed(() => tabularResultItems(props.activeTab.results
 const allResultExportSheets = computed(() =>
   tabularResults.value.map((item) => ({
     sheetName: item.label || t("tabs.resultN", { n: item.n }),
-    result: activeEffectiveDatabaseType.value === "neo4j" ? projectNeo4jNodeResult(item.result) : item.result,
+    result: item.result,
     sql: item.index === props.activeTab.activeResultIndex ? queryResultExecutionSql(props.activeTab) : item.result.sourceStatement,
   })),
 );
@@ -619,25 +549,21 @@ const resultRunFallbackLabel = (sequence: number) => t(resultTabNamingMode.value
 const activeResultGridCacheKey = computed(() => resultGridCacheKey(props.activeTab));
 const activeResultGridColumnWidthCacheKey = computed(() => resultGridColumnWidthCacheKey(props.activeTab));
 const activeResultGridInstanceKey = computed(() => resultGridInstanceKey(props.activeTab));
-const hasNeo4jNodes = computed(() => activeEffectiveDatabaseType.value === "neo4j" && !!props.activeTab.result?.neo4j_node_cells?.length);
-const neo4jNodeTable = useNeo4jNodeTableResult(
-  computed(() => props.activeTab.result),
-  activeResultGridInstanceKey,
-);
-const activeGridResult = computed(() => (hasNeo4jNodes.value ? neo4jNodeTable.result.value : props.activeTab.result));
-const activeGridSort = computed(() => (hasNeo4jNodes.value ? neo4jNodeTable.sort.value : undefined));
+const hasNeo4jNodes = computed(() => false);
+
+const activeGridResult = computed(() => props.activeTab.result);
 
 function sortQueryGrid(column: string, columnIndex: number, direction: "asc" | "desc" | null, whereInput?: string, mode?: DataGridSortMode, effectiveOrderBy?: string) {
-  if (hasNeo4jNodes.value) neo4jNodeTable.setSort(column, columnIndex, direction);
-  else emit("sort", props.activeTab.id, column, columnIndex, direction, whereInput, mode, effectiveOrderBy);
+  {
+    emit("sort", props.activeTab.id, column, columnIndex, direction, whereInput, mode, effectiveOrderBy);
+  }
 }
 
 async function fetchGridResultForExport(onProgress?: (info: { rowsExported: number; totalRows: number | null }) => void) {
-  const isNeo4j = activeEffectiveDatabaseType.value === "neo4j";
   const result = await queryStore.fetchTabResultForExport(props.activeTab.id, onProgress);
-  if (!result || !isNeo4j) return result;
-  extractNeo4jNodeCells(result);
-  return projectNeo4jNodeResult(result);
+  {
+    return result;
+  }
 }
 const activeResultSql = computed(() => resultSqlForGrid(props.activeTab));
 const activeResultExportSql = computed(() => queryResultExecutionSql(props.activeTab));
@@ -655,8 +581,9 @@ const activeStatementExecutionMarkers = computed(() =>
 const activeElasticsearchJsonResponse = computed(() => elasticsearchJsonResponseForResult(activeEffectiveDatabaseType.value, activeResultSql.value, props.activeTab.result));
 /** Whether the active result is an Elasticsearch _source table that also has a raw JSON toggle. */
 const activeElasticsearchRawBody = computed(() => {
-  if (activeEffectiveDatabaseType.value !== "elasticsearch" && activeEffectiveDatabaseType.value !== "easysearch" && activeEffectiveDatabaseType.value !== "solr") return undefined;
-  return props.activeTab.result?.elasticsearch_raw_body;
+  {
+    return undefined;
+  }
 });
 /** ES `_search?profile=true` body extracted from the active result, when present. */
 const activeElasticsearchProfileBody = computed(() => elasticsearchProfileBodyForResult(activeEffectiveDatabaseType.value, props.activeTab.result));
@@ -735,9 +662,9 @@ const hasTabularResult = computed(() => {
   if (props.activeTab.result?.columns.length && props.activeTab.result.server_message !== true) return true;
   return visibleResultItems.value.length > 0;
 });
-const redisConsoleResults = computed(() => (props.activeTab.results?.length ? props.activeTab.results : props.activeTab.result ? [props.activeTab.result] : []));
-const canShowRedisConsoleOutput = computed(() => activeEffectiveDatabaseType.value === "redis" && (props.activeTab.isExecuting || redisConsoleResults.value.some((result) => result.execution_error === true || typeof result.redis_console_output === "string")));
-const redisResultViewMode = computed<RedisResultViewMode>(() => (activeEffectiveDatabaseType.value === "redis" ? (props.activeTab.uiState?.redisResultViewMode ?? "grid") : "grid"));
+
+const canShowRedisConsoleOutput = computed(() => false);
+const redisResultViewMode = computed<RedisResultViewMode>(() => "grid");
 const canShowResultOutput = computed(() => hasTabularResult.value || props.activeTab.isExecuting);
 const canShowExplainOutput = computed(() => !!props.activeTab.explainPlan || !!props.activeTab.explainError || !!props.activeTab.explainTableResult || !!props.activeTab.explainTableError || props.activeTab.isExplaining === true);
 // A batch can attach server messages to more than one statement result (for
@@ -751,7 +678,7 @@ const resultMessages = computed<QueryMessage[]>(() => {
 });
 const resultMessageCount = computed(() => resultMessages.value.length);
 const canShowMessagesOutput = computed(() => resultMessageCount.value > 0);
-const showStandaloneResultToolbar = computed(() => activeElasticsearchJsonResponse.value || props.activeOutputView !== "result" || (redisResultViewMode.value === "console" && canShowRedisConsoleOutput.value) || !props.activeTab.result || !hasTabularResult.value);
+const showStandaloneResultToolbar = computed(() => activeElasticsearchJsonResponse.value || props.activeOutputView !== "result" || !props.activeTab.result || !hasTabularResult.value);
 const standaloneResultToolbarCompact = computed(() => isDataGridToolbarCompact(standaloneResultToolbarWidth.value, standaloneResultToolbarViewportWidth.value));
 let standaloneResultToolbarResizeObserver: ResizeObserver | undefined;
 
@@ -760,9 +687,10 @@ function updateStandaloneResultToolbarDimensions() {
   standaloneResultToolbarViewportWidth.value = typeof window === "undefined" ? 0 : window.innerWidth;
 }
 
-function setRedisResultViewMode(mode: RedisResultViewMode) {
-  if (activeEffectiveDatabaseType.value !== "redis") return;
-  queryStore.updateTabUiState(props.activeTab.id, { redisResultViewMode: mode });
+function setRedisResultViewMode(_mode: RedisResultViewMode) {
+  {
+    return;
+  }
 }
 
 function observeStandaloneResultToolbar() {
@@ -777,64 +705,11 @@ function observeStandaloneResultToolbar() {
 }
 
 watch(standaloneResultToolbarRef, observeStandaloneResultToolbar, { flush: "post" });
-type MongoQueryGridChanges = {
-  dirtyRows: Map<number, Map<number, MongoInputValue>>;
-  deletedRows: Set<number>;
-  newRows: MongoInputValue[][];
-  columns: string[];
-  rows: MongoInputValue[][];
-};
+
 const mongoQueryResultSaveHandler = computed<CustomSaveHandler | undefined>(() => {
-  const tab = props.activeTab;
-  const target = tab.mongoEditTarget;
-  if (tab.mode !== "query" || activeEffectiveDatabaseType.value !== "mongodb" || !target || !activeResultConnectionId.value || !activeResultDatabase.value || !tab.result) return undefined;
-  if (!tab.result.columns.includes(target.idColumn)) return undefined;
-
-  const editTarget = { idColumn: target.idColumn, documentAt: (rowIdx: number) => tab.result?.mongo_documents?.[rowIdx] };
-
-  const save: CustomSaveHandler["save"] = async (changes: MongoQueryGridChanges) => {
-    if (changes.newRows.length > 0) {
-      throw new Error("MongoDB query result editing does not support inserting rows.");
-    }
-    if (!changes.columns.includes(target.idColumn)) throw new Error("No _id column");
-    for (const operation of buildMongoQueryResultOperations(changes, editTarget)) {
-      const id = serializeMongoDocumentId(operation.id);
-      if (operation.kind === "delete") {
-        await api.mongoDeleteDocument(activeResultConnectionId.value, activeResultDatabase.value, target.collection, id);
-      } else {
-        await api.mongoUpdateDocument(activeResultConnectionId.value, activeResultDatabase.value, target.collection, id, JSON.stringify(operation.update));
-      }
-    }
-  };
-
-  const preview: CustomSaveHandler["preview"] = async (changes: MongoQueryGridChanges) => buildMongoQueryResultOperations(changes, editTarget).map((operation) => formatMongoQueryResultOperationPreview(target.collection, operation));
-
-  const applySavedChanges: NonNullable<CustomSaveHandler["applySavedChanges"]> = ({ dirtyRows, columns }) => {
-    const documents = tab.result?.mongo_documents;
-    if (!documents) return;
-
-    // Replace the raw array only after every backend update succeeds, keeping
-    // the grid and JSON preview atomic when a multi-row save partially fails.
-    if (tab.resultLocalSortOriginalMongoDocuments) {
-      tab.resultLocalSortOriginalMongoDocuments = applyMongoGridChangesToDocumentBaseline(tab.resultLocalSortOriginalMongoDocuments, documents, dirtyRows, columns);
-    }
-    tab.result!.mongo_documents = documents.map((document, rowIdx) => {
-      const changes = dirtyRows.get(rowIdx);
-      return changes ? applyMongoGridChangesToDocument(document, changes, columns) : document;
-    });
-    const copyDocuments = tab.result!.mongo_copy_documents;
-    if (copyDocuments) {
-      if (tab.resultLocalSortOriginalMongoCopyDocuments) {
-        tab.resultLocalSortOriginalMongoCopyDocuments = applyMongoGridChangesToDocumentBaseline(tab.resultLocalSortOriginalMongoCopyDocuments, copyDocuments, dirtyRows, columns);
-      }
-      tab.result!.mongo_copy_documents = copyDocuments.map((document, rowIdx) => {
-        const changes = dirtyRows.get(rowIdx);
-        return changes ? applyMongoGridChangesToDocument(document, changes, columns) : document;
-      });
-    }
-  };
-
-  return { save, preview, applySavedChanges, canInsert: false, canDelete: true, supportsInsert: false, readonlyColumns: [target.idColumn], targetLabel: target.collection };
+  {
+    return undefined;
+  }
 });
 const influxDbV1DeleteSaveHandler = computed<CustomSaveHandler | undefined>(() => {
   const tab = props.activeTab;
@@ -867,7 +742,7 @@ const influxDbV1DeleteSaveHandler = computed<CustomSaveHandler | undefined>(() =
     canInsert: false,
     canUpdate: false,
     canDelete: true,
-    canDeleteRow: (_sourceIndex, row) => canDeleteInfluxDbV1Row(target, row),
+    canDeleteRow: (_sourceIndex, _row) => false,
     confirmation: "influxdb-v1-delete",
     reloadOnFailure: true,
     supportsInsert: false,
@@ -1150,7 +1025,6 @@ function onHandleClickTable(target: SqlObjectNavigationTarget) {
 }
 
 function onLocateObjectTable(target: ContentAreaSurfaceEmits["openObjectTable"][1]) {
-  const isMongo = props.activeConnection?.db_type === "mongodb";
   emit("locate-tab", {
     id: props.activeTab.id,
     title: target.tableName,
@@ -1158,8 +1032,8 @@ function onLocateObjectTable(target: ContentAreaSurfaceEmits["openObjectTable"][
     database: props.activeTab.database,
     schema: target.schema,
     catalog: target.catalog,
-    mode: isMongo ? "mongo" : "data",
-    sql: isMongo ? target.tableName : "",
+    mode: "data",
+    sql: "",
     isExecuting: false,
     tableMeta: { ...target, columns: [], primaryKeys: [] },
   });
@@ -1278,11 +1152,11 @@ function onHandleCloseColumnPanel() {
 
 function focusSearch(target: Element | null = null): boolean {
   if (elasticsearchJsonResponsePanelRef.value?.focusSearch()) return true;
-  if (props.activeTab.mode === "mongo") return documentBrowserRef.value?.focusSearch() ?? false;
-  if (props.activeTab.mode === "redis") return redisKeyBrowserRef.value?.focusSearch() ?? false;
-  if (props.activeTab.mode === "etcd") return etcdKeyBrowserRef.value?.focusSearch() ?? false;
-  if (props.activeTab.mode === "zookeeper") return zookeeperKeyBrowserRef.value?.focusSearch() ?? false;
-  if (props.activeTab.mode === "consul") return consulWorkspaceRef.value?.focusSearch() ?? false;
+  {}
+  {}
+  {}
+  {}
+  {}
   if (props.activeTab.mode === "databases") return databaseBrowserRef.value?.focusSearch() ?? false;
   if (props.activeTab.mode === "database-search") return databaseSearchPanelRef.value?.focusSearch() ?? false;
   if (props.activeTab.mode === "objects") return objectBrowserRef.value?.focusSearch(target) ?? false;
@@ -1334,11 +1208,11 @@ watch(
 function refreshData(): boolean {
   // Reuse ObjectBrowser's reload path so schema reloads and stale object-response guards stay intact.
   if (props.activeTab.mode === "objects") return objectBrowserRef.value?.refresh?.() ?? false;
-  if (props.activeTab.mode === "etcd") return etcdKeyBrowserRef.value?.refresh?.() ?? false;
-  if (props.activeTab.mode === "etcd-dashboard") return etcdDashboardRef.value?.refresh?.() ?? false;
-  if (props.activeTab.mode === "zookeeper") return zookeeperKeyBrowserRef.value?.refresh?.() ?? false;
-  if (props.activeTab.mode === "consul-overview") return consulOverviewRef.value?.refresh?.() ?? false;
-  if (props.activeTab.mode === "consul") return consulWorkspaceRef.value?.refresh?.() ?? false;
+  {}
+  {}
+  {}
+  {}
+  {}
   if (props.activeTab.mode === "databases") return databaseBrowserRef.value?.refresh?.() ?? false;
   if (props.activeTab.mode === "plugin-filesystem") {
     void pluginFilesystemTabRef.value?.refresh();
@@ -1697,18 +1571,20 @@ function applyTableStructureChanges() {
 
 // The Redis console is bound to the visible tab and logical database. Refuse
 // any other AI target before passing a command to the key browser (#9902).
-function isRedisConsoleReady(target: AiConversationBinding): boolean {
-  return isAiRedisConsoleTarget(props.activeTab, target) && !!redisKeyBrowserRef.value;
+function isRedisConsoleReady(_target: AiConversationBinding): boolean {
+  return false;
 }
 
-async function insertRedisCommand(command: string, target: AiConversationBinding): Promise<boolean> {
-  if (!isRedisConsoleReady(target)) return false;
-  return (await redisKeyBrowserRef.value?.insertCommand?.(command)) ?? false;
+async function insertRedisCommand(_command: string, _target: AiConversationBinding): Promise<boolean> {
+  {
+    return false;
+  }
 }
 
-async function executeRedisCommand(command: string, target: AiConversationBinding): Promise<boolean> {
-  if (!isRedisConsoleReady(target)) return false;
-  return (await redisKeyBrowserRef.value?.executeCommand?.(command)) ?? false;
+async function executeRedisCommand(_command: string, _target: AiConversationBinding): Promise<boolean> {
+  {
+    return false;
+  }
 }
 
 function previewStatementRange(range: { from: number; to: number } | null): boolean {
@@ -1923,15 +1799,7 @@ defineExpose({
               @click-column="onHandleClickColumn"
               @close-column-panel="onHandleCloseColumnPanel"
             />
-            <ColumnInfoPanel
-              v-if="showColumnInfo"
-              :columns="columnInfoColumns"
-              :loading="columnInfoLoading"
-              :error="columnInfoError"
-              :database-type="activeEffectiveDatabaseType"
-              :is-gaussdb-m="activeEffectiveDatabaseType === 'gaussdb' && activeResultConnection?.driver_profile?.toLowerCase() === 'gaussdb-m'"
-              @close="closeColumnInfo"
-            />
+            <ColumnInfoPanel v-if="showColumnInfo" :columns="columnInfoColumns" :loading="columnInfoLoading" :error="columnInfoError" :database-type="activeEffectiveDatabaseType" :is-gaussdb-m="false" @close="closeColumnInfo" />
             <Button v-if="!editorOnly && hasQueryOutput && !resultsPaneOpen" variant="secondary" size="sm" class="absolute bottom-3 right-3 z-20 h-7 gap-1.5 rounded-full border bg-background/95 px-3 text-xs shadow-lg hover:bg-accent" @click="resultsPaneOpen = true">
               <ChevronUp class="h-3.5 w-3.5" />
               {{ t("editor.showResultsPane") }}
@@ -2053,7 +1921,7 @@ defineExpose({
                 />
               </template>
               <div class="ml-auto flex shrink-0 items-center gap-1">
-                <template v-if="activeOutputView === 'result' && redisResultViewMode === 'grid' && activeTab.result && hasTabularResult && !activeElasticsearchJsonResponse && !showElasticsearchRawJson">
+                <template v-if="activeOutputView === 'result' && redisResultViewMode === 'grid' && activeTab.result && hasTabularResult && !activeElasticsearchJsonResponse">
                   <DataGridColumnLayoutPopover :grid="dataGridRef" trigger-class="px-1.5" />
                   <LightTooltip v-if="dataGridRef?.goToColumnToolbarCapability?.visible" :text="dataGridRef.goToColumnToolbarCapability.tooltip ?? dataGridRef.goToColumnToolbarCapability.label" side="bottom" nowrap>
                     <Button
@@ -2406,8 +2274,6 @@ defineExpose({
               :default-view="settingsStore.editorSettings.defaultExplainView"
             />
 
-            <ElasticsearchProfilePanel v-else-if="activeOutputView === 'profile' && canShowProfile" class="flex-1 min-h-0" :body="activeElasticsearchProfileBody ?? ''" />
-
             <QueryChart v-else-if="activeOutputView === 'chart' && activeTab.result && !activeElasticsearchJsonResponse" class="flex-1 min-h-0" :result="activeTab.result" />
 
             <div v-else-if="activeOutputView === 'summary'" class="flex flex-1 min-h-0 min-w-0 overflow-auto bg-background">
@@ -2523,15 +2389,11 @@ defineExpose({
               </div>
             </div>
 
-            <RedisQueryConsoleOutput v-else-if="activeOutputView === 'result' && redisResultViewMode === 'console' && canShowRedisConsoleOutput" :result="activeTab.result" :results="activeTab.results" :loading="activeTab.isExecuting" />
-
             <QueryMessagesView v-else-if="activeOutputView === 'messages'" class="flex-1 min-h-0" :messages="resultMessages" />
 
             <template v-else>
-              <ElasticsearchJsonResponsePanel v-if="activeElasticsearchJsonResponse" ref="elasticsearchJsonResponsePanelRef" class="flex-1 min-h-0" :status="activeElasticsearchJsonResponse.status" :body="activeElasticsearchJsonResponse.body" />
-              <ElasticsearchJsonResponsePanel v-else-if="showElasticsearchRawJson && activeElasticsearchRawBody" ref="elasticsearchJsonResponsePanelRef" class="flex-1 min-h-0" :status="200" :body="activeElasticsearchRawBody" can-show-table @show-table="showElasticsearchRawJson = false" />
               <DataGrid
-                v-else-if="activeTab.result && hasTabularResult"
+                v-if="activeTab.result && hasTabularResult"
                 ref="dataGridRef"
                 :key="activeResultGridInstanceKey"
                 :cache-key="activeResultGridCacheKey"
@@ -2540,23 +2402,23 @@ defineExpose({
                 :view-generation="activeTab.resultViewGeneration"
                 class="flex-1 min-h-0"
                 :result="activeGridResult!"
-                :sort-column="hasNeo4jNodes ? activeGridSort?.column : activeTab.resultSortColumn"
-                :sort-column-index="hasNeo4jNodes ? activeGridSort?.columnIndex : activeTab.resultSortColumnIndex"
-                :sort-direction="hasNeo4jNodes ? activeGridSort?.direction : activeTab.resultSortDirection"
-                :sort-mode="hasNeo4jNodes ? 'local' : activeTab.resultSortMode"
+                :sort-column="activeTab.resultSortColumn"
+                :sort-column-index="activeTab.resultSortColumnIndex"
+                :sort-direction="activeTab.resultSortDirection"
+                :sort-mode="activeTab.resultSortMode"
                 :database-sort-enabled="!hasNeo4jNodes"
                 :initial-order-by-input="activeTab.orderByInput"
                 :sql="activeResultSql"
                 :export-sql="activeResultExportSql"
                 :page-sql="activeTab.resultPageSql"
                 :loading="activeResultIsLoading"
-                :editable="!hasNeo4jNodes && (!!activeTab.queryAnalysis || !!mongoQueryResultSaveHandler)"
-                :source-columns="hasNeo4jNodes ? undefined : activeTab.querySourceColumns"
-                :joined-write-targets="hasNeo4jNodes ? undefined : activeTab.queryWriteTargets"
+                :editable="!!activeTab.queryAnalysis || !!mongoQueryResultSaveHandler"
+                :source-columns="activeTab.querySourceColumns"
+                :joined-write-targets="activeTab.queryWriteTargets"
                 :query-multi-source="(activeTab.queryWriteTargets?.length ?? 0) > 1"
-                :readonly-column-indexes="hasNeo4jNodes ? undefined : groupedQueryReadonlyColumnIndexes(activeTab)"
-                :result-column-comments="hasNeo4jNodes ? undefined : activeTab.resultColumnComments"
-                :query-display-source-columns="hasNeo4jNodes ? undefined : activeTab.queryDisplaySourceColumns"
+                :readonly-column-indexes="groupedQueryReadonlyColumnIndexes(activeTab)"
+                :result-column-comments="activeTab.resultColumnComments"
+                :query-display-source-columns="activeTab.queryDisplaySourceColumns"
                 :custom-save-handler="mongoQueryResultSaveHandler"
                 :mongo-update-target="mongoQueryResultSaveHandler && activeTab.result.mongo_copy_documents?.length === activeTab.result.rows.length ? activeTab.mongoEditTarget : undefined"
                 :query-editability-reason="activeTab.queryEditabilityReason"
@@ -2572,7 +2434,7 @@ defineExpose({
                 :connection-id="activeResultConnectionId"
                 :database="activeResultDatabase"
                 :schema="activeResultSchema"
-                :table-meta="hasNeo4jNodes ? undefined : activeTab.tableMeta"
+                :table-meta="activeTab.tableMeta"
                 :table-info-tab="activeTab.tableInfoTab"
                 :page-offset="activeTab.resultPageOffset"
                 :page-limit="activeTab.resultPageLimit"
@@ -2587,18 +2449,16 @@ defineExpose({
                 :on-execute-sql="async (sql: string) => emit('executeSql', activeTab.id, sql)"
                 :full-export-result="fetchGridResultForExport"
                 :query-result-export-request="
-                  hasNeo4jNodes
-                    ? undefined
-                    : (options: {
-                        exportId: string;
-                        filePath: string;
-                        format: 'csv' | 'xlsx' | 'json' | 'txt' | 'sql';
-                        includeSqlSheet?: boolean;
-                        exportTableName?: string;
-                        exportColumnTypes?: Array<string | null | undefined>;
-                        exportColumnExtras?: Array<string | null | undefined>;
-                        insertMode?: SqlInsertMode;
-                      }) => queryStore.buildQueryResultExportRequest(activeTab.id, options)
+                  (options: {
+                    exportId: string;
+                    filePath: string;
+                    format: 'csv' | 'xlsx' | 'json' | 'txt' | 'sql';
+                    includeSqlSheet?: boolean;
+                    exportTableName?: string;
+                    exportColumnTypes?: Array<string | null | undefined>;
+                    exportColumnExtras?: Array<string | null | undefined>;
+                    insertMode?: SqlInsertMode;
+                  }) => queryStore.buildQueryResultExportRequest(activeTab.id, options)
                 "
                 :all-export-results="allResultExportSheets"
                 :export-file-base-name="activeQueryResultExportBaseName"
@@ -2632,11 +2492,11 @@ defineExpose({
                     <button
                       type="button"
                       class="inline-flex h-5 shrink-0 items-center rounded-sm border border-transparent px-2 text-xs leading-none transition-colors"
-                      :class="showElasticsearchRawJson ? 'bg-secondary text-secondary-foreground' : 'text-muted-foreground hover:text-foreground'"
+                      :class="'text-muted-foreground hover:text-foreground'"
                       :aria-pressed="showElasticsearchRawJson"
                       @click="showElasticsearchRawJson = !showElasticsearchRawJson"
                     >
-                      {{ showElasticsearchRawJson ? t("tabs.tableData") : t("redis.jsonView") }}
+                      {{ t("redis.jsonView") }}
                     </button>
                   </template>
                   <template v-else-if="canShowProfile">
@@ -3130,152 +2990,22 @@ defineExpose({
     </template>
 
     <!-- Redis mode: key browser -->
-    <template v-else-if="activeTab.mode === 'redis'">
-      <div class="flex-1 min-h-0">
-        <RedisKeyBrowser ref="redisKeyBrowserRef" :key="`${activeTab.id}:${activeTab.connectionId}:${activeTab.database}`" :connection-id="activeTab.connectionId" :db="Number(activeTab.database)" :block-dangerous-redis-commands="props.blockDangerousRedisCommands" :state-key="activeTab.id" />
-      </div>
-    </template>
 
     <!-- Redis Dashboard: instance info -->
-    <template v-else-if="activeTab.mode === 'redis-dashboard'">
-      <div class="flex-1 min-h-0">
-        <RedisDashboard :key="activeTab.id" :connection-id="activeTab.connectionId" />
-      </div>
-    </template>
 
     <!-- etcd mode: key browser -->
-    <template v-else-if="activeTab.mode === 'etcd'">
-      <div class="flex-1 min-h-0">
-        <EtcdKeyBrowser ref="etcdKeyBrowserRef" :key="activeTab.id" :connection-id="activeTab.connectionId" />
-      </div>
-    </template>
 
     <!-- etcd Dashboard: cluster observation -->
-    <template v-else-if="activeTab.mode === 'etcd-dashboard'">
-      <div class="flex-1 min-h-0">
-        <EtcdDashboard v-if="canAccessEtcdAdmin" ref="etcdDashboardRef" :key="activeTab.id" :connection-id="activeTab.connectionId" />
-        <div v-else class="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground"><ShieldAlert class="h-4 w-4" />{{ t("etcd.adminPermissionRequired") }}</div>
-      </div>
-    </template>
-
-    <template v-else-if="activeTab.mode === 'etcd-access-control'">
-      <div class="flex-1 min-h-0">
-        <EtcdAccessControl v-if="canAccessEtcdAdmin" :key="activeTab.id" :connection-id="activeTab.connectionId" />
-        <div v-else class="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground"><ShieldAlert class="h-4 w-4" />{{ t("etcd.adminPermissionRequired") }}</div>
-      </div>
-    </template>
-
-    <template v-else-if="activeTab.mode === 'nacos-access-control'">
-      <div class="flex-1 min-h-0">
-        <NacosAccessControlConsole :key="activeTab.id" :connection-id="activeTab.connectionId" :read-only="connectionIsEffectivelyReadOnly(activeConnection)" />
-      </div>
-    </template>
 
     <!-- ZooKeeper mode: znode browser -->
-    <template v-else-if="activeTab.mode === 'zookeeper'">
-      <div class="flex-1 min-h-0">
-        <ZooKeeperKeyBrowser ref="zookeeperKeyBrowserRef" :key="activeTab.id" :connection-id="activeTab.connectionId" />
-      </div>
-    </template>
-
-    <template v-else-if="activeTab.mode === 'consul-overview'">
-      <div class="flex-1 min-h-0">
-        <ConsulOverview ref="consulOverviewRef" :key="activeTab.id" :connection-id="activeTab.connectionId" />
-      </div>
-    </template>
 
     <!-- Consul management workspace -->
-    <template v-else-if="activeTab.mode === 'consul'">
-      <div class="flex-1 min-h-0">
-        <ConsulWorkspace ref="consulWorkspaceRef" :key="activeTab.id" :connection-id="activeTab.connectionId" />
-      </div>
-    </template>
 
     <!-- Document mode: MongoDB collections and Elasticsearch indices -->
-    <template v-else-if="activeTab.mode === 'mongo'">
-      <div class="flex-1 min-h-0">
-        <DocumentBrowser ref="documentBrowserRef" :key="`${activeTab.id}:${activeTab.sql}`" :connection-id="activeTab.connectionId" :database="activeTab.database" :collection="activeTab.sql" :database-type="activeEffectiveDatabaseType" :table-meta="activeTab.tableMeta" :state-key="activeTab.id" />
-      </div>
-    </template>
 
     <!-- Meilisearch index detail -->
-    <template v-else-if="activeTab.mode === 'meilisearch'">
-      <div class="flex-1 min-h-0">
-        <MeilisearchIndexView :key="activeTab.id" :connection-id="activeTab.connectionId" :index="activeTab.sql" />
-      </div>
-    </template>
-
-    <template v-else-if="activeTab.mode === 'meilisearch-system'">
-      <div class="flex-1 min-h-0">
-        <MeilisearchSystemWorkspace :key="activeTab.id" :connection-id="activeTab.connectionId" />
-      </div>
-    </template>
-
-    <template v-else-if="activeTab.mode === 'mongo-gridfs'">
-      <div class="flex-1 min-h-0">
-        <MongoGridFsBrowser :key="activeTab.id" :connection-id="activeTab.connectionId" :database="activeTab.database" :state-key="activeTab.id" />
-      </div>
-    </template>
-
-    <template v-else-if="activeTab.mode === 'mongo-bucket'">
-      <div class="flex-1 min-h-0">
-        <MongoBucketBrowser :key="activeTab.id" :connection-id="activeTab.connectionId" :database="activeTab.database" :bucket="activeTab.mongoBucket?.bucketName || activeTab.sql" :state-key="activeTab.id" />
-      </div>
-    </template>
 
     <!-- Vector mode: Qdrant and Milvus collections -->
-    <template v-else-if="activeTab.mode === 'vector'">
-      <div class="flex-1 min-h-0">
-        <VectorBrowser
-          :key="activeTab.id"
-          :connection-id="activeTab.connectionId"
-          :database="activeTab.database"
-          :collection="activeTab.sql"
-          :collection-label="activeTab.title"
-          :database-type="activeEffectiveDatabaseType"
-          :dimension="activeTabDimension"
-          :tenant="activeVectorConnection?.username"
-          :result="activeTab.result"
-          @update:result="queryStore.updateTabPageResult(activeTab.id, activeTab.mode, $event, activeTab)"
-        />
-      </div>
-    </template>
-
-    <template v-else-if="activeTab.mode === 'hbase'">
-      <div class="flex-1 min-h-0">
-        <HBaseBrowser :key="activeTab.id" :tab-id="activeTab.id" :connection-id="activeTab.connectionId" :namespace="activeTab.database" :table="activeTab.sql" :create-table-on-open="activeTab.hbaseCreateTableOnOpen" />
-      </div>
-    </template>
-
-    <template v-else-if="activeTab.mode === 'mq'">
-      <div class="flex-1 min-h-0">
-        <MqAdminConsole :key="activeTab.id" :connection-id="activeTab.connectionId" :initial-tenant="activeTab.mqTenant" :initial-tab="activeTab.mqInitialTab" :read-only="connectionIsEffectivelyReadOnly(activeConnection)" />
-      </div>
-    </template>
-
-    <template v-else-if="activeTab.mode === 'mqtt'">
-      <div class="flex-1 min-h-0">
-        <MqttAdminConsole :key="activeTab.id" :connection-id="activeTab.connectionId" :initial-topic="activeTab.mqttInitialTopic" />
-      </div>
-    </template>
-
-    <template v-else-if="activeTab.mode === 'nacos'">
-      <div class="flex-1 min-h-0">
-        <NacosAdminConsole
-          :key="activeTab.id"
-          :connection-id="activeTab.connectionId"
-          :namespace="activeTab.nacosNamespace"
-          :namespace-name="activeTab.nacosNamespaceName"
-          :target-data-id="activeTab.nacosTargetDataId"
-          :target-group="activeTab.nacosTargetGroup"
-          :target-keyword="activeTab.nacosTargetKeyword"
-          :target-request-id="activeTab.nacosTargetRequestId"
-          :read-only="connectionIsEffectivelyReadOnly(activeConnection)"
-          :zen-mode="props.zenMode"
-          @toggle-zen-mode="emit('toggleZenMode')"
-        />
-      </div>
-    </template>
 
     <!-- plugin-workbench tabs render in the always-mounted layer in App.vue
          (v-show visibility): remounting the webview per tab switch would
@@ -3377,64 +3107,14 @@ defineExpose({
       <DatabaseUserAdmin :key="activeTab.id" :connection="activeConnection" />
     </template>
 
-    <template v-else-if="activeTab.mode === 'xugu-users' && activeConnection">
-      <XuguUserPermissions :key="activeTab.id" :connection="activeConnection" />
-    </template>
-
     <template v-else-if="activeTab.mode === 'processlist' && activeConnection">
       <ProcessListPanel :key="activeTab.id" :connection="activeConnection" />
-    </template>
-
-    <template v-else-if="activeTab.mode === 'sqlserver-trace' && activeConnection">
-      <SqlServerActivityTracePanel :key="activeTab.id" :connection="activeConnection" :tab-id="activeTab.id" />
     </template>
 
     <template v-else-if="activeTab.mode === 'mysql-dashboard'">
       <div class="min-h-0 flex-1">
         <MySqlDashboard :key="activeTab.id" :connection-id="activeTab.connectionId" :client-session-id="activeTab.id" />
       </div>
-    </template>
-
-    <template v-else-if="activeTab.mode === 'postgres-dashboard'">
-      <div class="min-h-0 flex-1">
-        <PostgresDashboard :key="activeTab.id" :connection-id="activeTab.connectionId" />
-      </div>
-    </template>
-
-    <template v-else-if="activeTab.mode === 'xugu-dashboard'">
-      <div class="min-h-0 flex-1">
-        <XuguServerDashboard :key="activeTab.id" :connection-id="activeTab.connectionId" />
-      </div>
-    </template>
-
-    <template v-else-if="activeTab.mode === 'nacos-dashboard'">
-      <div class="min-h-0 flex-1">
-        <NacosDashboard :key="activeTab.id" :connection-id="activeTab.connectionId" />
-      </div>
-    </template>
-
-    <template v-else-if="activeTab.mode === 'solr-admin'">
-      <div class="min-h-0 flex-1">
-        <SolrAdmin :key="activeTab.id" :connection-id="activeTab.connectionId" />
-      </div>
-    </template>
-
-    <template v-else-if="activeTab.mode === 'dolt-version-control'">
-      <div class="min-h-0 flex-1">
-        <DoltVersionControl :key="activeTab.id" :connection-id="activeTab.connectionId" :database="activeTab.database" :initial-branch="activeTab.workspaceBranch" />
-      </div>
-    </template>
-
-    <template v-else-if="activeTab.mode === 'dameng-jobs' && activeConnection">
-      <DamengJobAdmin :key="activeTab.id" :connection="activeConnection" />
-    </template>
-
-    <template v-else-if="activeTab.mode === 'dameng-users' && activeConnection">
-      <DamengUserAdmin :key="activeTab.id" :connection="activeConnection" />
-    </template>
-
-    <template v-else-if="activeTab.mode === 'dameng-roles' && activeConnection">
-      <DamengRoleAdmin :key="activeTab.id" :connection="activeConnection" />
     </template>
 
     <Dialog v-model:open="resultRunRenameOpen">

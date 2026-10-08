@@ -69,8 +69,8 @@ function decorationsForHints(hints: readonly InsertValueHint[]): DecorationSet {
  * hints (and their SELECT extension) apply. NoSQL/document stores are excluded;
  * keep this list in sync instead of re-inlining it at call sites.
  */
-export function supportsInsertValueHints(databaseType: string | undefined | null): boolean {
-  return databaseType !== "redis" && databaseType !== "mongodb" && databaseType !== "elasticsearch" && databaseType !== "easysearch" && databaseType !== "meilisearch" && databaseType !== "solr" && databaseType !== "couchdb" && databaseType !== "victoriametrics" && databaseType !== "salesforce";
+export function supportsInsertValueHints(_databaseType: string | undefined | null): boolean {
+  return true;
 }
 
 export function buildInsertValueHintDecorations(hints: readonly InsertValueHint[]): DecorationSet {

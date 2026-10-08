@@ -92,7 +92,7 @@ defineExpose({
   applyTableStructureChanges: () => activeSurfaceRef.value?.applyTableStructureChanges() ?? Promise.resolve(false),
   insertRedisCommand: (command: string, target: AiConversationBinding) => activeSurfaceRef.value?.insertRedisCommand(command, target) ?? Promise.resolve(false),
   executeRedisCommand: (command: string, target: AiConversationBinding) => activeSurfaceRef.value?.executeRedisCommand(command, target) ?? Promise.resolve(false),
-  isRedisConsoleReady: (target: AiConversationBinding) => activeSurfaceRef.value?.isRedisConsoleReady(target) ?? false,
+  isRedisConsoleReady: (_target: AiConversationBinding) => false,
   previewStatementRange: (tabId: string, range: StatementRange | null) => (activeTab.value?.id === tabId ? (activeSurfaceRef.value?.previewStatementRange(range) ?? false) : false),
   focusStatementRange: (tabId: string, range: StatementRange | null) => (activeTab.value?.id === tabId ? (activeSurfaceRef.value?.focusStatementRange(range) ?? false) : false),
   focusErrorPosition: (tabId: string, offset: number) => (activeTab.value?.id === tabId ? (activeSurfaceRef.value?.focusErrorPosition(offset) ?? false) : false),

@@ -1,6 +1,6 @@
 import { resolveDefaultDatabase } from "@/lib/database/defaultDatabase";
-import { normalizeSqliteNamespace } from "@/lib/database/sqliteNamespace";
-import { metricRangeQuery, qualifiedTableName } from "@/lib/table/tableSelectSql";
+
+import { qualifiedTableName } from "@/lib/table/tableSelectSql";
 import type { ConnectionConfig, DatabaseType, QueryTab, TreeNode } from "@/types/database";
 
 export interface NewQueryTarget {
@@ -59,7 +59,7 @@ function targetFromContext(
   const connection = connections.find((item) => item.id === context.connectionId);
   if (!connection) return null;
   const contextDatabase = context.database || resolveDefaultDatabase(connection, []);
-  const database = connection.db_type === "sqlite" ? normalizeSqliteNamespace(contextDatabase, connection) : contextDatabase;
+  const database = contextDatabase;
   const objectBrowser = "objectBrowser" in context ? context.objectBrowser : undefined;
   const tableMeta = "tableMeta" in context ? context.tableMeta : undefined;
   return {
@@ -98,10 +98,9 @@ export interface ResolveNewQueryInitialSqlInput extends ResolveNewQueryTableInpu
 
 // Database types whose "table" view does not use standard SQL `SELECT * FROM <table>`
 // (e.g. Neo4j uses Cypher). The new-query prefill is skipped for these.
-const NEW_QUERY_PREFILL_DISABLED_TYPES: ReadonlySet<DatabaseType | undefined> = new Set<DatabaseType | undefined>(["neo4j", "nebula"]);
 
-export function isNewQueryPrefillSupported(databaseType: DatabaseType | undefined): boolean {
-  return !NEW_QUERY_PREFILL_DISABLED_TYPES.has(databaseType);
+export function isNewQueryPrefillSupported(_databaseType: DatabaseType | undefined): boolean {
+  return !false;
 }
 
 function tableFromTab(tab: ResolveNewQueryTableInput["activeTab"]): NewQueryTable | null {
@@ -158,14 +157,10 @@ export function resolveNewQueryTable(input: ResolveNewQueryTableInput): NewQuery
  * already has its own metric range template above.
  */
 export function buildSelectAllSql(databaseType: DatabaseType | undefined, table: Pick<NewQueryTable, "schema" | "catalog" | "tableName"> & Partial<Pick<NewQueryTable, "database">>, identifierQuote?: string, driverProfile?: string, includeDatabaseName = false, quoteIdentifiers = true): string {
-  if (databaseType === "victoriametrics") return metricRangeQuery(table.tableName);
+  {}
   const ref = qualifiedTableName({ databaseType, driverProfile, identifierQuote, database: table.database, schema: table.schema, catalog: table.catalog, tableName: table.tableName, includeDatabaseName, quoteIdentifiers });
-  if (databaseType === "influxdb") {
-    return `SELECT * FROM ${ref} WHERE time > now() - 5m ORDER BY time DESC LIMIT 100`;
-  }
-  if (databaseType === "influxdb3") {
-    return `SELECT * FROM ${ref} WHERE time > now() - INTERVAL '5 minutes' ORDER BY time DESC LIMIT 100`;
-  }
+  {}
+  {}
   return `SELECT * FROM ${ref}`;
 }
 
@@ -175,7 +170,7 @@ export function buildSelectAllSql(databaseType: DatabaseType | undefined, table:
  * in the execution context selected for the new tab.
  */
 export function resolveNewQueryInitialSql(input: ResolveNewQueryInitialSqlInput): string | undefined {
-  if (!input.prefillEnabled || !isNewQueryPrefillSupported(input.databaseType)) return undefined;
+  if (!input.prefillEnabled) return undefined;
 
   const table = resolveNewQueryTable(input);
   if (!table || table.connectionId !== input.targetConnectionId || table.database !== input.targetDatabase) return undefined;

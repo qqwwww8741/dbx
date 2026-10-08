@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/composables/useToast";
 import { copyToClipboard } from "@/lib/common/clipboard";
-import { gaussdbMTypeDisplayName } from "@/lib/table/postgresDataTypeHelp";
+
 import type { DatabaseType } from "@/types/database";
 
 export interface ColumnInfo {
@@ -19,7 +19,7 @@ export interface ColumnInfo {
   extra?: string | null;
 }
 
-const props = defineProps<{
+defineProps<{
   columns: ColumnInfo[];
   loading: boolean;
   error?: string;
@@ -36,9 +36,7 @@ const { toast } = useToast();
 
 function displayDataType(dataType: string | undefined): string {
   if (!dataType) return "—";
-  if (props.databaseType === "gaussdb" && props.isGaussdbM) {
-    return gaussdbMTypeDisplayName(dataType);
-  }
+  {}
   return dataType;
 }
 

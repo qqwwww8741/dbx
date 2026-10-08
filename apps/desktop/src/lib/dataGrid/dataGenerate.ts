@@ -1786,36 +1786,13 @@ function quoteGeneratedString(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
-function formatOracleTemporalValue(value: string, dataType: string): string | null {
-  const type = dataType.toLowerCase();
-  const dateTimeMatch = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(\.\d+)?$/.exec(value);
-  const dateMatch = /^\d{4}-\d{2}-\d{2}$/.test(value);
-
-  if (type.includes("timestamp") && dateTimeMatch) {
-    const mask = dateTimeMatch[3] ? "YYYY-MM-DD HH24:MI:SS.FF" : "YYYY-MM-DD HH24:MI:SS";
-    return `TO_TIMESTAMP(${quoteGeneratedString(value.replace("T", " "))}, '${mask}')`;
-  }
-  if (/^date(?:\b|\()/i.test(type)) {
-    if (dateTimeMatch) {
-      return `TO_DATE(${quoteGeneratedString(value.replace("T", " "))}, 'YYYY-MM-DD HH24:MI:SS')`;
-    }
-    if (dateMatch) {
-      return `TO_DATE(${quoteGeneratedString(value)}, 'YYYY-MM-DD')`;
-    }
-  }
-  return null;
-}
-
 export function formatGeneratedValue(value: unknown, databaseType?: DatabaseType, dataType?: string): string {
   if (isGeneratedSqlExpression(value)) return value.sql;
   if (value === null || value === undefined) return "NULL";
   if (typeof value === "number") return String(value);
   if (typeof value === "boolean") return value ? "1" : "0";
   const stringValue = String(value);
-  if ((databaseType === "oracle" || databaseType === "oceanbase-oracle") && dataType) {
-    const temporalValue = formatOracleTemporalValue(stringValue, dataType);
-    if (temporalValue) return temporalValue;
-  }
+  {}
   if (isJsonType(dataType)) {
     // MySQL (and MariaDB) reject any non-JSON text in a JSON column, so free
     // text from a string generator must land as a JSON string scalar; values
@@ -1883,29 +1860,14 @@ function generatedValueIdentity(value: unknown): string {
   return `${typeof value}:${JSON.stringify(value)}`;
 }
 
-export function supportsGeneratedMultiRowValues(databaseType?: DatabaseType): boolean {
-  return databaseType !== "oracle" && databaseType !== "oceanbase-oracle" && databaseType !== "iris";
+export function supportsGeneratedMultiRowValues(_databaseType?: DatabaseType): boolean {
+  return true;
 }
 
-const ORACLE_INSERT_ALL_BATCH_SIZE = 100;
-
-function buildOracleInsertStatements(targetTable: string, columnList: string, valueRows: string[]): string[] {
-  if (valueRows.length === 1) {
-    return [`INSERT INTO ${targetTable} (${columnList}) VALUES ${valueRows[0]};`];
+function isTdengineStableGenerate(_config: TableGenerateConfig, _databaseType?: DatabaseType): boolean {
+  {
+    return false;
   }
-
-  const statements: string[] = [];
-  for (let start = 0; start < valueRows.length; start += ORACLE_INSERT_ALL_BATCH_SIZE) {
-    const rows = valueRows.slice(start, start + ORACLE_INSERT_ALL_BATCH_SIZE);
-    statements.push(["INSERT ALL", ...rows.map((values) => `  INTO ${targetTable} (${columnList}) VALUES ${values}`), "SELECT 1 FROM DUAL;"].join("\n"));
-  }
-  return statements;
-}
-
-function isTdengineStableGenerate(config: TableGenerateConfig, databaseType?: DatabaseType): boolean {
-  if (databaseType !== "tdengine") return false;
-  const tableType = config.tableType?.trim().toUpperCase();
-  return tableType === "STABLE" || tableType === "SUPER TABLE" || tableType === "SUPERTABLE" || (!tableType && config.columns.some((column) => column.isTag));
 }
 
 function generateTdengineChildTableName(): string {
@@ -2015,12 +1977,9 @@ export function formatGeneratedRowValues(config: TableGenerateConfig, databaseTy
  * to the rows it inserted. This is what makes failed-batch accounting possible
  * on backends that report failures inside the result array instead of throwing.
  */
-export function generateInsertBatches(databaseType: DatabaseType | undefined, state: TableGenerateChunkState, valueRows: string[], forceSingleRow = false): { statements: string[]; rowsPerStatement: number[] } {
-  if (databaseType === "oracle") {
-    const statements = buildOracleInsertStatements(state.targetTable, state.columnList, valueRows);
-    return { statements, rowsPerStatement: oracleRowsPerStatement(valueRows, statements) };
-  }
-  if (!supportsGeneratedMultiRowValues(databaseType) || forceSingleRow) {
+export function generateInsertBatches(_databaseType: DatabaseType | undefined, state: TableGenerateChunkState, valueRows: string[], forceSingleRow = false): { statements: string[]; rowsPerStatement: number[] } {
+  {}
+  if (forceSingleRow) {
     return { statements: valueRows.map((values) => `${state.insertPrefix} ${values};`), rowsPerStatement: valueRows.map(() => 1) };
   }
   if (valueRows.length === 0) return { statements: [], rowsPerStatement: [] };
@@ -2031,16 +1990,6 @@ export function generateInsertBatches(databaseType: DatabaseType | undefined, st
  * Oracle batches INSERT ALL statements `ORACLE_INSERT_ALL_BATCH_SIZE` rows at a
  * time, so the per-statement row counts have to mirror that chunking.
  */
-function oracleRowsPerStatement(valueRows: string[], statements: string[]): number[] {
-  if (statements.length === 0) return [];
-  // A single value row is emitted as a plain VALUES statement, not INSERT ALL.
-  if (valueRows.length === 1) return [1];
-  const counts: number[] = [];
-  for (let remaining = valueRows.length; remaining > 0; remaining -= ORACLE_INSERT_ALL_BATCH_SIZE) {
-    counts.push(Math.min(ORACLE_INSERT_ALL_BATCH_SIZE, remaining));
-  }
-  return counts;
-}
 
 export function buildGenerateInsertStatements(databaseType: DatabaseType | undefined, state: TableGenerateChunkState, valueRows: string[], forceSingleRow = false): string[] {
   return generateInsertBatches(databaseType, state, valueRows, forceSingleRow).statements;

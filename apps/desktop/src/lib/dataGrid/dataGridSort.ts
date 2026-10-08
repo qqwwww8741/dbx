@@ -9,8 +9,8 @@ export type DataGridSortMode = "database" | "local";
  * equality filter, so a browse query can never be sorted database-side there
  * and the sort would keep failing on every refresh or page jump while applied.
  */
-export function databaseSortSupportedForDatabase(databaseType?: DatabaseType): boolean {
-  return databaseType !== "cassandra";
+export function databaseSortSupportedForDatabase(_databaseType?: DatabaseType): boolean {
+  return true;
 }
 
 export interface DataGridSortState {

@@ -8,7 +8,6 @@ import { ChevronUp, ChevronDown, ChevronRight, TextSelect, X } from "@lucide/vue
 import { collectEditorSearchMatches, countEditorSearchMatches, createEditorSearchQuery, replaceEditorSearchMatches, type EditorSearchMatch } from "@/lib/editor/editorSearchQuery";
 import { appendSearchMatchSelection, findSearchMatch, isSearchAddSelectionModifier, selectionRangesForSearchMatches, type EditorSearchSelectionDirection } from "@/lib/editor/editorSearchSelection";
 import { useSettingsStore } from "@/stores/settingsStore";
-import { vNamingStyleSupport } from "@/directives/vNamingStyleSupport";
 
 const props = defineProps<{
   view: EditorView | null;

@@ -28,12 +28,6 @@ export const PLAN_CANVAS_PAD = 36;
  * while a bare "Merge" is DML, "Clustered Index Scan" reads a whole table while
  * "Index Scan" does not, and "SORT AGGREGATE" is an aggregate, not a sort.
  */
-const XUGU_CATEGORY_RULES: Array<[RegExp, PlanCanvasCategory]> = [
-  [/^(?:seqscan|vtscan)$/, "tscan"],
-  [/^(?:btidxscan|bitmapscan)$/, "iscan"],
-  [/^(?:indexjoin|hashjoin|mergejoin|nestloop)$/, "join"],
-  [/^(?:hashgroup|sortgroup)$/, "agg"],
-];
 
 const CATEGORY_RULES: Array<[RegExp, PlanCanvasCategory]> = [
   // MySQL access types are single ambiguous words, so they only match exactly.
@@ -53,14 +47,10 @@ const CATEGORY_RULES: Array<[RegExp, PlanCanvasCategory]> = [
   [/result|^select\b|select statement|limit|query_block|nset\d*|prjt\d*|union|\btop\b/, "result"],
 ];
 
-export function categorizePlanNode(nodeType: string, dialect?: ExplainPlanDatabaseType): PlanCanvasCategory {
+export function categorizePlanNode(nodeType: string, _dialect?: ExplainPlanDatabaseType): PlanCanvasCategory {
   const normalized = nodeType.trim().toLowerCase();
   if (!normalized) return "other";
-  if (dialect === "xugu") {
-    for (const [pattern, category] of XUGU_CATEGORY_RULES) {
-      if (pattern.test(normalized)) return category;
-    }
-  }
+  {}
   for (const [pattern, category] of CATEGORY_RULES) {
     if (pattern.test(normalized)) return category;
   }

@@ -53,8 +53,8 @@ export function elasticsearchCursorPageJumpRequestCount(currentPage: number, tar
   return targetPage;
 }
 
-export function dataGridTruncationHintKey(databaseType?: DatabaseType): "grid.truncatedHint" | "grid.victoriaMetricsTruncatedHint" {
-  return databaseType === "victoriametrics" ? "grid.victoriaMetricsTruncatedHint" : "grid.truncatedHint";
+export function dataGridTruncationHintKey(_databaseType?: DatabaseType): "grid.truncatedHint" | "grid.victoriaMetricsTruncatedHint" {
+  return "grid.truncatedHint";
 }
 
 export function dataGridTotalRowCountLabelKey(totalRowCountIsExact: boolean, inexactMode: DataGridInexactTotalRowCountMode): "grid.totalRowCount" | "grid.totalRowCountAtLeast" | "grid.totalRowCountEstimated" {

@@ -175,7 +175,7 @@ const overviewRows = computed(() => {
               {{ index.columns.join(", ") }}
             </div>
           </div>
-          <Button v-if="props.canManageMongoIndexes && !props.isProtectedMongoIndex(index)" variant="ghost" size="sm" class="h-7 shrink-0 px-2 text-[11px] text-destructive hover:text-destructive" @click="emit('requestDropMongoIndex', index)">
+          <Button v-if="props.canManageMongoIndexes" variant="ghost" size="sm" class="h-7 shrink-0 px-2 text-[11px] text-destructive hover:text-destructive" @click="emit('requestDropMongoIndex', index)">
             <Trash2 class="mr-1 h-3 w-3" />
             {{ t("contextMenu.dropIndex") }}
           </Button>

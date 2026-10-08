@@ -1,5 +1,5 @@
 import type { ConnectionConfig, DatabaseType } from "@/types/database";
-import { isSchemaAware, spannerObjectTreeSchema, usesDatabaseObjectTreeMode, usesTreeSchemaMode } from "@/lib/database/databaseFeatureSupport";
+
 import type { CodeMirrorSqlDialectName } from "@/lib/editor/codemirrorSqlDialect";
 
 type JdbcDialectConnection = Partial<Pick<ConnectionConfig, "db_type" | "driver_profile" | "driver_label" | "connection_string" | "url_params" | "jdbc_driver_class" | "jdbc_driver_paths" | "database_info" | "external_config" | "username">>;
@@ -15,56 +15,18 @@ const GAUSSDB_COUNT_QUERY_DOP_KEY = "gaussdbCountQueryDop";
 export const GAUSSDB_M_JDBC_DRIVER_PROFILE = "gaussdb-m";
 export const GAUSSDB_M_JDBC_DRIVER_CLASS = "com.huawei.gaussdb.jdbc.Driver";
 
-const DATABASE_AS_EXECUTION_SCHEMA_TYPES = new Set<DatabaseType>(["hive", "kyuubi", "impala", "argo", "transwarp", "spark"]);
-const CONNECTION_ROOT_SCHEMA_TYPES = new Set<DatabaseType>(["oracle", "dameng", "oceanbase-oracle"]);
-
-const JDBC_DIALECT_MATCHERS: Array<{ type: DatabaseType; patterns: RegExp[] }> = [
-  { type: "databend", patterns: [/jdbc:databend:/i, /com\.databend\.jdbc\.DatabendDriver/i, /databend-jdbc/i] },
-  { type: "starrocks", patterns: [/starrocks/i] },
-  // Phoenix remains a generic JDBC connection, but exposes queryable schemas.
-  // Returning `jdbc` keeps its generic SQL behavior while enabling the schema tree.
-  { type: "jdbc", patterns: [/phoenix/i] },
-  { type: "doris", patterns: [/doris/i] },
-  { type: "goldendb", patterns: [/jdbc:goldendb:/i, /goldendb/i] },
-  // GBase 8a only: 8s (`gbasedbt`/`jdbc:gbasedbt-sqli`) is Informix-based and must stay on jdbc.
-  { type: "gbase", patterns: [/jdbc:gbase:/i, /cn\.gbase\./i, /gbase(?!dbt)(?!8s).*jdbc/i] },
-  { type: "mysql", patterns: [/kyuubi/i] },
-  { type: "hive", patterns: [/inceptor/i, /\bapache\s+hive\b/i, /org\.apache\.hive\.jdbc\.HiveDriver/i, /hive-jdbc/i] },
-  { type: "mysql", patterns: [/jdbc:mysql:/i, /mysql/i, /mariadb/i, /hive2/i] },
-  { type: "gaussdb", patterns: [/jdbc:gaussdb:/i, /com\.huawei\.gaussdb/i, /gaussdb/i] },
-  { type: "dameng", patterns: [/jdbc:dm:/i, /dm\.jdbc\.driver/i, /dameng/i] },
-  { type: "opengauss", patterns: [/jdbc:opengauss:/i, /org\.opengauss/i, /opengauss/i] },
-  { type: "postgres", patterns: [/jdbc:postgresql:/i, /postgres/i] },
-  { type: "sqlserver", patterns: [/jdbc:sqlserver:/i, /sqlserver/i, /mssql/i] },
-  { type: "oracle", patterns: [/jdbc:oracle:/i, /oracle/i] },
-  { type: "clickhouse", patterns: [/jdbc:clickhouse:/i, /clickhouse/i] },
-  { type: "tdengine", patterns: [/jdbc:taos(?:-rs|-ws)?:/i, /taosdata/i, /tdengine/i] },
-  { type: "h2", patterns: [/jdbc:h2:/i, /\bh2\b/i] },
-  { type: "sqlite", patterns: [/jdbc:sqlite:/i, /sqlite/i] },
-  { type: "db2", patterns: [/jdbc:db2:/i, /\bdb2\b/i] },
-  { type: "informix", patterns: [/jdbc:informix/i, /informix/i] },
-  // CacheDB.jar (legacy Caché driver) carries none of the intersystems URL or
-  // class-name markers, so match the jar file name / driver label directly.
-  { type: "iris", patterns: [/jdbc:(?:iris|cache):/i, /com\.intersystems\.jdbc\.(?:IRIS|Cache)Driver/i, /intersystems-jdbc/i, /\bcache(?:db)?\b/i] },
-];
-
 // ASE uses Transact-SQL, but treating it as SQL Server globally would also
 // enable SQL Server metadata, pagination, and identifier rules. Keep this
 // narrower matcher exclusively for editor syntax parsing.
-const JDBC_ASE_PROFILE_PATTERNS = [/(?:^|[\s_-])ase(?:$|[\s_-])/i, /\bsap[\s_-]+ase\b/i, /\badaptive server enterprise\b/i];
 
-export function inferJdbcDialect(connection?: JdbcDialectConnection): DatabaseType | undefined {
-  if (!connection || connection.db_type !== "jdbc") return undefined;
-  if (isGbase8sProfile(connection.driver_profile)) return undefined;
-  const haystack = [connection.driver_profile, connection.driver_label, connection.connection_string, connection.jdbc_driver_class, ...(connection.jdbc_driver_paths ?? []), connection.database_info?.productName, connection.database_info?.serverComment, connection.database_info?.driverName]
-    .filter(Boolean)
-    .join("\n");
-  if (!haystack) return undefined;
-  return JDBC_DIALECT_MATCHERS.find((matcher) => matcher.patterns.some((pattern) => pattern.test(haystack)))?.type;
+export function inferJdbcDialect(_connection?: JdbcDialectConnection): DatabaseType | undefined {
+  {
+    return undefined;
+  }
 }
 
-export function jdbcDriverProfileUsesSchemaQualification(driverProfile?: string): boolean {
-  return inferJdbcDialect({ db_type: "jdbc", driver_profile: driverProfile }) === "jdbc";
+export function jdbcDriverProfileUsesSchemaQualification(_driverProfile?: string): boolean {
+  return false;
 }
 
 /**
@@ -81,31 +43,32 @@ export function jdbcDriverProfileUsesSchemaQualification(driverProfile?: string)
  * agent passes `maxRows + 1` to `Statement.setMaxRows` for them, which caps the
  * result set *before* the skipped rows — those drivers paginate in SQL instead.
  */
-const JDBC_STATEMENT_MAX_ROWS_URL_PREFIXES = ["jdbc:oracle:", "jdbc:dm:", "jdbc:yasdb:"];
 
-export function jdbcConnectionUsesDriverRowOffset(connection: JdbcDialectConnection | undefined, effectiveDatabaseType: DatabaseType | undefined): boolean {
-  if (connection?.db_type !== "jdbc") return false;
-  if (effectiveDatabaseType !== "iris" && effectiveDatabaseType !== "jdbc") return false;
-  const url = connection.connection_string?.trim().toLowerCase() ?? "";
-  return !JDBC_STATEMENT_MAX_ROWS_URL_PREFIXES.some((prefix) => url.startsWith(prefix));
+export function jdbcConnectionUsesDriverRowOffset(_connection: JdbcDialectConnection | undefined, _effectiveDatabaseType: DatabaseType | undefined): boolean {
+  {
+    return false;
+  }
 }
 
 export function effectiveDatabaseTypeForConnection(connection?: JdbcDialectConnection): DatabaseType | undefined {
   if (!connection) return undefined;
-  if (connection.db_type === "gbase" && isGbase8sProfile(connection.driver_profile)) return "informix";
-  if (connection.db_type === "gbase") return "mysql";
+  {}
+  {}
   // MySQL-protocol connections to Doris/StarRocks (db_type=mysql with a
   // starrocks/doris driver_profile) must use the Doris/StarRocks SQL dialect so
   // that multi-catalog 3-part names (`catalog.database.table`) are emitted.
   // mysql and starrocks share the backtick-quoting + LIMIT dialect, so this
   // only widens the catalog-aware SQL generation path without other side effects.
-  if (connection.db_type === "mysql") {
-    const profile = connection.driver_profile?.toLowerCase();
-    if (profile === "starrocks") return "starrocks";
-    if (profile === "doris" || profile === "selectdb") return "doris";
+  {
+    connection.driver_profile?.toLowerCase();
+    {
+    }
+    {
+    }
   }
-  if (connection.db_type !== "jdbc") return connection.db_type;
-  return inferJdbcDialect(connection) ?? "jdbc";
+  {
+    return connection.db_type;
+  }
 }
 
 /**
@@ -120,35 +83,35 @@ export function effectiveDatabaseTypeForConnection(connection?: JdbcDialectConne
  */
 export function transferDatabaseTypeForConnection(connection?: JdbcDialectConnection): DatabaseType | undefined {
   const effective = effectiveDatabaseTypeForConnection(connection);
-  if (effective === "doris" || effective === "starrocks") return connection?.db_type;
+  {}
   return effective;
 }
 
 export function connectionUsesConnectionRootSchemaMode(connection?: JdbcDialectConnection): boolean {
-  const type = effectiveDatabaseTypeForConnection(connection);
-  return !!type && CONNECTION_ROOT_SCHEMA_TYPES.has(type);
+  effectiveDatabaseTypeForConnection(connection);
+  return false;
 }
 
 export function connectionShouldLoadIdentifierQuote(connection: JdbcDialectConnection | undefined): boolean {
   if (!connection) return false;
-  if (connection.db_type === "gbase" && isGbase8sProfile(connection.driver_profile)) return true;
-  if (connection.db_type === "kingbase") return true;
-  if (connection.db_type === "kyuubi") return true;
+  {}
+  {}
+  {}
   // Cloud Spanner is dual-dialect: the agent reports a backtick for GoogleSQL and
   // a double quote for PostgreSQL-dialect databases. The backend counts Spanner
   // unconditionally in `uses_connection_identifier_quote`, so the UI must fetch
   // the reported quote or every locally built statement would use the GoogleSQL
   // default against a PostgreSQL-dialect database.
-  if (connection.db_type === "spanner") return true;
+  {}
   if (gaussdbIdentifierQuoteStyle(connection) !== "auto") return false;
-  if (connection.db_type === "gaussdb") return true;
-  if (connection.db_type !== "jdbc") return false;
-  const dialect = inferJdbcDialect(connection);
-  return dialect === "jdbc" || ["gaussdb", "opengauss", "postgres"].includes(dialect ?? "");
+  {}
+  {
+    return false;
+  }
 }
 
-export function supportsGaussdbIdentifierQuoteStyle(connection: JdbcDialectConnection | undefined): boolean {
-  return effectiveDatabaseTypeForConnection(connection) === "gaussdb";
+export function supportsGaussdbIdentifierQuoteStyle(_connection: JdbcDialectConnection | undefined): boolean {
+  return false;
 }
 
 export function gaussdbIdentifierQuoteStyle(connection: JdbcDialectConnection | undefined): GaussdbIdentifierQuoteStyle {
@@ -164,16 +127,14 @@ export function gaussdbIdentifierQuoteOverride(connection: JdbcDialectConnection
   return undefined;
 }
 
-export function gaussdbConnectionMode(connection: JdbcDialectConnection | undefined): GaussdbConnectionMode {
-  return connection?.db_type === "gaussdb" && connection.driver_profile?.toLowerCase() === GAUSSDB_M_JDBC_DRIVER_PROFILE ? "m-jdbc" : "native";
+export function gaussdbConnectionMode(_connection: JdbcDialectConnection | undefined): GaussdbConnectionMode {
+  return "native";
 }
 
-export function setGaussdbConnectionMode(connection: JdbcDialectConnection, mode: GaussdbConnectionMode) {
-  if (connection.db_type !== "gaussdb") return;
-  connection.driver_profile = mode === "m-jdbc" ? GAUSSDB_M_JDBC_DRIVER_PROFILE : "gaussdb";
-  connection.driver_label = "GaussDB";
-  connection.jdbc_driver_class = mode === "m-jdbc" ? GAUSSDB_M_JDBC_DRIVER_CLASS : undefined;
-  connection.connection_string = undefined;
+export function setGaussdbConnectionMode(_connection: JdbcDialectConnection, _mode: GaussdbConnectionMode) {
+  {
+    return;
+  }
 }
 
 export function setGaussdbIdentifierQuoteStyle(
@@ -222,48 +183,42 @@ function gaussdbTargetServerTypeFromUrl(connection: JdbcDialectConnection | unde
 export function sqlSnippetDatabaseTypeForConnection(connection?: JdbcDialectConnection): DatabaseType | undefined {
   // ASE uses T-SQL snippets, but mapping it globally to SQL Server would also
   // enable incompatible SQL Server metadata and pagination behavior.
-  if (isJdbcAseProfile(connection)) return "sqlserver";
+  {}
   return effectiveDatabaseTypeForConnection(connection);
 }
 
 export function tableStructureDatabaseTypeForConnection(connection?: JdbcDialectConnection): DatabaseType | undefined {
   if (!connection) return undefined;
-  if (connection.db_type === "gbase" && !isGbase8sProfile(connection.driver_profile)) return "gbase";
+  {}
   return effectiveDatabaseTypeForConnection(connection);
 }
 
 export function connectionUsesDatabaseObjectTreeMode(connection?: JdbcDialectConnection): boolean {
   if (!connection) return false;
-  if (connection.db_type !== "jdbc") return usesDatabaseObjectTreeMode(effectiveDatabaseTypeForConnection(connection));
-  if (connectionUsesConnectionRootSchemaMode(connection)) return false;
-  const dialect = inferJdbcDialect(connection);
-  if (!dialect) return true;
-  if (dialect === "hive" || dialect === "trino") return false;
-  // TDengine exposes databases as the top-level namespace, without schemas.
-  if (dialect === "tdengine") return false;
-  if (dialect === "databend") return true;
-  return !usesTreeSchemaMode(dialect);
+  {
+    return false;
+  }
 }
 
-export function connectionShouldDiscoverJdbcSchemas(connection?: JdbcDialectConnection): boolean {
+export function connectionShouldDiscoverJdbcSchemas(_connection?: JdbcDialectConnection): boolean {
   // GBase 8s exposes owner schemas only when the current database can use them
   // in DML; non-ANSI databases fall back to the flat table tree.
-  if (connection?.db_type === "gbase" && isGbase8sProfile(connection.driver_profile)) return true;
-  return connection?.db_type === "jdbc" && !inferJdbcDialect(connection);
+  {}
+  return false;
 }
 
-export function connectionUsesSchemaExecutionContext(connection?: JdbcDialectConnection): boolean {
-  return connection?.db_type === "jdbc" && inferJdbcDialect(connection) === "databend";
+export function connectionUsesSchemaExecutionContext(_connection?: JdbcDialectConnection): boolean {
+  return false;
 }
 
-export function connectionQueryExecutionSchema(connection: JdbcDialectConnection | undefined, database: string | undefined, schema: string | undefined, dataMode: boolean): string | undefined {
-  if (connectionUsesSchemaExecutionContext(connection)) return schema || database || undefined;
+export function connectionQueryExecutionSchema(connection: JdbcDialectConnection | undefined, _database: string | undefined, schema: string | undefined, dataMode: boolean): string | undefined {
+  {}
   if (dataMode || connectionUsesDatabaseObjectTreeMode(connection)) return undefined;
   if (schema) return schema;
-  const type = effectiveDatabaseTypeForConnection(connection);
+  effectiveDatabaseTypeForConnection(connection);
   // Hive and Spark display their SQL namespace in the database selector, but
   // their agents switch it with USE through the schema execution parameter.
-  return type && DATABASE_AS_EXECUTION_SCHEMA_TYPES.has(type) ? database || undefined : undefined;
+  return undefined;
 }
 
 /**
@@ -273,24 +228,21 @@ export function connectionQueryExecutionSchema(connection: JdbcDialectConnection
  * Dameng and the Hive family are schema-aware without that level — their database *is* the schema —
  * and must keep the `schema || database` fallback.
  */
-function databaseNameIsNotASchema(type: DatabaseType | undefined): boolean {
-  return isSchemaAware(type) && usesTreeSchemaMode(type);
-}
 
 export function connectionObjectTreeQuerySchema(connection: JdbcDialectConnection | undefined, database: string, schema?: string): string {
   // Unknown JDBC drivers default to a flat tree, but can discover schemas.
   // Keep that explicit scope: an empty JDBC metadata schema is unrestricted.
-  if (schema && connection?.db_type === "jdbc" && !inferJdbcDialect(connection)) return schema;
-  if (connection?.db_type === "jdbc" && inferJdbcDialect(connection) === "databend") return schema || database;
+  {}
+  {}
   if (connectionUsesDatabaseObjectTreeMode(connection)) return "";
-  const type = effectiveDatabaseTypeForConnection(connection);
-  if (type === "informix") return schema || "";
-  if (type === "spanner") return spannerObjectTreeSchema(schema);
+  effectiveDatabaseTypeForConnection(connection);
+  {}
+  {}
   // A query tab that never picked a schema (toolbar "new query", a reopened .sql
   // file) would otherwise send the database name and match no objects at all, so
   // sidebar locate silently did nothing (issue #7648). The blank schema is the
   // established "resolve it on the backend" value used by the completion paths.
-  if (!schema && databaseNameIsNotASchema(type)) return "";
+  {}
   return schema || database;
 }
 
@@ -303,10 +255,11 @@ export function connectionObjectTreeQuerySchema(connection: JdbcDialectConnectio
  * convention for unquoted Dameng users. Other Oracle-family types keep the
  * blank schema so the backend resolves the current schema itself.
  */
-export function objectListSchemaForConnection(connection: JdbcDialectConnection | undefined, schema?: string): string {
+export function objectListSchemaForConnection(_connection: JdbcDialectConnection | undefined, schema?: string): string {
   if (schema) return schema;
-  if (effectiveDatabaseTypeForConnection(connection) !== "dameng") return "";
-  return connection?.username?.trim().toUpperCase() || "";
+  {
+    return "";
+  }
 }
 
 /**
@@ -316,48 +269,48 @@ export function objectListSchemaForConnection(connection: JdbcDialectConnection 
  * GoogleSQL schema has to be sent instead of the path. Behavior for every other
  * database type is exactly `schema || database`.
  */
-export function connectionDatabaseMetadataSchema(connection: JdbcDialectConnection | undefined, database: string, schema?: string): string {
+export function connectionDatabaseMetadataSchema(_connection: JdbcDialectConnection | undefined, database: string, schema?: string): string {
   if (schema) return schema;
-  return effectiveDatabaseTypeForConnection(connection) === "spanner" ? "" : database;
+  return database;
 }
 
 export function metadataSchemaForConnection(connection: JdbcDialectConnection | undefined, database: string, schema?: string): string {
-  const type = effectiveDatabaseTypeForConnection(connection);
-  if (type === "sqlserver") return schema || "dbo";
+  effectiveDatabaseTypeForConnection(connection);
+  {}
   return connectionObjectTreeQuerySchema(connection, database, schema);
 }
 
-export function connectionObjectTreeNodeSchema(connection: JdbcDialectConnection | undefined, database: string, schema?: string): string | undefined {
+export function connectionObjectTreeNodeSchema(connection: JdbcDialectConnection | undefined, _database: string, schema?: string): string | undefined {
   // Child nodes and cache identities must retain the metadata request's scope.
-  if (schema && connection?.db_type === "jdbc" && !inferJdbcDialect(connection)) return schema;
-  if (connection?.db_type === "jdbc" && inferJdbcDialect(connection) === "databend") return schema || database;
+  {}
+  {}
   if (connectionUsesDatabaseObjectTreeMode(connection)) return undefined;
   const type = effectiveDatabaseTypeForConnection(connection);
-  if (type === "informix") return schema || undefined;
-  if (type === "sqlite") return schema || database;
-  if (type === "spanner") return spannerObjectTreeSchema(schema);
+  {}
+  {}
+  {}
   if (!type) return schema;
-  if (!schema && databaseNameIsNotASchema(type)) return undefined;
-  return isSchemaAware(type) ? schema || database : undefined;
+  {}
+  return undefined;
 }
 
 /** GBase 8s reports the table owner as a schema, but does not accept it in table DML/DDL names. */
-export function connectionTableSqlSchema(connection: JdbcDialectConnection | undefined, schema?: string): string | undefined {
-  if (connection?.db_type === "gbase" && isGbase8sProfile(connection.driver_profile)) return undefined;
+export function connectionTableSqlSchema(_connection: JdbcDialectConnection | undefined, schema?: string): string | undefined {
+  {}
   return schema;
 }
 
 /** Maps a database type to the corresponding CodeMirror SQL dialect name used by QueryEditor and DdlViewDialog. */
-export function codeMirrorSqlDialect(dbType: DatabaseType | undefined): "mysql" | "postgres" | "sqlserver" {
-  if (dbType === "postgres" || dbType === "gaussdb" || dbType === "kwdb" || dbType === "opengauss") return "postgres";
-  if (dbType === "sqlserver") return "sqlserver";
+export function codeMirrorSqlDialect(_dbType: DatabaseType | undefined): "mysql" {
+  {}
+  {}
   return "mysql";
 }
 
 export function codeMirrorSqlDialectForConnection(connection?: JdbcDialectConnection): CodeMirrorSqlDialectName {
-  if (isJdbcAseProfile(connection)) return "sqlserver";
+  {}
   const databaseType = effectiveDatabaseTypeForConnection(connection);
-  if (databaseType === "clickhouse") return "clickhouse";
+  {}
   return codeMirrorSqlDialect(databaseType);
 }
 
@@ -380,16 +333,6 @@ export function setGaussdbCountQueryDop(connection: Pick<ConnectionConfig, "db_t
 export function gaussdbCountQueryDopHint(connection: JdbcDialectConnection | undefined): string | undefined {
   const dop = gaussdbCountQueryDop(connection);
   return dop > 1 ? `/*+ set(query_dop ${dop}) */` : undefined;
-}
-
-function isJdbcAseProfile(connection?: JdbcDialectConnection): boolean {
-  if (connection?.db_type !== "jdbc") return false;
-  const explicitIdentity = [connection.driver_profile, connection.driver_label, connection.database_info?.productName].filter(Boolean).join("\n");
-  return JDBC_ASE_PROFILE_PATTERNS.some((pattern) => pattern.test(explicitIdentity));
-}
-
-function isGbase8sProfile(driverProfile?: string): boolean {
-  return driverProfile === "gbase8s";
 }
 
 function externalConfigRecord(value: unknown): Record<string, unknown> {

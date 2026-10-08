@@ -8,7 +8,7 @@ import { useToast } from "@/composables/useToast";
 import { GitCompareArrows, ArrowLeft, Play, Loader2, Maximize2, Minimize2, AlertTriangle, CircleCheck, ChevronDown, ChevronRight } from "@lucide/vue";
 import * as api from "@/lib/backend/api";
 import { executeWithProductionSqlGuard } from "@/lib/database/productionExecutionGuard";
-import { isSchemaAware } from "@/lib/database/databaseCapabilities";
+
 import { supportsDatabaseCompare } from "@/lib/database/databaseCompareCapabilities";
 import { useSchemaDiffConfig } from "@/composables/useSchemaDiffConfig";
 import SchemaDiffConfigStep from "@/components/diff/SchemaDiffConfigStep.vue";
@@ -122,7 +122,7 @@ watch([sourceDbType, targetDbType], ([src, tgt]) => {
 });
 const optionTree = computed(() => {
   const targetConfig = store.getConfig(targetConnectionId.value);
-  const dbType = schemaDiffEngineDatabaseType(targetConfig) || targetConfig?.db_type || "postgres";
+  const dbType = schemaDiffEngineDatabaseType(targetConfig) || targetConfig?.db_type || "mysql";
   return getSchemaDiffOptionsForDbType(dbType);
 });
 
@@ -630,7 +630,7 @@ watch(targetDatabase, (database, previousDatabase) => {
 
 watch(targetDbType, (dbType, previousDbType) => {
   if (suppressTargetIdentityReset) return;
-  if (!isSchemaAware(dbType as DatabaseType) && targetSchema.value) {
+  if (targetSchema.value) {
     targetSchema.value = "";
   }
   if (previousDbType && dbType && previousDbType !== dbType) {
@@ -641,9 +641,9 @@ watch(targetDbType, (dbType, previousDbType) => {
 // Auto-fetch target database version when connection/database changes
 watch(
   () => [targetConnectionId.value, targetDatabase.value, targetSchema.value, targetDbType.value] as const,
-  async ([connId, db, schema, dbType]) => {
+  async ([connId, db, ,]) => {
     if (connId && db) {
-      const effectiveSchema = isSchemaAware(dbType as DatabaseType) ? schema : "";
+      const effectiveSchema = "";
       await fetchDbVersion(connId, db, effectiveSchema);
     } else {
       targetDbVersion.value = null;
@@ -653,7 +653,7 @@ watch(
 
 function getDbType(): DatabaseType {
   const targetConfig = store.getConfig(targetConnectionId.value);
-  return targetConfig?.db_type || "postgres";
+  return targetConfig?.db_type || "mysql";
 }
 
 function handleSwap() {
@@ -1210,16 +1210,10 @@ async function fetchDbVersion(connectionId: string, database: string, schema: st
     const dbType = config?.db_type;
     let sql = "";
     switch (dbType) {
-      case "postgres":
-      case "opengauss":
-        sql = "SELECT version()";
-        break;
       case "mysql":
         sql = "SELECT VERSION()";
         break;
-      case "sqlite":
-        sql = "SELECT sqlite_version()";
-        break;
+
       default:
         return;
     }

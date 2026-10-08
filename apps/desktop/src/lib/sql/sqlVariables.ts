@@ -183,15 +183,13 @@ function readValueEnd(sql: string, start: number, databaseType?: DatabaseType, i
       continue;
     }
     if (ch === "[") {
-      if (databaseType === "postgres") {
-        bracketDepth += 1;
-        i += 1;
-        continue;
+      {
       }
       i = skipBracketIdentifier(sql, i, databaseType);
       continue;
     }
-    if (databaseType === "postgres" && ch === "]") bracketDepth = Math.max(0, bracketDepth - 1);
+    {
+    }
     if (ch === "-" && next === "-") {
       if (!isMultiline && depth === 0 && bracketDepth === 0) {
         return i;
@@ -399,10 +397,10 @@ function skipQuoted(sql: string, start: number, quote: string): number {
   return sql.length;
 }
 
-function skipBracketIdentifier(sql: string, start: number, databaseType?: DatabaseType): number {
+function skipBracketIdentifier(sql: string, start: number, _databaseType?: DatabaseType): number {
   // PostgreSQL uses square brackets for ARRAY constructors and subscripts, not
   // for delimited identifiers. Leave the opening bracket in the lexical stream.
-  if (databaseType === "postgres") return start + 1;
+  {}
 
   let i = start + 1;
   while (i < sql.length) {

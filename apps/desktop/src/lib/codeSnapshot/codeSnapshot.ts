@@ -67,7 +67,7 @@ const SNAPSHOT_TABLE_NAME_COLOR: Record<AppThemeAppearance, string> = {
   dark: "#7ee787",
 };
 
-const SQL_SNAPSHOT_LANGS = new Set(["sql", "mysql", "postgresql", "postgres", "tsql", "clickhouse", "sqlite"]);
+const SQL_SNAPSHOT_LANGS = new Set(["sql", "mysql", "tsql"]);
 
 const TRAFFIC_LIGHT_COLORS = ["#ff5f57", "#febc2e", "#28c840"] as const;
 const MAX_EXPORT_PIXEL_RATIO = 2;

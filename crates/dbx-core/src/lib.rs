@@ -1,6 +1,5 @@
 #![recursion_limit = "256"]
 
-pub mod admin;
 pub mod ai;
 pub mod data;
 pub mod host;
@@ -13,26 +12,15 @@ pub use dbx_ai_provider::{
 };
 pub use dbx_platform::{path_utils, process};
 
-pub use ai::agent_explain;
-pub use ai::agent_kv;
 pub use ai::agent_loop;
 pub use ai::agent_tools;
 pub use ai::plugin_tools;
 pub use ai::tool_approval;
-pub use dbx_drivers::agent_catalog;
-pub use dbx_drivers::agent_connection;
-pub use dbx_drivers::agent_manager;
-pub use dbx_drivers::agent_offline_export;
-pub use dbx_drivers::agent_recovery;
-pub use dbx_drivers::agent_runtime;
-pub use dbx_drivers::agent_service;
 pub use dbx_drivers::backend_error;
-pub use dbx_drivers::oracle_oci;
 pub use host::changelog;
 pub use persistence::cloud_sync;
 pub use persistence::config;
 pub mod connection;
-pub use admin::consul;
 pub use connection::connection_secrets;
 pub use data::correction;
 pub use data::csv_export;
@@ -44,22 +32,11 @@ pub use dbx_sql::data_grid_sql;
 pub use dbx_sql::database_search_sql;
 pub use dbx_types::database_manifest;
 pub mod db;
-#[cfg(feature = "mq-admin")]
-pub use admin::mq;
-#[cfg(feature = "mq-admin")]
-pub use admin::mqtt;
-pub use admin::nacos;
+
 pub use ai::mcp_policy;
 pub use ai::prompt_template;
-pub use connection::driver_runtime;
-pub use connection::jdbc;
 pub use data::docs;
 pub use data::export_runtime;
-pub use data::mongodb_dump;
-pub use data::mongodb_import_export;
-pub use dbx_drivers::mongo_oidc;
-pub use dbx_drivers::mongo_shell;
-pub use dbx_drivers::salesforce_oauth;
 pub use dbx_formats::export_split_zip;
 pub use dbx_plugin_runtime::plugins;
 pub use dbx_sql::db_admin_sql;
@@ -71,9 +48,6 @@ pub use dbx_sql::object_source_sql;
 pub use dbx_types::models;
 pub use host::external;
 pub use persistence::history;
-pub use query::document_ops;
-pub use query::hbase_ops;
-pub use query::mongo_ops;
 pub use query::object_cache;
 pub use safety::production_safety;
 pub mod query;
@@ -83,7 +57,6 @@ pub use dbx_sql::query_execution_sql;
 pub use dbx_sql::query_result_sql;
 pub use persistence::saved_sql;
 pub use query::query_cancel;
-pub use query::redis_ops;
 pub use safety::risk_metrics;
 pub mod scheduled_backup;
 pub mod schema;
@@ -91,7 +64,6 @@ pub use connection::session_credentials;
 pub use connection::task_supervisor;
 pub use data::script_generator;
 pub use data::sql_file_import;
-pub use data::sqlite_backup;
 pub use data::table_export;
 pub use data::table_import;
 pub use data::transfer;
@@ -110,7 +82,6 @@ pub use dbx_sql::sql_editability;
 pub use dbx_sql::sql_error_position;
 pub use dbx_sql::sql_parser;
 pub use dbx_sql::sql_risk;
-pub(crate) use dbx_sql::sqlserver_temporal;
 pub use dbx_types::types;
 pub use host::update;
 pub use persistence::state_persistence;
@@ -123,3 +94,5 @@ pub use dbx_platform::download::{
     download_candidate_urls, race_download, race_download_urls, DownloadSource, CNB_RELEASE_DOWNLOAD_PREFIX,
     GITHUB_RELEASE_DOWNLOAD_PREFIX, R2_CDN_BASE,
 };
+
+pub use dbx_drivers::driver_error;

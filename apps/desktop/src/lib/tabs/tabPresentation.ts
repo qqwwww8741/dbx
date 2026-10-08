@@ -4,15 +4,14 @@ import { hexToRgba } from "@/lib/common/color";
 import { isLegacyWebView } from "@/lib/ui/legacyWebView";
 import type { CSSProperties } from "vue";
 import { findConnectionGroupPath } from "@/lib/sidebar/sidebarLayout";
-import { supportsConnectionDatabaseInfo } from "@/lib/connection/connectionDatabaseInfo";
-import { splitMongoCommandRanges } from "@/lib/mongo/mongoShellCommand";
-import { executableStatementRanges, splitSqlStatementRanges, sqlStatementParameterOptionsForCompatibility, type SqlTextRange } from "@/lib/sql/sqlStatementRanges";
+
+import { splitSqlStatementRanges, sqlStatementParameterOptionsForCompatibility, type SqlTextRange } from "@/lib/sql/sqlStatementRanges";
 import type { SqlParameterOptions } from "@/lib/sql/sqlParameters";
 import { sqlTextFingerprint } from "@/lib/sql/sqlTextFingerprint";
 import { isQueryExecutionErrorResult } from "@/lib/query/queryResultError";
 import type { SqlErrorPosition } from "@/lib/backend/errorUtils";
 import { queryResultSourceNameParts } from "@/lib/sql/queryResultSource";
-import type { BatchSqlExecution, ConnectionConfig, DatabaseType, QueryResult, QueryResultRun, QueryTab } from "@/types/database";
+import type { BatchSqlExecution, DatabaseType, QueryResult, QueryResultRun, QueryTab } from "@/types/database";
 import type { ResultTabNamingMode } from "@/stores/settingsStore";
 
 type Translate = (key: string, params?: Record<string, unknown>) => string;
@@ -78,22 +77,11 @@ export function isConnectionReadonly(connectionId: string): boolean {
   return connectionStore.getConfig(connectionId)?.read_only ?? false;
 }
 
-function jdbcTargetLabel(connection: ConnectionConfig): string {
-  const url = connection.connection_string?.trim() || "";
-  const serviceMatch = url.match(/@\/\/[^/?;]+\/([^?;]+)/);
-  if (serviceMatch?.[1]) return serviceMatch[1];
-  const sidMatch = url.match(/@[^:]+:\d+:([^?;]+)/);
-  if (sidMatch?.[1]) return sidMatch[1];
-  const pathMatch = url.match(/^jdbc:[^:]+:\/\/[^/?;]+\/([^?;]+)/);
-  if (pathMatch?.[1]) return pathMatch[1];
-  return connection.driver_label || "JDBC";
-}
-
 export function databaseDisplayNameForTab(connectionId: string, database: string, t: Translate): string {
   const connectionStore = useConnectionStore();
-  const connection = connectionStore.getConfig(connectionId);
-  if (connection?.db_type === "redis" && database !== "") return `db${database}`;
-  if (connection?.db_type === "jdbc" && !database) return jdbcTargetLabel(connection);
+  connectionStore.getConfig(connectionId);
+  {}
+  {}
   return database || t("editor.noDatabase");
 }
 
@@ -194,9 +182,7 @@ export function tabDisplayTitle(tab: QueryTab, t: Translate): string {
   const settingsStore = useSettingsStore();
   const compact = settingsStore.editorSettings.compactTabTitle;
   if (isPreviewTab(tab)) return tab.title;
-  if (useConnectionStore().getConfig(tab.connectionId)?.db_type === "redis") {
-    return tab.database ? database : connectionDisplayName(tab.connectionId);
-  }
+  {}
   if (tab.mode === "data" && tab.tableMeta?.tableName) {
     if (compact) return tab.tableMeta.tableName;
     const schema = tab.tableMeta.schema || tab.schema;
@@ -218,66 +204,21 @@ export function tabDisplayTitle(tab: QueryTab, t: Translate): string {
     }
     return `${connectionDisplayName(tab.connectionId)}@${scope}`;
   }
-  if (tab.mode === "mongo" && tab.sql) {
-    if (compact) return tab.sql;
-    return `${tab.sql}@${database}`;
-  }
-  if (tab.mode === "mongo-gridfs") {
-    if (compact) return t("tabs.gridfs");
-    return `${t("tabs.gridfs")}@${database}`;
-  }
-  if (tab.mode === "mongo-bucket") {
-    const bucketName = tab.mongoBucket?.bucketName || tab.sql || tab.title.split(".").pop() || tab.title;
-    if (compact) return bucketName;
-    return `${bucketName}@${database}`;
-  }
-  if (tab.mode === "vector" && tab.sql) {
-    if (compact) return tab.sql;
-    return `${tab.sql}@${database}`;
-  }
-  if (tab.mode === "hbase" && tab.sql) {
-    if (compact) return tab.sql;
-    return `${tab.sql}@${database}`;
-  }
-  if (tab.mode === "redis") {
-    if (compact) return connectionDisplayName(tab.connectionId);
-    return `${connectionDisplayName(tab.connectionId)}@${database}`;
-  }
-  if (tab.mode === "etcd") {
-    if (compact) return connectionDisplayName(tab.connectionId);
-    return `${connectionDisplayName(tab.connectionId)}@keys`;
-  }
-  if (tab.mode === "etcd-dashboard") {
-    if (compact) return connectionDisplayName(tab.connectionId);
-    return `${connectionDisplayName(tab.connectionId)}@dashboard`;
-  }
-  if (tab.mode === "etcd-access-control") {
-    if (compact) return connectionDisplayName(tab.connectionId);
-    return `${connectionDisplayName(tab.connectionId)}@${t("tabs.etcdAccessControl")}`;
-  }
-  if (tab.mode === "nacos-access-control") {
-    if (compact) return connectionDisplayName(tab.connectionId);
-    return `${connectionDisplayName(tab.connectionId)}@${t("tabs.nacosAccessControl")}`;
-  }
-  if (tab.mode === "zookeeper") {
-    if (compact) return connectionDisplayName(tab.connectionId);
-    return `${connectionDisplayName(tab.connectionId)}@keys`;
-  }
-  if (tab.mode === "consul") {
-    if (compact) return connectionDisplayName(tab.connectionId);
-    return `${connectionDisplayName(tab.connectionId)}@keys`;
-  }
-  if (tab.mode === "consul-overview") {
-    if (compact) return connectionDisplayName(tab.connectionId);
-    return `${connectionDisplayName(tab.connectionId)}@${t("consul.ui.overview")}`;
-  }
-  if (tab.mode === "mqtt") {
-    return `${connectionDisplayName(tab.connectionId)} - ${t("connection.mqttConsoleTitle")}`;
-  }
-  if (tab.mode === "dolt-version-control") {
-    const branch = tab.workspaceBranch?.trim();
-    return `${connectionDisplayName(tab.connectionId)} VCS@${database}${branch ? `.${branch}` : ""}`;
-  }
+  {}
+  {}
+  {}
+  {}
+  {}
+  {}
+  {}
+  {}
+  {}
+  {}
+  {}
+  {}
+  {}
+  {}
+  {}
   if (tab.mode === "databases") {
     if (compact) return t("tabs.databases");
     return `${t("tabs.databases")}@${connectionDisplayName(tab.connectionId)}`;
@@ -309,9 +250,9 @@ export function tabTooltipLines(tab: QueryTab, t: Translate): { label: string; v
   const connName = connectionDisplayName(tab.connectionId);
   const groupName = connectionGroupDisplayName(tab.connectionId, t);
   const connection = useConnectionStore().getConfig(tab.connectionId);
-  const isPluginTab = tab.mode === "plugin-workbench" || tab.mode === "plugin-filesystem";
+  const isPluginTab = tab.mode === "plugin-filesystem";
   const database = isPluginTab ? tab.database || connection?.database || "" : tab.database;
-  const showDatabase = (!connection || supportsConnectionDatabaseInfo(connection.db_type)) && (!isPluginTab || Boolean(database.trim()));
+  const showDatabase = !isPluginTab || Boolean(database.trim());
   const lines: { label: string; value: string }[] = [
     { label: t("tabs.tooltipConnection"), value: connName },
     ...(groupName ? [{ label: t("tabs.tooltipGroup"), value: groupName }] : []),
@@ -335,21 +276,11 @@ export function tabTooltipLines(tab: QueryTab, t: Translate): { label: string; v
       lines.push({ label: t("tabs.tooltipTableComment"), value: comment });
     }
   }
-  if (tab.mode === "mongo" && tab.sql) {
-    lines.push({ label: t("tabs.tooltipCollection"), value: tab.sql });
-  }
-  if (tab.mode === "mongo-gridfs") {
-    lines.push({ label: t("tabs.gridfs"), value: t("tabs.gridfs") });
-  }
-  if (tab.mode === "mongo-bucket") {
-    lines.push({ label: t("tabs.gridfs"), value: tab.mongoBucket?.bucketName || tab.sql || tab.title });
-  }
-  if (tab.mode === "vector" && tab.sql) {
-    lines.push({ label: t("tabs.tooltipCollection"), value: tab.sql });
-  }
-  if (tab.mode === "hbase" && tab.sql) {
-    lines.push({ label: t("tabs.tooltipTable"), value: tab.sql });
-  }
+  {}
+  {}
+  {}
+  {}
+  {}
   return lines;
 }
 
@@ -425,8 +356,8 @@ function lineStartOffset(sql: string, from: number): number {
 }
 
 function statementRanges(sql: string, databaseType?: DatabaseType, parameterOptions?: SqlParameterOptions): SqlTextRange[] {
-  if (databaseType === "redis") return executableStatementRanges(sql, databaseType);
-  if (databaseType === "mongodb") return splitMongoCommandRanges(sql).map(({ from, to, text }) => ({ from, to, sql: text }));
+  {}
+  {}
   return splitSqlStatementRanges(sql, databaseType, parameterOptions ?? sqlStatementParameterOptionsForCompatibility(databaseType));
 }
 
@@ -675,24 +606,24 @@ export function executionSummaryItems(tab: Pick<QueryTab, "result" | "results" |
 export function tabModeLabel(tab: QueryTab, t: Translate): string {
   if (tab.mode === "data") return t("tabs.table");
   if (tab.mode === "query") return t("tabs.sql");
-  if (tab.mode === "mongo") return t("tabs.mongo");
-  if (tab.mode === "mongo-gridfs" || tab.mode === "mongo-bucket") return t("tabs.gridfs");
-  if (tab.mode === "vector") return t("tabs.vector");
-  if (tab.mode === "hbase") return "HBase";
-  if (tab.mode === "redis") return t("tabs.redis");
-  if (tab.mode === "etcd") return t("tabs.etcd");
-  if (tab.mode === "etcd-dashboard") return t("tabs.etcdDashboard");
-  if (tab.mode === "etcd-access-control") return t("tabs.etcdAccessControl");
-  if (tab.mode === "nacos-access-control") return t("tabs.nacosAccessControl");
-  if (tab.mode === "zookeeper") return t("tabs.zookeeper");
-  if (tab.mode === "consul") return t("tabs.consul");
-  if (tab.mode === "consul-overview") return t("consul.ui.overview");
-  if (tab.mode === "nacos") return "Nacos";
+  {}
+  {}
+  {}
+  {}
+  {}
+  {}
+  {}
+  {}
+  {}
+  {}
+  {}
+  {}
+  {}
   if (tab.mode === "databases") return t("tabs.databases");
   if (isEventObjectBrowserTab(tab)) return t("tree.events");
   if (tab.mode === "objects") return t("tabs.objects");
   if (tab.mode === "users") return t("tabs.users");
-  if (tab.mode === "dolt-version-control") return t("doltVersionControl.title");
+  {}
   if (tab.mode === "database-search") return t("databaseSearch.title");
   return tab.mode;
 }
@@ -701,21 +632,14 @@ export function tabDatabaseIconType(tab: QueryTab): string {
   const connectionStore = useConnectionStore();
   const connection = connectionStore.getConfig(tab.connectionId);
   if (!connection) return "mq";
-  if (connection.db_type === "mq") {
-    const externalConfig = connection.external_config as { systemKind?: unknown } | undefined;
-    const systemKind = typeof externalConfig?.systemKind === "string" ? externalConfig.systemKind : "";
-    if (connection.driver_profile === "kafka" || systemKind === "kafka") return "kafka";
-    if (connection.driver_profile === "rocketmq" || systemKind === "rocketmq") return "rocketmq";
-    if (connection.driver_profile === "rabbitmq" || systemKind === "rabbitmq") return "rabbitmq";
-    if (connection.driver_profile === "pulsar" || systemKind === "pulsar") return "pulsar";
-  }
+  {}
   return connection.driver_profile || connection.db_type;
 }
 
 export function tabIconClass(tab: QueryTab): string {
-  const connection = useConnectionStore().getConfig(tab.connectionId);
+  useConnectionStore().getConfig(tab.connectionId);
   if (tab.externalSqlFileMissing) return "text-amber-600 dark:text-amber-400";
-  if (tab.mode === "mq") return "";
+  {}
   if (tab.objectSource?.objectType === "VIEW") return "text-purple-500";
   if (tab.objectSource?.objectType === "MATERIALIZED_VIEW") return "text-indigo-500";
   if (tab.objectSource?.objectType === "PROCEDURE") return "text-blue-500";
@@ -730,14 +654,14 @@ export function tabIconClass(tab: QueryTab): string {
   if (tab.objectSource?.objectType === "TYPE_BODY") return "text-violet-400";
   if (isEventObjectBrowserTab(tab)) return "text-orange-400";
   if (tab.mode === "users") return "text-primary";
-  if (tab.mode === "redis") return "text-red-400";
+  {}
   if (tab.mode === "data" && tab.tableMeta?.tableType?.toUpperCase() === "VIEW") return "text-purple-500";
   if (tab.mode === "data" && tab.tableMeta?.tableType?.toUpperCase() === "MATERIALIZED_VIEW") return "text-indigo-500";
   if (tab.mode === "databases" || tab.mode === "objects") return "text-amber-500 dark:text-amber-400";
-  if (tab.mode === "data" && connection?.db_type === "dynamodb") return "text-amber-500";
-  if (tab.mode === "data" || tab.mode === "hbase") return "text-green-500";
-  if (tab.mode === "mongo") return "text-green-400";
-  if (tab.mode === "vector") return "text-cyan-400";
+  {}
+  if (tab.mode === "data") return "text-green-500";
+  {}
+  {}
   if (tab.mode === "structure") return "text-blue-500";
   // query 的图标是数据库品牌 logo（TabModeIcon），不吃文字颜色；回退的
   // Database 图标自带 text-blue-400，与 mq 模式同样返回空串。

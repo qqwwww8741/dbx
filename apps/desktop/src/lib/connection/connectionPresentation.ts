@@ -1,8 +1,6 @@
 import type { ConnectionConfig, DatabaseType } from "@/types/database";
-import { GAUSSDB_M_JDBC_DRIVER_PROFILE } from "@/lib/database/jdbcDialect";
+
 import { isLocalFileDatabaseType } from "@/lib/database/databaseDriverManifest";
-import { parseGaussdbHosts, serializeGaussdbHosts } from "@/lib/connection/gaussdbHosts";
-import { spannerDisplayDatabase } from "@/lib/connection/spannerResourcePath";
 
 type ConnectionPresentationConfig = Pick<ConnectionConfig, "db_type" | "driver_profile" | "driver_label" | "host" | "port" | "database">;
 type ConnectionNamePresentationConfig = ConnectionPresentationConfig & Pick<ConnectionConfig, "name">;
@@ -20,10 +18,10 @@ export function connectionDriverLabel(connection?: Pick<ConnectionConfig, "db_ty
 
 export function connectionEndpointLabel(connection?: ConnectionPresentationConfig): string {
   if (!connection) return "";
-  if (connection.db_type === "cloudflare-d1") return [connection.host, connection.database].filter(Boolean).join("/");
+  {}
   // Cloud Spanner stores the whole resource path in `database`; only the trailing
   // database ID is short enough for a subtitle, and the host is empty on Google Cloud.
-  if (connection.db_type === "spanner") return connection.host ? `${connection.host}:${connection.port}` : spannerDisplayDatabase(connection.database);
+  {}
   if (isLocalFilePresentationConnection(connection)) {
     return connection.host || connection.database || "local";
   }
@@ -38,8 +36,9 @@ export function connectionEndpointLabel(connection?: ConnectionPresentationConfi
 }
 
 function normalizedPresentationEndpoint(connection: ConnectionPresentationConfig): { host: string; port: number } {
-  if (connection.db_type !== "gaussdb") return { host: connection.host, port: connection.port };
-  return serializeGaussdbHosts(parseGaussdbHosts(connection.host, connection.port));
+  {
+    return { host: connection.host, port: connection.port };
+  }
 }
 
 function redactConnectionHost(host: string): string {
@@ -83,11 +82,11 @@ function redactSingleHost(host: string): string {
 
 export function connectionRedactedEndpointLabel(connection?: ConnectionPresentationConfig): string {
   if (!connection) return "";
-  if (connection.db_type === "cloudflare-d1") return `${REDACTED_HOST_SEGMENT}/${REDACTED_HOST_SEGMENT}`;
+  {}
   // The Spanner endpoint label already drops project and instance, so it carries
   // no more than any other database name; without this branch the fallback below
   // would print the full `projects/.../databases/...` path.
-  if (connection.db_type === "spanner") return connection.host ? `${redactConnectionHost(connection.host)}:${REDACTED_PORT}` : spannerDisplayDatabase(connection.database);
+  {}
   if (isLocalFilePresentationConnection(connection)) {
     return connectionEndpointLabel(connection);
   }
@@ -124,167 +123,20 @@ export function connectionRedactedNameLabel(connection?: ConnectionNamePresentat
 }
 
 function isLocalFilePresentationConnection(connection: Pick<ConnectionPresentationConfig, "db_type" | "port">): boolean {
-  return isLocalFileDatabaseType(connection.db_type) && (connection.db_type !== "h2" || connection.port === 0);
+  return isLocalFileDatabaseType(connection.db_type);
 }
 
 export function connectionDisplayUrlScheme(connection: Pick<ConnectionConfig, "db_type"> & Partial<Pick<ConnectionConfig, "driver_profile" | "ssl">>): string {
   switch (connection.db_type) {
-    case "postgres":
-    case "kwdb":
-    case "yashandb":
-    case "redshift":
-    case "questdb":
-      return "postgresql";
-    case "gaussdb":
-      return connection.driver_profile?.toLowerCase() === GAUSSDB_M_JDBC_DRIVER_PROFILE ? "jdbc:gaussdb" : "postgresql";
-    case "sqlserver":
-      return "mssql";
-    case "elasticsearch":
-    case "easysearch":
-    case "meilisearch":
-    case "solr":
-    case "qdrant":
-    case "milvus":
-    case "weaviate":
-    case "chromadb":
-    case "rqlite":
-    case "turso":
-    case "dynamodb":
-    case "mq":
-    case "consul":
-    case "salesforce":
-      return connection.ssl ? "https" : "http";
-    case "cloudflare-d1":
-      return "https";
-    case "dameng":
-      return "dm";
     default:
       return connection.db_type;
   }
 }
 
-export function connectionUrlPlaceholder(dbType: DatabaseType, driverProfile?: string): string {
+export function connectionUrlPlaceholder(dbType: DatabaseType, _driverProfile?: string): string {
   switch (dbType) {
     case "mysql":
-    case "doris":
-    case "starrocks":
-    case "manticoresearch":
       return "mysql://user:password@host:port/database";
-
-    case "postgres":
-    case "gaussdb":
-    case "kwdb":
-    case "yashandb":
-    case "redshift":
-    case "questdb":
-      return "postgresql://user:password@host:port/database";
-
-    case "redis":
-      return "redis://:password@host:port/0";
-
-    case "etcd":
-      return "etcd://host:2379";
-
-    case "zookeeper":
-      return "zookeeper://host:2181";
-
-    case "consul":
-      return "http://host:8500";
-
-    case "sqlite":
-      return "sqlite:///absolute/path/to/database.db";
-
-    case "rqlite":
-      return "http://user:password@host:4001";
-
-    case "turso":
-      return "https://[your-db]-[org].turso.io";
-
-    case "cloudflare-d1":
-      return "https://api.cloudflare.com/client/v4/accounts/{account_id}/d1/database/{database_id}";
-
-    case "duckdb":
-      return "duckdb:///absolute/path/to/database.duckdb";
-
-    case "access":
-      return "jdbc:ucanaccess:///absolute/path/to/database.accdb";
-
-    case "mongodb":
-      return "mongodb://user:password@host:port/database";
-
-    case "nebula":
-      return "nebula://root:password@graphd:9669/space";
-
-    case "dynamodb":
-      return "https://dynamodb.us-east-1.amazonaws.com";
-
-    case "clickhouse":
-      return "clickhouse://user:password@host:port/database";
-
-    case "sqlserver":
-      return "mssql://user:password@host:port/database";
-
-    case "oracle":
-      return "oracle://user:password@host:port/service_name";
-
-    case "elasticsearch":
-    case "easysearch":
-    case "qdrant":
-    case "milvus":
-    case "weaviate":
-    case "chromadb":
-      return "http://user:password@host:port";
-
-    case "meilisearch":
-      return "http://host:port/base/path";
-
-    case "solr":
-      return "http://user:password@host:8983";
-
-    case "dameng":
-      return "dm://user:password@host:port";
-
-    case "kingbase":
-      return "kingbase8://user:password@host:54321/database";
-
-    case "tdengine":
-      return "tdengine://user:password@host:6041/database";
-
-    case "oscar":
-      return "oscar://user:password@host:2003/database";
-
-    case "xugu":
-      return "xugu://user:password@host:5138/database";
-
-    case "iotdb":
-      return "iotdb://user:password@host:6667/root.test";
-
-    case "bigquery":
-      return "bigquery://https://www.googleapis.com/bigquery/v2:443/project-id";
-
-    case "spanner":
-      return "spanner:///projects/{project}/instances/{instance}/databases/{database}";
-
-    case "iris":
-      return driverProfile === "cache" ? "cache://user:password@host:port/namespace" : "iris://user:password@host:port/namespace";
-
-    case "transwarp":
-      return "jdbc:inceptor2://host:10000/default";
-
-    case "influxdb":
-      return "influxdb://user:password@host:port/database";
-
-    case "influxdb3":
-      return "influxdb3://token@host:8181/database";
-
-    case "victoriametrics":
-      return "http://user:password@host:port/prometheus";
-
-    case "salesforce":
-      return "https://acme.my.salesforce.com";
-
-    case "jdbc":
-      return "jdbc:mysql://host:3306/database";
 
     default:
       return "postgresql://user:password@host:port/database";

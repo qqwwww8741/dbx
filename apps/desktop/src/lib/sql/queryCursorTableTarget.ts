@@ -1,4 +1,3 @@
-import { isSchemaAware, isSingleDatabase } from "@/lib/database/databaseFeatureSupport";
 import { extractIdentifierPartsAt, isSqlKeyword, sqlObjectNavigationTarget, type SqlObjectNavigationTarget, type SqlObjectNavigationType } from "@/lib/sql/sqlNavigation";
 import type { ActiveTabSidebarTarget } from "@/lib/sidebar/sidebarActiveTabTarget";
 import type { SqlCompletionTable } from "@/lib/sql/sqlCompletion";
@@ -68,7 +67,7 @@ export function queryTableCandidateAtSqlPosition(input: QueryTableCandidateAtPos
     database = parts[parts.length - 3];
     schema = parts[parts.length - 2];
   } else if (parts.length === 2) {
-    if (input.databaseType && !isSchemaAware(input.databaseType) && !isSingleDatabase(input.databaseType)) {
+    if (input.databaseType) {
       database = parts[0];
       schema = undefined;
     } else {

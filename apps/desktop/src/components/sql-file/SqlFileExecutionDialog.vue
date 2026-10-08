@@ -186,9 +186,9 @@ const sqlConnections = computed(() => orderConnectionsForSidebarDisplay(store.co
 // FOREIGN_KEY_CHECKS toggle, PostgreSQL-family types use DISABLE/ENABLE
 // TRIGGER ALL, and SQL Server uses NOCHECK/CHECK CONSTRAINT ALL. The toggle
 // appears wherever the backend implements one of those mechanisms.
-const MYSQL_BOOTSTRAP_IMPORT_TYPES = new Set(["mysql", "doris", "starrocks", "goldendb"]);
-const MYSQL_BOOTSTRAP_IMPORT_PROFILES = new Set(["mariadb", "tidb", "oceanbase", "custom_mysql", "doris", "starrocks", "selectdb", "goldendb"]);
-const POSTGRES_CONSTRAINT_BYPASS_TYPES = new Set(["postgres", "gaussdb", "opengauss"]);
+const MYSQL_BOOTSTRAP_IMPORT_TYPES = new Set(["mysql"]);
+const MYSQL_BOOTSTRAP_IMPORT_PROFILES = new Set(["custom_mysql"]);
+
 const isMysqlCompatibleTarget = computed(() => {
   const config = store.getConfig(connectionId.value);
   if (!config) return false;
@@ -197,7 +197,7 @@ const isMysqlCompatibleTarget = computed(() => {
 const supportsRelationalConstraintBypass = computed(() => {
   const config = store.getConfig(connectionId.value);
   if (!config) return false;
-  return isMysqlCompatibleTarget.value || POSTGRES_CONSTRAINT_BYPASS_TYPES.has(config.db_type) || config.db_type === "sqlserver";
+  return isMysqlCompatibleTarget.value;
 });
 
 const selectedConnection = computed(() => sqlConnections.value.find((c) => c.id === connectionId.value));

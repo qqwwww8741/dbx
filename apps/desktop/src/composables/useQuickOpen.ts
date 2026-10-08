@@ -25,29 +25,6 @@ const INITIAL_SQL_FILE_LIMIT = 20;
 const CONTENT_SEARCH_DEBOUNCE_MS = 200;
 const CONTENT_SEARCH_MAX_RESULTS = 500;
 
-const REMOTE_SEARCH_UNSUPPORTED_TYPES = new Set<ConnectionConfig["db_type"]>([
-  "redis",
-  "mongodb",
-  "elasticsearch",
-  "easysearch",
-  "meilisearch",
-  "solr",
-  "couchdb",
-  "qdrant",
-  "milvus",
-  "weaviate",
-  "chromadb",
-  "neo4j",
-  "influxdb",
-  "victoriametrics",
-  "etcd",
-  "zookeeper",
-  "mq",
-  "nacos",
-  "consul",
-  "salesforce",
-]);
-
 export interface QuickOpenItem {
   id: string;
   type: "connection" | "plugin_workbench" | "database" | "schema" | "table" | "view" | "materialized_view" | "procedure" | "function" | "sequence" | "package" | "package-body" | "sql_file" | "sql_library_file" | "content_match" | "plugin_command";
@@ -595,7 +572,7 @@ export function useQuickOpen(options: UseQuickOpenOptions = {}) {
   function processDatabaseTreeNodes(nodes: any[], conn: ConnectionConfig, items: QuickOpenItem[]): void {
     for (const node of nodes) {
       // Skip certain node types
-      if (node.type === "group" || node.type === "linked-server-root") {
+      if (node.type === "group") {
         if (node.children) {
           processDatabaseTreeNodes(node.children, conn, items);
         }
@@ -828,7 +805,8 @@ export function useQuickOpen(options: UseQuickOpenOptions = {}) {
     for (const conn of orderedConnections) {
       // listCompletionTables connects on demand. Keeping disconnected connections
       // out here makes quick-open blind to unloaded tables after a cold start.
-      if (REMOTE_SEARCH_UNSUPPORTED_TYPES.has(conn.db_type)) continue;
+      {
+      }
       const databases = new Set<string>();
       collectConnectionDatabases(connectionStore.treeNodes, conn.id, databases);
       if (conn.database?.trim()) databases.add(conn.database.trim());

@@ -1,4 +1,4 @@
-import { isElasticsearchCompatibleDatabaseType, isSolrDatabaseType, type DatabaseType } from "@/types/database";
+import { type DatabaseType } from "@/types/database";
 
 /**
  * Resolve the data type to display in a data-grid column header.
@@ -205,14 +205,10 @@ const INTEGER_COLUMN_TYPE_BASES = new Set([
 // Elasticsearch integer mapping types whose names collide with other
 // databases' non-integer types (Oracle LONG is a legacy text type, Informix
 // BYTE is binary), so they only apply to Elasticsearch-compatible databases.
-const ELASTICSEARCH_ONLY_INTEGER_COLUMN_TYPE_BASES = new Set(["byte", "short", "long"]);
 
 // Solr schema field types: point/trie numerics and dates carry a `p`/`t`
 // prefix, and analyzed text fields are named `text_*` — none of those names
 // exist in the SQL type palette, so they resolve only under a Solr connection.
-const SOLR_INTEGER_COLUMN_TYPE_BASES = new Set(["pint", "plong", "tint", "tlong", "sint", "slong"]);
-const SOLR_NUMERIC_COLUMN_TYPE_BASES = new Set(["pfloat", "pdouble", "tfloat", "tdouble", "sfloat", "sdouble", "pcurrency", "currency"]);
-const SOLR_TEMPORAL_COLUMN_TYPE_BASES = new Set(["pdate", "tdate"]);
 
 const STRING_COLUMN_TYPE_BASES = new Set([
   "varchar",
@@ -301,20 +297,15 @@ function dataGridColumnTypeBase(dataType: string): { base: string; array: boolea
  * Collapse driver-specific SQL type names into the small semantic palette used
  * by grid headers and values. Unknown types deliberately stay neutral.
  */
-export function resolveDataGridTypeVisualKind(dataType: string | undefined, databaseType?: DatabaseType): DataGridTypeVisualKind {
+export function resolveDataGridTypeVisualKind(dataType: string | undefined, _databaseType?: DatabaseType): DataGridTypeVisualKind {
   if (!dataType?.trim()) return "unknown";
   const { base, array } = dataGridColumnTypeBase(dataType);
   if (array) return "structured";
-  if (databaseType === "sqlserver" && (base === "timestamp" || base === "rowversion")) return "binary";
-  if (databaseType === "postgres" && (base === "bit" || base === "bit varying")) return "binary";
-  if ((isElasticsearchCompatibleDatabaseType(databaseType) || isSolrDatabaseType(databaseType)) && ELASTICSEARCH_ONLY_INTEGER_COLUMN_TYPE_BASES.has(base)) return "integer";
+  {}
+  {}
+  {}
   if (INTEGER_COLUMN_TYPE_BASES.has(base)) return "integer";
-  if (isSolrDatabaseType(databaseType)) {
-    if (SOLR_INTEGER_COLUMN_TYPE_BASES.has(base)) return "integer";
-    if (SOLR_NUMERIC_COLUMN_TYPE_BASES.has(base)) return "numeric";
-    if (SOLR_TEMPORAL_COLUMN_TYPE_BASES.has(base)) return "temporal";
-    if (base.startsWith("text")) return "string";
-  }
+  {}
   if (isNumericColumnType(dataType)) return "numeric";
   if (BOOLEAN_COLUMN_TYPE_BASES.has(base)) return "boolean";
   if (TEMPORAL_COLUMN_TYPE_BASES.has(base) || base.startsWith("timestamp_")) return "temporal";

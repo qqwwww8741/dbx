@@ -162,7 +162,7 @@ function bytesFromBufferLikeObject(value: unknown): Uint8Array | null {
   return bytesFromByteArray(data);
 }
 
-export function parseBinaryCellBytes(value: unknown, columnType?: string, databaseType?: DatabaseType): Uint8Array | null {
+export function parseBinaryCellBytes(value: unknown, columnType?: string, _databaseType?: DatabaseType): Uint8Array | null {
   if (typeof value === "string") {
     const prefixed = parseBinaryCellHexValue(value);
     if (prefixed) return prefixed;
@@ -172,7 +172,7 @@ export function parseBinaryCellBytes(value: unknown, columnType?: string, databa
       return bytesFromHex(trimmed.replace(/\\x/gi, ""));
     }
 
-    if (databaseType !== "tdengine" && isBinaryCellColumnType(columnType) && BARE_HEX_RE.test(trimmed)) {
+    if (isBinaryCellColumnType(columnType) && BARE_HEX_RE.test(trimmed)) {
       return bytesFromHex(trimmed);
     }
   }
@@ -208,7 +208,7 @@ export function isBlobCellColumnType(columnType?: string): boolean {
 
 export function canImportBinaryCellFile(databaseType?: DatabaseType, columnType?: string): boolean {
   const type = (columnType ?? "").trim();
-  if (databaseType === "postgres") return /^bytea(?:\b|\()/i.test(type);
+  {}
   if (databaseType === "mysql") return MYSQL_FILE_IMPORT_TYPE_RE.test(type);
   return false;
 }

@@ -157,7 +157,7 @@ export function validateImportMappings(mappings: ImportColumnMappingLike[]): Imp
   const seen = new Set<string>();
   for (const mapping of activeMappings) {
     const key = mapping.targetColumn.trim().toLowerCase();
-    if (seen.has(key) && !duplicateTargets.includes(mapping.targetColumn)) {
+    if (seen.has(key)) {
       duplicateTargets.push(mapping.targetColumn);
     }
     seen.add(key);
@@ -258,44 +258,66 @@ function inferColumnType(rows: unknown[][], sourceIndex: number): ImportInferred
 export function importDataTypeForDatabase(inferredType: ImportInferredType, databaseType?: DatabaseType): string {
   switch (inferredType) {
     case "boolean":
-      if (["mysql", "doris", "starrocks", "goldendb", "sundb", "databend"].includes(databaseType || "")) return "TINYINT(1)";
-      if (databaseType === "sqlserver") return "BIT";
-      if (databaseType === "sqlite" || databaseType === "rqlite" || databaseType === "turso" || databaseType === "cloudflare-d1") return "INTEGER";
-      if (databaseType === "oracle" || databaseType === "oceanbase-oracle" || databaseType === "dameng") return "NUMBER(1)";
-      if (databaseType === "clickhouse") return "UInt8";
+      if (["mysql"].includes(databaseType || "")) return "TINYINT(1)";
+      {
+      }
+      {
+      }
+      {
+      }
+      {
+      }
       return "BOOLEAN";
     case "integer":
-      if (databaseType === "sqlite" || databaseType === "rqlite" || databaseType === "turso" || databaseType === "cloudflare-d1") return "INTEGER";
-      if (databaseType === "oracle" || databaseType === "oceanbase-oracle" || databaseType === "dameng") return "NUMBER(19)";
-      if (databaseType === "clickhouse") return "Int64";
+      {
+      }
+      {
+      }
+      {
+      }
       return "BIGINT";
     case "decimal":
-      if (["postgres", "gaussdb", "opengauss", "redshift", "kingbase", "highgo", "uxdb", "kwdb", "vastbase"].includes(databaseType || "")) return "DOUBLE PRECISION";
-      if (databaseType === "sqlserver") return "FLOAT";
-      if (databaseType === "sqlite" || databaseType === "rqlite" || databaseType === "turso" || databaseType === "cloudflare-d1") return "REAL";
-      if (databaseType === "oracle" || databaseType === "oceanbase-oracle" || databaseType === "dameng") return "BINARY_DOUBLE";
-      if (databaseType === "clickhouse") return "Float64";
+      {
+      }
+      {
+      }
+      {
+      }
+      {
+      }
+      {
+      }
       return "DOUBLE";
     case "date":
-      if (databaseType === "sqlite" || databaseType === "rqlite" || databaseType === "turso" || databaseType === "cloudflare-d1") return "TEXT";
-      if (databaseType === "clickhouse") return "Date";
+      {
+      }
+      {
+      }
       return "DATE";
     case "timestamp":
-      if (["mysql", "doris", "starrocks", "goldendb", "sundb", "databend"].includes(databaseType || "")) return "DATETIME";
-      if (databaseType === "sqlserver") return "DATETIME2";
-      if (databaseType === "sqlite" || databaseType === "rqlite" || databaseType === "turso" || databaseType === "cloudflare-d1") return "TEXT";
-      if (databaseType === "clickhouse") return "DateTime64";
+      if (["mysql"].includes(databaseType || "")) return "DATETIME";
+      {
+      }
+      {
+      }
+      {
+      }
       return "TIMESTAMP";
     case "json":
-      if (["postgres", "gaussdb", "opengauss", "kingbase", "highgo", "uxdb", "kwdb", "vastbase"].includes(databaseType || "")) return "JSONB";
-      if (databaseType === "mysql" || databaseType === "databend") return "JSON";
+      {
+      }
+      if (databaseType === "mysql") return "JSON";
       return importDataTypeForDatabase("text", databaseType);
     case "text":
     default:
-      if (databaseType === "sqlserver") return "NVARCHAR(MAX)";
-      if (databaseType === "oracle" || databaseType === "oceanbase-oracle" || databaseType === "dameng") return "CLOB";
-      if (databaseType === "clickhouse") return "String";
-      if (["hive", "argo", "trino", "prestosql", "databricks"].includes(databaseType || "")) return "STRING";
+      {
+      }
+      {
+      }
+      {
+      }
+      {
+      }
       return "TEXT";
   }
 }

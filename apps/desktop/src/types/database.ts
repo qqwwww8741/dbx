@@ -7,20 +7,20 @@ import type { PluginAiRecommendation } from "@/types/pluginAiRecommendations";
 
 export type { DatabaseType } from "@/types/generated/databaseTypes";
 
-export function isElasticsearchCompatibleDatabaseType(dbType?: DatabaseType): boolean {
-  return dbType === "elasticsearch" || dbType === "easysearch";
+export function isElasticsearchCompatibleDatabaseType(_dbType?: DatabaseType): boolean {
+  return false;
 }
 
-export function isMeilisearchDatabaseType(dbType?: DatabaseType): boolean {
-  return dbType === "meilisearch";
+export function isMeilisearchDatabaseType(_dbType?: DatabaseType): boolean {
+  return false;
 }
 
-export function isSolrDatabaseType(dbType?: DatabaseType): boolean {
-  return dbType === "solr";
+export function isSolrDatabaseType(_dbType?: DatabaseType): boolean {
+  return false;
 }
 
-export function isCouchDbDatabaseType(dbType?: DatabaseType): boolean {
-  return dbType === "couchdb";
+export function isCouchDbDatabaseType(_dbType?: DatabaseType): boolean {
+  return false;
 }
 
 export interface SqlSnippet {
@@ -1598,13 +1598,7 @@ export type TreeNodeType =
   | "connection"
   | "connection-group"
   | "database"
-  | "tablespace"
   | "datafile"
-  | "doris-catalog"
-  | "linked-server-root"
-  | "linked-server"
-  | "linked-server-catalog"
-  | "linked-server-schema"
   | "schema"
   | "table"
   | "view"
@@ -1637,23 +1631,15 @@ export type TreeNodeType =
   | "group-types"
   | "group-sequences"
   | "group-synonyms"
-  | "oracle-db-links"
-  | "oracle-db-link"
   | "group-jobs"
   | "group-packages"
   | "group-partitions"
   | "group-extensions"
   | "group-event-triggers"
-  | "group-tablespaces"
-  | "group-datafiles"
   | "extension"
   | "event-trigger"
   | "object-browser"
   | "user-admin"
-  | "xugu-user-admin"
-  | "dameng-users"
-  | "dameng-roles"
-  | "dameng-job-admin"
   | "saved-sql-root"
   | "saved-sql-folder"
   | "saved-sql-file"
@@ -1671,27 +1657,7 @@ export type TreeNodeType =
   | "constraint"
   | "partition"
   | "subpartition"
-  | "redis-db"
-  | "mq-tenant"
-  | "nacos-namespace"
-  | "nacos-access-control"
-  | "etcd-root"
-  | "etcd-dashboard"
-  | "etcd-access-control"
-  | "zookeeper-root"
-  | "consul-root"
-  | "consul-overview"
-  | "mongo-db"
-  | "mongo-gridfs"
-  | "mongo-buckets"
-  | "mongo-bucket"
-  | "mongo-collection"
-  | "dynamodb-table"
-  | "vector-database"
-  | "vector-collection"
-  | "elasticsearch-index"
-  | "meilisearch-system"
-  | "mqtt-topic";
+  | "dynamodb-table";
 
 export interface ConnectionGroup {
   id: string;
@@ -2103,47 +2069,7 @@ export interface QueryTab {
   explainClientSessionId?: string;
   /** Invalidates tab-scoped completion metadata after session context changes. */
   completionContextVersion?: number;
-  mode:
-    | "data"
-    | "query"
-    | "redis"
-    | "redis-dashboard"
-    | "mongo"
-    | "meilisearch"
-    | "meilisearch-system"
-    | "mongo-gridfs"
-    | "mongo-bucket"
-    | "vector"
-    | "hbase"
-    | "etcd"
-    | "etcd-dashboard"
-    | "etcd-access-control"
-    | "zookeeper"
-    | "consul"
-    | "consul-overview"
-    | "mq"
-    | "mqtt"
-    | "nacos"
-    | "nacos-dashboard"
-    | "nacos-access-control"
-    | "databases"
-    | "objects"
-    | "structure"
-    | "users"
-    | "xugu-users"
-    | "dameng-users"
-    | "dameng-roles"
-    | "dameng-jobs"
-    | "processlist"
-    | "sqlserver-trace"
-    | "mysql-dashboard"
-    | "postgres-dashboard"
-    | "xugu-dashboard"
-    | "solr-admin"
-    | "dolt-version-control"
-    | "plugin-workbench"
-    | "plugin-filesystem"
-    | "database-search";
+  mode: "data" | "query" | "databases" | "objects" | "structure" | "users" | "processlist" | "mysql-dashboard" | "plugin-filesystem" | "database-search" | "plugin-workbench";
   pluginWorkbench?: {
     /** Host command that created this tab; distinct commands can share a workbench. */
     commandId?: string;

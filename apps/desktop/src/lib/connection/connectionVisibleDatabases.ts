@@ -1,16 +1,12 @@
-import type { ConnectionConfig, DatabaseType } from "@/types/database";
+import type { ConnectionConfig } from "@/types/database";
 import { filterDatabaseNamesForVisiblePicker, normalizeVisibleDatabaseSelection } from "@/lib/database/visibleDatabases";
 
 const DRAFT_VISIBLE_DATABASES_PREFIX = "__visible_draft_";
 
 // Turso and Cloudflare D1 target one fixed SQLite-compatible `main` namespace;
 // non-database services expose their own root objects rather than database namespaces.
-const UNSUPPORTED_VISIBLE_DATABASE_TYPES = new Set<DatabaseType>(["turso", "cloudflare-d1", "dynamodb", "elasticsearch", "easysearch", "meilisearch", "solr", "couchdb", "qdrant", "milvus", "weaviate", "chromadb", "etcd", "zookeeper", "mq", "nacos", "consul", "plugin", "salesforce"]);
 
-type VisibleDatabaseConnectionFields = Pick<
-  ConnectionConfig,
-  "db_type" | "driver_profile" | "host" | "port" | "username" | "database" | "connection_string" | "url_params" | "redis_connection_mode" | "redis_sentinel_master" | "redis_sentinel_nodes" | "redis_cluster_nodes" | "etcd_endpoints" | "jdbc_driver_class"
->;
+type VisibleDatabaseConnectionFields = Pick<ConnectionConfig, "db_type" | "driver_profile" | "host" | "port" | "username" | "database" | "connection_string" | "url_params" | "jdbc_driver_class">;
 
 type VisibleObjectFilterConnectionFields = VisibleDatabaseConnectionFields & Pick<ConnectionConfig, "visible_databases" | "visible_schemas">;
 
@@ -19,7 +15,7 @@ export function buildDraftVisibleDatabasesConnectionId(seed: string): string {
 }
 
 export function connectionCanChooseVisibleDatabases(connection: Pick<ConnectionConfig, "db_type"> | undefined): boolean {
-  return !!connection?.db_type && !UNSUPPORTED_VISIBLE_DATABASE_TYPES.has(connection.db_type);
+  return !!connection?.db_type;
 }
 
 export function initialVisibleDatabaseSelection(databaseNames: string[], visibleDatabases: string[] | undefined, connection?: Pick<ConnectionConfig, "db_type" | "driver_profile" | "visible_databases">): string[] {
@@ -56,11 +52,7 @@ function visibleDatabaseFingerprint(connection: VisibleDatabaseConnectionFields)
     database: connection.database || "",
     connection_string: connection.connection_string || "",
     url_params: connection.url_params || "",
-    redis_connection_mode: connection.redis_connection_mode || "",
-    redis_sentinel_master: connection.redis_sentinel_master || "",
-    redis_sentinel_nodes: connection.redis_sentinel_nodes || "",
-    redis_cluster_nodes: connection.redis_cluster_nodes || "",
-    etcd_endpoints: connection.etcd_endpoints || "",
+
     jdbc_driver_class: connection.jdbc_driver_class || "",
   });
 }

@@ -7,7 +7,6 @@ publish = false
 
 [features]
 default = []
-duckdb-sidecar = []
 
 [dependencies]
 dbx-sql-core = { path = "../dbx-sql-core" }

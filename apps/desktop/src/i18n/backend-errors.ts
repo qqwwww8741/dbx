@@ -1,5 +1,4 @@
 import { GENERIC_TRANSPORT_FAILURE_MESSAGE, LEGACY_BACKEND_ERROR_CODE, normalizeBackendError, sanitizeBackendErrorMessage, type BackendError } from "@/lib/backend/errorUtils";
-import { PHOENIX_DRIVER_NOT_INSTALLED_ERROR, PHOENIX_JDBC_PLUGIN_NOT_INSTALLED_ERROR } from "@/lib/database/phoenixConnection";
 
 /**
  * Minimal shape of a translate function, satisfied by both `useI18n().t` inside
@@ -84,8 +83,6 @@ const taggedAiCliErrorKeys: Record<string, string> = {
 const exactMessageKeys: Record<string, string> = {
   "Plugin update is in progress. Please try again after it finishes.": "pluginPlatform.updateInProgress",
   "Plugin update blocked by active operations. Please wait for them to finish.": "pluginPlatform.updateBlockedByOperations",
-  [PHOENIX_DRIVER_NOT_INSTALLED_ERROR]: "connection.phoenixDriverNotInstalled",
-  [PHOENIX_JDBC_PLUGIN_NOT_INSTALLED_ERROR]: "connection.phoenixDriverNotInstalled",
 };
 
 const patterns: [RegExp, string][] = [

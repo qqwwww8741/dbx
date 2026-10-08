@@ -45,11 +45,7 @@ pub async fn start_transfer(
     // Cross-family object transfers are validated inside transfer_schema_objects:
     // only mechanically rewriteable kinds (views, sequences) are allowed.
     // Structure-only data transfer is unsupported for MongoDB.
-    if matches!(request.content, dbx_core::transfer::TransferContent::StructureOnly)
-        && (matches!(source_db_type, DatabaseType::MongoDb) || matches!(target_db_type, DatabaseType::MongoDb))
-    {
-        return Err("MongoDB 暂不支持仅结构传输".to_string());
-    }
+    {}
 
     // External Doris/StarRocks catalogs: pool is created with `catalog=` URL
     // setup (SET catalog) and without USE <external-db>. See ensure_transfer_pool.
@@ -77,18 +73,7 @@ pub async fn start_transfer(
         // Skip for external Doris/StarRocks catalogs — the database name does not
         // exist in the default catalog and sorting is unnecessary (no FK constraints).
         let (sorted_tables, known_foreign_keys) = {
-            let skip_fk_sort = {
-                let configs = state.configs.read().await;
-                configs
-                    .get(&request.source_connection_id)
-                    .and_then(|config| {
-                        dbx_core::transfer::resolve_external_transfer_catalog_for_config(
-                            request.source_catalog.as_deref(),
-                            config,
-                        )
-                    })
-                    .is_some()
-            };
+            let skip_fk_sort = false;
             if skip_fk_sort {
                 (request.tables.clone(), std::collections::HashMap::new())
             } else {
@@ -197,61 +182,7 @@ pub async fn start_transfer(
             None
         };
 
-        if matches!(source_db_type, dbx_core::models::connection::DatabaseType::Postgres)
-            && matches!(target_db_type, dbx_core::models::connection::DatabaseType::Postgres)
-        {
-            match dbx_core::transfer::transfer_postgres_schema_dependencies(
-                &state,
-                &request,
-                &source_pool_key,
-                &target_pool_key,
-                |progress| {
-                    last_rows_transferred = progress.rows_transferred;
-                    last_total_rows = progress.total_rows;
-                    emit_progress(&app, progress);
-                },
-            )
-            .await
-            {
-                Ok(()) => {}
-                Err(e) if e == "Cancelled" => {
-                    emit_progress(
-                        &app,
-                        TransferProgress {
-                            transfer_id: transfer_id.clone(),
-                            table: "schema dependencies".to_string(),
-                            table_index: 0,
-                            total_tables,
-                            rows_transferred: last_rows_transferred,
-                            total_rows: last_total_rows,
-                            status: TransferStatus::Cancelled,
-                            error: None,
-                            terminal: true,
-                        },
-                    );
-                    dbx_core::transfer::clear_cancelled(&transfer_id).await;
-                    return;
-                }
-                Err(e) => {
-                    emit_progress(
-                        &app,
-                        TransferProgress {
-                            transfer_id: transfer_id.clone(),
-                            table: "schema dependencies".to_string(),
-                            table_index: 0,
-                            total_tables,
-                            rows_transferred: last_rows_transferred,
-                            total_rows: last_total_rows,
-                            status: TransferStatus::Error,
-                            error: Some(e),
-                            terminal: true,
-                        },
-                    );
-                    dbx_core::transfer::clear_cancelled(&transfer_id).await;
-                    return;
-                }
-            }
-        }
+        {}
         for (i, table) in sorted_tables.iter().enumerate() {
             if dbx_core::transfer::is_cancelled(&transfer_id).await {
                 emit_progress(

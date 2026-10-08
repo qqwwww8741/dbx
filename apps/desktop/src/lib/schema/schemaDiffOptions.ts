@@ -33,10 +33,8 @@ export const POSTGRES_SCHEMA_DIFF_OPTIONS: SchemaDiffOptionItem[] = [
 export const MYSQL_SCHEMA_DIFF_OPTIONS: SchemaDiffOptionItem[] = [...POSTGRES_SCHEMA_DIFF_OPTIONS, { id: "compareCharset", labelKey: "schemaDiff.options.compareCharset", defaultChecked: true }];
 
 export const SCHEMA_DIFF_OPTIONS_BY_DB_TYPE: Record<string, SchemaDiffOptionItem[]> = {
-  postgres: POSTGRES_SCHEMA_DIFF_OPTIONS,
-  opengauss: POSTGRES_SCHEMA_DIFF_OPTIONS,
   mysql: MYSQL_SCHEMA_DIFF_OPTIONS,
-  goldendb: MYSQL_SCHEMA_DIFF_OPTIONS,
+
   // sqlserver: [...] 后续扩展
 };
 

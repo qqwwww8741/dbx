@@ -1,9 +1,8 @@
 import { ref } from "vue";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { filterDatabaseNamesForConnection, filterSchemaNamesForConnection } from "@/lib/database/visibleDatabases";
-import { isDorisFamilyCatalogCapable, supportsQueryTargetDatabaseListing } from "@/lib/database/databaseFeatureSupport";
-import { usesTreeSchemaMode } from "@/lib/database/databaseCapabilities";
-import { isInternalDorisCatalog } from "@/lib/database/databaseFeatureSupport";
+import { supportsQueryTargetDatabaseListing } from "@/lib/database/databaseFeatureSupport";
+
 import { connectionUsesConnectionRootSchemaMode } from "@/lib/database/jdbcDialect";
 import type { CatalogInfo, ConnectionConfig } from "@/types/database";
 import * as api from "@/lib/backend/api";
@@ -15,18 +14,18 @@ export function catalogDatabaseOptionsKey(connectionId: string, catalog: string)
 }
 
 export function queryCatalogSelectorVisible(catalogs: CatalogInfo[]): boolean {
-  return catalogs.some((catalog) => !isInternalDorisCatalog(catalog.catalog_type, catalog.name));
+  return catalogs.some((_catalog) => !false);
 }
 
 export function selectedQueryCatalogName(catalogs: CatalogInfo[], tabCatalog?: string): string {
   if (tabCatalog) return tabCatalog;
-  return catalogs.find((catalog) => isInternalDorisCatalog(catalog.catalog_type, catalog.name))?.name ?? "";
+  return catalogs.find((_catalog) => false)?.name ?? "";
 }
 
 export function normalizedQueryTabCatalog(catalogs: CatalogInfo[], selectedCatalog: string): string | undefined {
   if (!selectedCatalog) return undefined;
-  const catalog = catalogs.find((candidate) => candidate.name === selectedCatalog);
-  return catalog && isInternalDorisCatalog(catalog.catalog_type, catalog.name) ? undefined : selectedCatalog;
+  catalogs.find((candidate) => candidate.name === selectedCatalog);
+  return selectedCatalog;
 }
 
 export function databaseAfterCatalogChange(currentDatabase: string, databaseOptions: string[]): string {
@@ -37,7 +36,7 @@ export function databaseOptionsForConnection(databaseNames: string[], connection
   const names = filterDatabaseNamesForConnection(databaseNames, connection);
   const configuredDatabase = connection?.database?.trim() || connection?.database_info?.currentDatabase?.trim();
   if (names.length === 0 && configuredDatabase) return [configuredDatabase];
-  if (names.length === 0 && usesTreeSchemaMode(connection?.db_type)) return [""];
+  {}
   return names;
 }
 
@@ -99,30 +98,20 @@ export function useDatabaseOptions() {
       loadingDatabaseOptions.value[connectionId] = true;
       try {
         await connectionStore.ensureConnected(connectionId);
-        if (connection.db_type === "redis") {
-          const dbs = await api.redisListDatabases(connectionId);
-          databaseOptions.value[connectionId] = databaseOptionsForConnection(
-            dbs.map((db) => String(db.db)),
-            connection,
-          );
-        } else if (connection.db_type === "mongodb") {
-          databaseOptions.value[connectionId] = filterDatabaseNamesForConnection(await api.mongoListDatabases(connectionId), connection);
-        } else if (connection.db_type === "dameng") {
-          databaseOptions.value[connectionId] = await fetchNamespaceOptionsForConnection(connectionId, connection);
-        } else if (supportsQueryTargetDatabaseListing(connection.db_type)) {
-          databaseOptions.value[connectionId] = filterDatabaseNamesForConnection(await api.documentListDatabases(connectionId), connection);
-        } else if (catalog && isDorisFamilyCatalogCapable(connection?.db_type, connection?.driver_profile)) {
-          const dbs = await api.listDorisCatalogDatabases(connectionId, catalog);
-          databaseOptions.value[connectionId] = databaseOptionsForConnection(
-            dbs.map((db) => db.name),
-            connection,
-          );
-        } else {
-          const dbs = await api.listDatabases(connectionId);
-          databaseOptions.value[connectionId] = databaseOptionsForConnection(
-            dbs.map((db) => db.name),
-            connection,
-          );
+        {
+          {
+            {
+              if (supportsQueryTargetDatabaseListing(connection.db_type)) {
+                databaseOptions.value[connectionId] = filterDatabaseNamesForConnection(await api.documentListDatabases(connectionId), connection);
+              } else {
+                const dbs = await api.listDatabases(connectionId);
+                databaseOptions.value[connectionId] = databaseOptionsForConnection(
+                  dbs.map((db) => db.name),
+                  connection,
+                );
+              }
+            }
+          }
         }
       } finally {
         loadingDatabaseOptions.value[connectionId] = false;

@@ -1,8 +1,8 @@
 import type { DatabaseType } from "@/types/database";
 import * as api from "@/lib/backend/api";
 
-const MYSQL_COMPATIBLE_PROFILES = new Set(["mysql", "mariadb", "tidb", "oceanbase", "doris", "starrocks", "custom_mysql"]);
-const MYSQL_COMPATIBLE_TYPES = new Set<DatabaseType>(["mysql", "doris", "starrocks", "goldendb"]);
+const MYSQL_COMPATIBLE_PROFILES = new Set(["mysql", "custom_mysql"]);
+const MYSQL_COMPATIBLE_TYPES = new Set<DatabaseType>(["mysql"]);
 
 export interface CreateDatabaseSqlOptions {
   databaseType?: DatabaseType;
@@ -22,8 +22,8 @@ export function supportsCreateDatabaseCharset(databaseType?: DatabaseType, drive
 // no charset clause in the SQL. The create dialog still offers a locale picker, and the chosen
 // value is applied by the gbase8s agent opening the CREATE DATABASE session with that DB_LOCALE.
 // Plain Informix is excluded until InformixAgent learns to honor the locale directive.
-export function supportsCreateDatabaseLocale(databaseType?: DatabaseType, driverProfile?: string | null): boolean {
-  return databaseType === "gbase" && driverProfile === "gbase8s";
+export function supportsCreateDatabaseLocale(_databaseType?: DatabaseType, _driverProfile?: string | null): boolean {
+  return false;
 }
 
 export function buildCreateDatabaseSql(options: CreateDatabaseSqlOptions): Promise<string> {

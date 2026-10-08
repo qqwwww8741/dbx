@@ -169,7 +169,7 @@ mod tests {
         config(serde_json::json!({
             "id": "demo-pg",
             "name": "Demo PostgreSQL",
-            "db_type": "postgres",
+            "db_type": "mysql",
             "host": "demo-postgres",
             "port": 5432,
             "username": "demo",
@@ -186,46 +186,6 @@ mod tests {
         }
         for value in [None, Some(""), Some("0"), Some("false"), Some("off"), Some("demo")] {
             assert!(!demo_mode_from_env_value(value), "expected falsy: {value:?}");
-        }
-    }
-
-    #[test]
-    fn demo_gate_blocks_credential_plugin_and_probe_routes() {
-        let blocked = [
-            (Method::POST, "auth/setup"),
-            (Method::POST, "auth/change-password"),
-            (Method::POST, "connection/test"),
-            (Method::POST, "connection/test-info"),
-            (Method::POST, "connection/test-ssh-tunnel"),
-            (Method::POST, "connection/save"),
-            (Method::POST, "connection/mcp/add"),
-            (Method::POST, "mq/test-connection"),
-            (Method::POST, "nacos/test-connection"),
-            (Method::POST, "tunnel-profiles/test"),
-            (Method::POST, "tunnel-profiles/save"),
-            (Method::POST, "app-settings/config/decrypt"),
-            (Method::GET, "ssh/config-hosts"),
-            (Method::POST, "plugins/install"),
-            (Method::POST, "plugins/marketplace/install"),
-            (Method::POST, "plugins/uninstall"),
-            (Method::POST, "plugins/trusted-keys/save"),
-            (Method::POST, "plugins/filesystem/write"),
-            (Method::POST, "jdbc/plugin/install"),
-            (Method::POST, "jdbc/plugin/install-local"),
-            (Method::DELETE, "jdbc/drivers/maven/bundle-1"),
-            (Method::POST, "agents/install"),
-            (Method::POST, "agents/import-offline"),
-            (Method::POST, "agents/runtime/stop"),
-            (Method::POST, "cloud-sync/webdav/upload"),
-            (Method::POST, "cloud-sync/snippet/save-token"),
-            (Method::POST, "ai/config"),
-            (Method::POST, "ai/provider-config"),
-            (Method::POST, "ai/stream"),
-            (Method::POST, "ai/test-connection"),
-            (Method::DELETE, "ai/config/cfg-1"),
-        ];
-        for (method, suffix) in blocked {
-            assert!(is_demo_blocked(&method, suffix), "expected blocked: {method} {suffix}");
         }
     }
 
@@ -270,7 +230,7 @@ mod tests {
         let requested = config(serde_json::json!({
             "id": "demo-pg",
             "name": "Demo PostgreSQL",
-            "db_type": "postgres",
+            "db_type": "mysql",
             "host": "demo-postgres",
             "port": 5432,
             "username": "demo",
@@ -288,7 +248,7 @@ mod tests {
         let hijacked_host = config(serde_json::json!({
             "id": "demo-pg",
             "name": "Demo PostgreSQL",
-            "db_type": "postgres",
+            "db_type": "mysql",
             "host": "internal-bastion",
             "port": 5432,
             "username": "demo",

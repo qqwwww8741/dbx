@@ -69,8 +69,6 @@ import {
   DEFAULT_EDITOR_SETTINGS,
   DEFAULT_DESKTOP_SETTINGS,
   DEFAULT_SIDEBAR_TABLE_PAGE_SIZE,
-  DUCKDB_WORKER_MAX_PROCESSES_MAX,
-  DUCKDB_WORKER_MAX_PROCESSES_MIN,
   normalizeDuckDbWorkerMaxProcesses,
   normalizeAiEnv,
   normalizeAiHeaders,
@@ -145,10 +143,6 @@ import { clearDebugLogs as clearStoredDebugLogs, downloadDebugLogs, getDebugLogB
 import {
   aiTestConnection,
   checkMcpServerStatus,
-  installMcpServer,
-  installNativeMcpServer,
-  uninstallMcpServer,
-  uninstallNpmMcpServer,
   loadMcpHttpServerSettings,
   saveMcpHttpServerSettings,
   mcpHttpServerStatus,
@@ -210,7 +204,7 @@ import { formatShortcutDisplay } from "@/lib/editor/shortcutDisplay";
 import { COLUMN_NAME_COPY_SEPARATOR_LABELS, COLUMN_NAME_COPY_SEPARATOR_OPTIONS, isColumnNameCopySeparator, type ColumnNameCopySeparator } from "@/lib/dataGrid/dataGridColumnNameCopy";
 import { normalizeSidebarHiddenTablePrefixes } from "@/lib/sidebar/sidebarTableNameDisplay";
 import { normalizeRedisKeyTemplates } from "@/lib/redis/redisKeyTemplates";
-import { REDIS_DATABASE_DISPLAY_LIMIT_MIN, REDIS_DATABASE_DISPLAY_LIMIT_MAX, REDIS_DATABASE_DISPLAY_LIMIT_OPTIONS } from "@/lib/redis/redisDatabaseAlias";
+
 import { currentStatementFrameRangeTo } from "@/lib/sql/currentStatementFrame";
 import { currentStatementFrameLayer } from "@/lib/editor/codemirrorCurrentStatementFrameLayer";
 import { buildQueryEditorLineNumbersExtension } from "@/lib/editor/queryEditorLineNumbers";
@@ -245,7 +239,7 @@ import {
   preferMcpNativeLaunch,
 } from "@/lib/mcp/mcpConfigTemplates";
 import { beginMcpStatusRequest, mcpUpdateAvailability } from "@/lib/mcp/mcpUpdateStatus";
-import { notifyComponentUpdatesChanged } from "@/lib/updates/componentUpdateEvents";
+
 import {
   addMcpAllowedToolName,
   customMcpAllowedToolNames,
@@ -258,7 +252,7 @@ import {
   toggleMcpAllowedToolName,
   type McpExecutionMode,
 } from "@/lib/mcp/mcpPolicySelection";
-import { isMacOS, isWindows } from "@/lib/backend/platform";
+import { isMacOS } from "@/lib/backend/platform";
 import { combineDataTypeForDatabase, dataTypeLengthInputValue, getDataTypeOptions, getDefaultLengthForType, isDataTypeLengthDisabled, splitDataType } from "@/lib/table/tableStructureEditorState";
 import { useToast } from "@/composables/useToast";
 import type { DatabaseType, SqlShortcutAction, SqlSnippet } from "@/types/database";
@@ -306,7 +300,7 @@ import {
 import { applyEditorSettingsDraftToRefs, type EditorSettingsDraftRefMap } from "@/lib/settings/applyEditorSettingsDraft";
 import { serializeSettingsTransfer, sortTransferCategories, transferCategoryForKey, type SettingsTransferCategoryId } from "@/lib/settings/settingsTransfer";
 import { useConnectionStore } from "@/stores/connectionStore";
-import { effectiveDatabaseTypeForConnection } from "@/lib/database/jdbcDialect";
+
 import { useSavedSqlStore } from "@/stores/savedSqlStore";
 import { usePromptTemplateStore } from "@/stores/promptTemplateStore";
 import { useTunnelProfileStore } from "@/stores/tunnelProfileStore";
@@ -363,7 +357,7 @@ const { draft: editHistoryRetentionLimit, loaded: historyRetentionLoaded, loadin
 const { draft: editMcpHistoryRetentionLimit, loaded: mcpHistoryRetentionLoaded, loading: mcpHistoryRetentionLoading, saving: mcpHistoryRetentionSaving, loadError: mcpHistoryRetentionLoadError } = mcpHistoryRetention;
 const mcpHistoryCleanupLoading = ref(false);
 const connectionStore = useConnectionStore();
-const hasSqlServerConnection = computed(() => connectionStore.connections.some((connection) => effectiveDatabaseTypeForConnection(connection) === "sqlserver"));
+const hasSqlServerConnection = computed(() => connectionStore.connections.some((_connection) => false));
 const savedSqlStore = useSavedSqlStore();
 const promptTemplateStore = usePromptTemplateStore();
 const tunnelProfileStore = useTunnelProfileStore();
@@ -513,9 +507,9 @@ const emit = defineEmits<{
 }>();
 
 const hasAnyUpdate = computed(() => Boolean(props.appUpdateAvailable || (props.driverUpdateCount || 0) > 0 || props.jdbcUpdateAvailable || props.mcpUpdateAvailable || (props.pluginUpdateCount || 0) > 0));
-const updateCheckItemKeys = ["app", "drivers", "jdbc", "mcp", "plugins"] as const;
+const updateCheckItemKeys = ["app", "drivers", "mcp", "plugins"] as const;
 type UpdateCheckItem = (typeof updateCheckItemKeys)[number];
-const updateCheckLoading = ref<Record<UpdateCheckItem, boolean>>({ app: false, drivers: false, jdbc: false, mcp: false, plugins: false });
+const updateCheckLoading = ref<Record<UpdateCheckItem, boolean>>({ app: false, drivers: false, mcp: false, plugins: false });
 let updateCheckRevealTimers: ReturnType<typeof setTimeout>[] = [];
 let updateCheckWasActive = false;
 
@@ -693,7 +687,7 @@ const tableCompletionSchemaQualificationDescription = computed(() => {
 const editInsertSpaceAfterCompletion = ref(settingsStore.editorSettings.insertSpaceAfterCompletion);
 const editSqlServerSpaceConfirmsCompletion = ref(settingsStore.editorSettings.sqlServerSpaceConfirmsCompletion);
 const editFunctionCompletionIncludeParams = ref(settingsStore.editorSettings.functionCompletionIncludeParams);
-const showSqlServerSpaceConfirmsCompletion = computed(() => hasSqlServerConnection.value || settingsStore.editorSettings.sqlServerSpaceConfirmsCompletion || editSqlServerSpaceConfirmsCompletion.value);
+
 const editSortCompletionColumnsAlphabetically = ref(settingsStore.editorSettings.sortCompletionColumnsAlphabetically);
 const editSelectFirstCompletionOnOpen = ref(settingsStore.editorSettings.selectFirstCompletionOnOpen);
 const editCompletionTriggerMode = ref<SqlCompletionTriggerMode>(settingsStore.editorSettings.completionTriggerMode);
@@ -739,7 +733,7 @@ const editDuckDbWorkerMaxProcesses = ref(settingsStore.desktopSettings.duckdb_wo
 const startupDuckDbWorkerProcessIsolation = ref(settingsStore.desktopSettings.duckdb_worker_process_isolation);
 const startupDuckDbWorkerMaxProcesses = ref(settingsStore.desktopSettings.duckdb_worker_max_processes);
 const duckDbWorkerStartupCaptured = ref(false);
-const duckDbRestarting = ref(false);
+
 const editSidebarTablePageSize = ref(settingsStore.desktopSettings.sidebar_table_page_size ?? DEFAULT_SIDEBAR_TABLE_PAGE_SIZE);
 const debugLogCopied = ref(false);
 const debugLogDownloaded = ref(false);
@@ -826,7 +820,7 @@ function sqlVariableSyntaxToggle(key: keyof SqlVariableSyntaxToggles): boolean {
 
 function setSqlVariableSyntaxToggle(key: keyof SqlVariableSyntaxToggles, value: boolean) {
   const dbType = editSqlVariableSyntaxDatabaseType.value;
-  if ((dbType === "neo4j" || dbType === "nebula") && key === "named") return;
+  {}
   const merged: SqlVariableSyntaxToggles = {
     ...DEFAULT_SQL_VARIABLE_SYNTAX_TOGGLES,
     ...editSqlVariableSyntaxOverrides.value[dbType],
@@ -2301,7 +2295,7 @@ function shortcutConflictHintText(definition: ShortcutDefinition): string {
 const hasShortcutConflicts = computed(() => shortcutConflicts.value.length > 0);
 const shortcutsChanged = computed(() => JSON.stringify(editShortcuts.value) !== JSON.stringify(editEditorSettingsBase.value.shortcuts));
 const sqlShortcutsChanged = computed(() => JSON.stringify(editSqlShortcuts.value) !== JSON.stringify(editEditorSettingsBase.value.sqlShortcuts));
-const duckDbWorkerSettingsRequireRestart = computed(() => editDuckDbWorkerProcessIsolation.value !== startupDuckDbWorkerProcessIsolation.value || normalizeDuckDbWorkerMaxProcesses(editDuckDbWorkerMaxProcesses.value) !== startupDuckDbWorkerMaxProcesses.value);
+
 const hasBlockingShortcutConflicts = computed(() => {
   const shortcutDraftTouched = shortcutsChanged.value || sqlShortcutsChanged.value;
   if (!shortcutDraftTouched) return false;
@@ -2428,20 +2422,6 @@ async function applySettings() {
 async function applySettingsAndClose() {
   if (await applySettingsForResult()) {
     closeSettings();
-  }
-}
-
-async function restartDbxForDuckDbIsolation() {
-  if (duckDbRestarting.value || hasApplyBlocker.value || isWeb) return;
-  duckDbRestarting.value = true;
-  try {
-    await persistSettings();
-    const { relaunch } = await import("@tauri-apps/plugin-process");
-    await relaunch();
-  } catch (e: any) {
-    toast(t("settings.restartDbxFailed", { error: e?.message || String(e) }), 5000);
-  } finally {
-    duckDbRestarting.value = false;
   }
 }
 
@@ -3663,10 +3643,7 @@ const MCP_SCOPE_CONNECTION_STORAGE_KEY = "dbx-mcp-config-scope-connection";
 const mcpPolicyLoading = ref(false);
 const mcpPolicySaving = ref(false);
 const mcpPolicyLoadError = ref("");
-const mcpInstalling = ref(false);
-const mcpUninstalling = ref(false);
-const mcpInstallMessage = ref("");
-const mcpInstallError = ref(false);
+
 const mcpPolicyDraft = ref<McpGlobalPolicy>(normalizeMcpGlobalPolicy(settingsStore.mcpGlobalPolicy));
 const mcpPolicyBaseline = ref<McpGlobalPolicy>(normalizeMcpGlobalPolicy(settingsStore.mcpGlobalPolicy));
 
@@ -4252,7 +4229,7 @@ async function rotateMcpHttpToken() {
 const mcpLaunchConfig = computed<McpLaunchConfig | undefined>(() => {
   if (isWeb) {
     return {
-      command: "dbx-mcp-server",
+      command: "dbx-mcp",
       env: {
         DBX_WEB_URL: mcpWebBackendUrl(window.location.origin, apiUrl("/api")),
         DBX_WEB_PASSWORD: "your-web-login-password",
@@ -4261,19 +4238,13 @@ const mcpLaunchConfig = computed<McpLaunchConfig | undefined>(() => {
   }
   const env = mcpStatus.value?.data_dir ? { DBX_DATA_DIR: mcpStatus.value.data_dir } : undefined;
   if (mcpStatus.value?.native_bin_path) {
-    return preferMcpNativeLaunch({ command: "dbx-mcp-server", env }, mcpStatus.value.native_bin_path);
+    return preferMcpNativeLaunch({ command: "dbx-mcp", env }, mcpStatus.value.native_bin_path);
   }
-  if (mcpStatus.value?.node_path && mcpStatus.value.script_path) {
-    return {
-      command: mcpStatus.value.node_path,
-      args: [mcpStatus.value.script_path],
-      env,
-    };
-  }
+
   if (mcpStatus.value?.bin_path) {
     return { command: mcpStatus.value.bin_path, env };
   }
-  return env ? { command: "dbx-mcp-server", env } : undefined;
+  return env ? { command: "dbx-mcp", env } : undefined;
 });
 
 const mcpJsonRecommendedConfig = computed(() => buildMcpJsonConfig(mcpLaunchConfig.value));
@@ -4308,20 +4279,7 @@ const mcpStatusLabel = computed(() => {
   return t("settings.mcpReady");
 });
 
-const mcpCommand = computed(() => {
-  if (!mcpStatus.value) return isWindows() ? 'powershell -NoProfile -Command "irm https://dbxio.com/install-mcp.ps1 | iex"' : "curl -fsSL https://dbxio.com/install-mcp | sh";
-  return mcpStatus.value.installed ? mcpStatus.value.update_command : mcpStatus.value.install_command;
-});
-
-const mcpUninstallCommand = computed(() => mcpStatus.value?.uninstall_command || "npm uninstall -g @dbx-app/mcp-server");
-const mcpNativeMigrationAvailable = computed(() => mcpStatus.value?.installation_source === "npm");
-const mcpInstallDisabled = computed(() => mcpInstalling.value || mcpUninstalling.value || Boolean(mcpStatus.value?.installed && !mcpStatus.value.update_available && !mcpNativeMigrationAvailable.value));
-const mcpInstallButtonLabel = computed(() => {
-  if (mcpInstalling.value) return t("settings.mcpInstalling");
-  if (mcpNativeMigrationAvailable.value) return t("settings.mcpSwitchToNativeButton");
-  if (!mcpStatus.value?.installed) return t("settings.mcpInstallButton");
-  return mcpStatus.value.update_available ? t("settings.mcpUpdateButton") : t("settings.mcpUpToDate");
-});
+const mcpCommand = computed(() => "cargo build --release -p dbx-mcp --features dbx-core/sqlite-sqlcipher,os-keyring");
 
 async function refreshMcpStatus() {
   if (mcpStatusLoading.value) return;
@@ -4330,7 +4288,7 @@ async function refreshMcpStatus() {
   const requestId = beginMcpStatusRequest();
   try {
     mcpStatus.value = await checkMcpServerStatus();
-    // 通知工具栏徽章同步：携带已获取的 update_available，避免根组件重复查询 npm registry。
+    // Keep the toolbar status in sync.
     window.dispatchEvent(
       new CustomEvent("dbx-mcp-status-changed", {
         detail: { updateAvailable: mcpUpdateAvailability(mcpStatus.value), requestId },
@@ -4354,75 +4312,6 @@ async function copyMcpText(kind: McpCopyKind, value: string) {
   window.setTimeout(() => {
     if (mcpCopied.value === kind) mcpCopied.value = "";
   }, 1500);
-}
-
-async function installMcp() {
-  if (mcpInstalling.value || mcpUninstalling.value) return;
-  mcpInstalling.value = true;
-  mcpInstallMessage.value = "";
-  mcpInstallError.value = false;
-  try {
-    const result = mcpNativeMigrationAvailable.value || !mcpStatus.value?.installed ? await installNativeMcpServer() : await installMcpServer();
-    mcpInstallMessage.value = result;
-    mcpInstallError.value = false;
-    // 安装成功后刷新状态
-    await refreshMcpStatus();
-    notifyComponentUpdatesChanged();
-  } catch (e: any) {
-    mcpInstallMessage.value = e?.message || String(e);
-    mcpInstallError.value = true;
-  } finally {
-    mcpInstalling.value = false;
-    // 3秒后清除消息
-    window.setTimeout(() => {
-      mcpInstallMessage.value = "";
-      mcpInstallError.value = false;
-    }, 3000);
-  }
-}
-
-async function uninstallMcp() {
-  if (mcpInstalling.value || mcpUninstalling.value || !mcpStatus.value?.installed) return;
-  if (!window.confirm(t("settings.mcpUninstallConfirm"))) return;
-  mcpUninstalling.value = true;
-  mcpInstallMessage.value = "";
-  mcpInstallError.value = false;
-  try {
-    mcpInstallMessage.value = await uninstallMcpServer();
-    await refreshMcpStatus();
-    notifyComponentUpdatesChanged();
-  } catch (e: any) {
-    mcpInstallMessage.value = t("settings.mcpUninstallFailed", { error: e?.message || String(e) });
-    mcpInstallError.value = true;
-  } finally {
-    mcpUninstalling.value = false;
-    window.setTimeout(() => {
-      mcpInstallMessage.value = "";
-      mcpInstallError.value = false;
-    }, 3000);
-  }
-}
-
-async function uninstallNpmMcpFallback() {
-  if (mcpInstalling.value || mcpUninstalling.value || !mcpStatus.value?.npm_installed) return;
-  if (!window.confirm(t("settings.mcpRemoveNpmFallbackConfirm"))) return;
-  mcpUninstalling.value = true;
-  mcpInstallMessage.value = "";
-  mcpInstallError.value = false;
-  try {
-    mcpInstallMessage.value = await uninstallNpmMcpServer();
-    await refreshMcpStatus();
-    notifyComponentUpdatesChanged();
-  } catch (e: any) {
-    mcpInstallMessage.value = t("settings.mcpRemoveNpmFallbackFailed", { error: e?.message || String(e) });
-    mcpInstallError.value = true;
-  } finally {
-    mcpUninstalling.value = false;
-    window.setTimeout(() => {
-      mcpInstallMessage.value = "";
-      mcpInstallError.value = false;
-    }, 3000);
-  }
 }
 
 // ---------- WebDAV Sync ----------
@@ -5658,15 +5547,7 @@ const aiEndpointHint = computed(() => {
 const aiSupportsApiStyle = computed(() => !aiIsCliProvider.value && (aiEditProvider.value === "openai" || aiEditProvider.value === "openai-compatible" || aiEditProvider.value === "custom"));
 const aiSupportsAnthropicApiStyle = computed(() => aiEditProvider.value === "custom");
 const aiCliMcpNeedsInstall = computed(() => aiIsCliProvider.value && (!mcpStatus.value || !mcpStatus.value.installed));
-const aiCliMcpCanInstall = computed(() => {
-  const status = mcpStatus.value;
-  return !mcpInstalling.value && !mcpUninstalling.value && !!status?.npm_available && (!status.installed || status.update_available);
-});
-const aiCliMcpActionLabel = computed(() => {
-  if (!mcpStatus.value?.installed) return t("settings.mcpInstallButton");
-  if (mcpStatus.value.update_available) return t("settings.mcpUpdateButton");
-  return t("settings.mcpUpToDate");
-});
+
 const aiCliEnvError = computed(() => cliEnvValidationError());
 const aiHeadersValidationError = computed(() => customHeadersValidationError());
 const aiCliPathError = computed(() => {
@@ -6912,16 +6793,6 @@ onUnmounted(() => {
                   <Switch id="editor-insert-space-after-completion" v-model="editInsertSpaceAfterCompletion" class="mt-0.5" />
                 </div>
 
-                <div v-if="showSqlServerSpaceConfirmsCompletion" class="settings-item flex items-center justify-between gap-4 rounded-md border bg-muted/20 px-3 py-2">
-                  <div class="space-y-1">
-                    <Label for="editor-sqlserver-space-confirms-completion">{{ t("settings.sqlServerSpaceConfirmsCompletion") }}</Label>
-                    <p class="text-xs text-muted-foreground">
-                      {{ t("settings.sqlServerSpaceConfirmsCompletionDescription") }}
-                    </p>
-                  </div>
-                  <Switch id="editor-sqlserver-space-confirms-completion" v-model="editSqlServerSpaceConfirmsCompletion" class="mt-0.5" />
-                </div>
-
                 <div class="settings-item flex items-center justify-between gap-4 rounded-md border bg-muted/20 px-3 py-2">
                   <div class="space-y-1">
                     <Label for="editor-function-completion-include-params">{{ t("settings.functionCompletionIncludeParams") }}</Label>
@@ -7163,7 +7034,7 @@ onUnmounted(() => {
                     <div class="text-sm font-medium text-muted-foreground">
                       {{ t("settings.sqlVariableSyntax") }}
                     </div>
-                    <p v-if="editSqlVariableSyntaxDatabaseType !== 'neo4j'" class="text-xs text-muted-foreground">
+                    <p class="text-xs text-muted-foreground">
                       {{ t("settings.sqlVariableSyntaxDescription") }}
                     </p>
                   </div>
@@ -7197,13 +7068,7 @@ onUnmounted(() => {
                         {{ t(`settings.sqlVariableSyntax_${key}Description`) }}
                       </p>
                     </div>
-                    <Switch
-                      :id="`sql-var-syntax-${key}`"
-                      :model-value="sqlVariableSyntaxToggle(key)"
-                      :disabled="!editSqlVariableSubstitutionEnabled || (['neo4j', 'nebula'].includes(editSqlVariableSyntaxDatabaseType) && key === 'named')"
-                      class="mt-0.5 shrink-0"
-                      @update:model-value="(value) => setSqlVariableSyntaxToggle(key, value as boolean)"
-                    />
+                    <Switch :id="`sql-var-syntax-${key}`" :model-value="sqlVariableSyntaxToggle(key)" :disabled="!editSqlVariableSubstitutionEnabled" class="mt-0.5 shrink-0" @update:model-value="(value) => setSqlVariableSyntaxToggle(key, value as boolean)" />
                   </div>
                 </div>
               </div>
@@ -8953,57 +8818,6 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <template v-if="!isWeb">
-                <div class="space-y-3">
-                  <div class="text-sm font-medium text-muted-foreground">DuckDB</div>
-                  <div class="settings-item space-y-3 rounded-md border bg-muted/20 px-3 py-2">
-                    <div class="flex items-start justify-between gap-4">
-                      <div class="space-y-1">
-                        <Label for="duckdb-worker-process-isolation">
-                          {{ t("settings.duckDbWorkerProcessIsolation") }}
-                        </Label>
-                        <p class="text-xs text-muted-foreground">
-                          {{ t("settings.duckDbWorkerProcessIsolationDescription") }}
-                        </p>
-                      </div>
-                      <Switch id="duckdb-worker-process-isolation" v-model="editDuckDbWorkerProcessIsolation" class="mt-0.5" />
-                    </div>
-                    <div class="flex items-start justify-between gap-4">
-                      <div class="space-y-1">
-                        <Label for="duckdb-worker-max-processes">
-                          {{ t("settings.duckDbWorkerMaxProcesses") }}
-                        </Label>
-                        <p class="text-xs text-muted-foreground">
-                          {{ t("settings.duckDbWorkerMaxProcessesDescription") }}
-                        </p>
-                      </div>
-                      <Input
-                        id="duckdb-worker-max-processes"
-                        v-model.number="editDuckDbWorkerMaxProcesses"
-                        type="number"
-                        class="h-8 w-20 text-right [&::-webkit-inner-spin-button]:appearance-none"
-                        :min="DUCKDB_WORKER_MAX_PROCESSES_MIN"
-                        :max="DUCKDB_WORKER_MAX_PROCESSES_MAX"
-                        :step="1"
-                        @blur="editDuckDbWorkerMaxProcesses = normalizeDuckDbWorkerMaxProcesses(editDuckDbWorkerMaxProcesses)"
-                      />
-                    </div>
-                    <div v-if="duckDbWorkerSettingsRequireRestart" class="flex flex-wrap items-center gap-2 border-t pt-2">
-                      <p class="text-xs font-medium text-amber-600 dark:text-amber-400">
-                        {{ t("settings.duckDbWorkerProcessIsolationRestartRequired") }}
-                      </p>
-                      <Button type="button" variant="outline" size="sm" class="h-7 gap-1.5 px-2 text-xs" :disabled="duckDbRestarting || hasApplyBlocker" @click="restartDbxForDuckDbIsolation">
-                        <Loader2 v-if="duckDbRestarting" class="size-3.5 animate-spin" />
-                        <RefreshCw v-else class="size-3.5" />
-                        {{ t("settings.restartDbx") }}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-
-                <Separator />
-              </template>
-
               <div class="space-y-3">
                 <div class="text-sm font-medium text-muted-foreground">
                   {{ t("settings.dateTimeSection") }}
@@ -9070,44 +8884,6 @@ onUnmounted(() => {
               </div>
 
               <Separator />
-
-              <div id="redis-key-templates" class="space-y-3">
-                <div class="text-sm font-medium text-muted-foreground">
-                  {{ t("settings.redisKeyTemplatesSection") }}
-                </div>
-                <div class="space-y-2">
-                  <Label for="redis-key-templates-input">{{ t("settings.redisKeyTemplates") }}</Label>
-                  <textarea
-                    id="redis-key-templates-input"
-                    v-model="editRedisKeyTemplates"
-                    class="dbx-editor-font-family min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-xs outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                    :placeholder="t('settings.redisKeyTemplatesPlaceholder')"
-                    spellcheck="false"
-                  />
-                  <p class="text-xs text-muted-foreground">
-                    {{ t("settings.redisKeyTemplatesDescription") }}
-                  </p>
-                </div>
-                <div class="space-y-2">
-                  <Label for="redis-database-display-limit-input">{{ t("settings.redisDatabaseDisplayLimit") }}</Label>
-                  <div class="flex items-center gap-3">
-                    <Input
-                      id="redis-database-display-limit-input"
-                      type="number"
-                      list="redis-database-display-limits"
-                      :min="REDIS_DATABASE_DISPLAY_LIMIT_MIN"
-                      :max="REDIS_DATABASE_DISPLAY_LIMIT_MAX"
-                      step="10"
-                      v-model.number="editRedisDatabaseDisplayLimit"
-                      class="settings-export-number-input h-9 w-28 [&::-webkit-inner-spin-button]:appearance-none"
-                    />
-                    <datalist id="redis-database-display-limits">
-                      <option v-for="size in REDIS_DATABASE_DISPLAY_LIMIT_OPTIONS" :key="size" :value="size" />
-                    </datalist>
-                    <span class="text-xs text-muted-foreground">{{ t("settings.redisDatabaseDisplayLimitDescription") }}</span>
-                  </div>
-                </div>
-              </div>
 
               <Separator />
 
@@ -10520,10 +10296,7 @@ LIMIT 100;</pre
                         <RefreshCw v-else class="mr-1 h-3 w-3" />
                         {{ t("settings.mcpRefresh") }}
                       </Button>
-                      <Button v-if="aiCliMcpNeedsInstall || mcpStatus?.update_available" type="button" size="sm" class="h-7 px-2 text-xs" :disabled="!aiCliMcpCanInstall" @click="installMcp">
-                        <Loader2 v-if="mcpInstalling" class="mr-1 h-3 w-3 animate-spin" />
-                        {{ mcpInstalling ? t("settings.mcpInstalling") : aiCliMcpActionLabel }}
-                      </Button>
+                      <Button v-if="aiCliMcpNeedsInstall" type="button" size="sm" @click="copyMcpText('install', mcpCommand)">{{ t("common.copy") }}</Button>
                     </div>
                   </div>
                 </div>
@@ -10983,103 +10756,15 @@ LIMIT 100;</pre
                       </TabsContent>
 
                       <TabsContent value="stdio" class="m-0 space-y-4">
-                        <div v-if="!isWeb" class="grid gap-3 sm:grid-cols-2">
-                          <div class="rounded-md border p-3">
-                            <div class="text-xs font-medium uppercase text-muted-foreground">
-                              {{ t("settings.mcpCurrent") }}
-                            </div>
-                            <div class="mt-2 font-mono text-sm">
-                              {{ mcpStatus?.current_version ? `v${mcpStatus.current_version}` : t("settings.mcpVersionMissing") }}
-                            </div>
+                        <div v-if="!isWeb" class="rounded-md border p-3 space-y-3">
+                          <p class="text-sm font-medium">{{ t("settings.mcpMysqlEdition") }}</p>
+                          <p class="text-xs text-muted-foreground">{{ t("settings.mcpMysqlBuildHint") }}</p>
+                          <div class="flex items-center gap-2">
+                            <code class="min-w-0 flex-1 overflow-x-auto text-xs">{{ mcpCommand }}</code>
+                            <Button type="button" variant="outline" size="sm" @click="copyMcpText('install', mcpCommand)">{{ t("common.copy") }}</Button>
                           </div>
-                          <div class="rounded-md border p-3">
-                            <div class="text-xs font-medium uppercase text-muted-foreground">
-                              {{ t("settings.mcpLatest") }}
-                            </div>
-                            <div class="mt-2 font-mono text-sm">
-                              {{ mcpStatus?.latest_version ? `v${mcpStatus.latest_version}` : t("settings.mcpVersionUnknown") }}
-                            </div>
-                          </div>
-                          <div class="rounded-md border p-3">
-                            <div class="text-xs font-medium uppercase text-muted-foreground">Node.js</div>
-                            <div class="mt-2 font-mono text-sm">
-                              {{ mcpStatus?.node_version || t("settings.mcpVersionUnknown") }}
-                            </div>
-                          </div>
-                          <div class="rounded-md border p-3">
-                            <div class="text-xs font-medium uppercase text-muted-foreground">npm</div>
-                            <div class="mt-2 font-mono text-sm">
-                              {{ mcpStatus?.npm_available ? t("settings.mcpAvailable") : t("settings.mcpUnavailable") }}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div v-if="mcpStatus?.bin_path" class="space-y-2">
-                          <Label>{{ t("settings.mcpBinPath") }}</Label>
-                          <div class="rounded-md border bg-muted/20 px-3 py-2 font-mono text-xs text-muted-foreground">
-                            {{ mcpStatus.bin_path }}
-                          </div>
-                        </div>
-
-                        <div v-if="!isWeb" class="space-y-2">
-                          <Label>{{ mcpStatus?.installed && !mcpNativeMigrationAvailable ? t("settings.mcpUpdateCommand") : t("settings.mcpInstallCommand") }}</Label>
-                          <p v-if="mcpNativeMigrationAvailable" class="rounded-md border border-blue-500/30 bg-blue-500/5 px-3 py-2 text-xs text-blue-700 dark:text-blue-300">
-                            {{ t("settings.mcpNativeMigrationHint") }}
-                          </p>
-                          <div class="flex min-w-0 items-center gap-2">
-                            <div class="min-w-0 flex-1 overflow-x-auto rounded-md border bg-background px-3 py-2 font-mono text-xs whitespace-nowrap">
-                              {{ mcpCommand }}
-                            </div>
-                            <Button type="button" variant="outline" size="icon" :title="t('common.copy')" @click="copyMcpText('install', mcpCommand)">
-                              <CheckCircle2 v-if="mcpCopied === 'install'" class="h-4 w-4 text-green-500" />
-                              <Copy v-else class="h-4 w-4" />
-                            </Button>
-                            <Button type="button" variant="default" :disabled="mcpInstallDisabled" @click="installMcp">
-                              <Loader2 v-if="mcpInstalling" class="mr-2 h-4 w-4 animate-spin" />
-                              <CheckCircle2 v-if="!mcpInstalling && mcpStatus?.installed && !mcpStatus?.update_available && !mcpNativeMigrationAvailable" class="mr-2 h-4 w-4" />
-                              {{ mcpInstallButtonLabel }}
-                            </Button>
-                          </div>
-                          <div
-                            v-if="mcpInstallMessage"
-                            :class="[
-                              'text-xs px-3 py-2 rounded-md border',
-                              mcpInstallError ? 'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-300 dark:border-red-800' : 'bg-green-50 text-green-700 border-green-200 dark:bg-green-950/30 dark:text-green-300 dark:border-green-800',
-                            ]"
-                          >
-                            {{ mcpInstallMessage }}
-                          </div>
-                        </div>
-
-                        <div v-if="!isWeb && mcpStatus?.installed" class="space-y-2">
-                          <Label>{{ t("settings.mcpUninstallCommand") }}</Label>
-                          <div class="flex min-w-0 items-center gap-2">
-                            <div class="min-w-0 flex-1 overflow-x-auto rounded-md border bg-background px-3 py-2 font-mono text-xs whitespace-nowrap">
-                              {{ mcpUninstallCommand }}
-                            </div>
-                            <Button type="button" variant="outline" size="icon" :title="t('common.copy')" @click="copyMcpText('uninstall', mcpUninstallCommand)">
-                              <CheckCircle2 v-if="mcpCopied === 'uninstall'" class="h-4 w-4 text-green-500" />
-                              <Copy v-else class="h-4 w-4" />
-                            </Button>
-                            <Button type="button" variant="outline" class="text-destructive hover:text-destructive" :disabled="mcpInstalling || mcpUninstalling" @click="uninstallMcp">
-                              <Loader2 v-if="mcpUninstalling" class="mr-2 h-4 w-4 animate-spin" />
-                              <Trash2 v-else class="mr-2 h-4 w-4" />
-                              {{ mcpUninstalling ? t("settings.mcpUninstalling") : t("settings.mcpUninstallButton") }}
-                            </Button>
-                          </div>
-                        </div>
-
-                        <div v-if="!isWeb && mcpStatus?.installation_source !== 'npm' && mcpStatus?.npm_installed" class="rounded-md border border-amber-500/30 bg-amber-500/5 p-3">
-                          <div class="flex flex-wrap items-center justify-between gap-3">
-                            <p class="min-w-0 flex-1 text-xs text-amber-800 dark:text-amber-200">
-                              {{ t("settings.mcpNpmFallbackHint") }}
-                            </p>
-                            <Button type="button" variant="outline" size="sm" :disabled="mcpInstalling || mcpUninstalling" @click="uninstallNpmMcpFallback">
-                              <Loader2 v-if="mcpUninstalling" class="mr-2 h-4 w-4 animate-spin" />
-                              <Trash2 v-else class="mr-2 h-4 w-4" />
-                              {{ t("settings.mcpRemoveNpmFallbackButton") }}
-                            </Button>
-                          </div>
+                          <p v-if="mcpStatus?.bin_path" class="break-all font-mono text-xs">{{ mcpStatus.bin_path }} · {{ mcpStatus.current_version }}</p>
+                          <Button type="button" variant="outline" size="sm" :disabled="mcpStatusLoading" @click="refreshMcpStatus">{{ t("common.refresh") }}</Button>
                         </div>
                       </TabsContent>
                     </Tabs>
@@ -11541,32 +11226,7 @@ LIMIT 100;</pre
                       <Switch id="auto-update-app" v-model="editAutoUpdateApp" :aria-label="t('settings.autoUpdateApp')" />
                     </div>
                   </div>
-                  <div class="flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2.5 text-sm">
-                    <button type="button" class="min-w-0 space-y-0.5 rounded-sm text-left transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50" @click="emit('open-driver-store', 'agent')">
-                      <div class="font-medium">{{ t("settings.updateDrivers") }}</div>
-                      <div class="flex items-center gap-1.5" :class="updateCheckLoading.drivers ? 'text-muted-foreground' : (props.driverUpdateCount || 0) > 0 ? 'text-primary' : 'text-muted-foreground'">
-                        <Loader2 v-if="updateCheckLoading.drivers" class="h-3 w-3 animate-spin" />
-                        <span>{{ updateCheckLoading.drivers ? t("updates.checking") : (props.driverUpdateCount || 0) > 0 ? t("settings.updateCount", { count: props.driverUpdateCount }) : t("settings.upToDate") }}</span>
-                      </div>
-                    </button>
-                    <div class="flex shrink-0 items-center gap-2">
-                      <Label for="auto-update-drivers" class="text-xs font-normal text-muted-foreground">{{ t("settings.autoUpdate") }}</Label>
-                      <Switch id="auto-update-drivers" v-model="editAutoUpdateDrivers" :aria-label="t('settings.autoUpdateDrivers')" />
-                    </div>
-                  </div>
-                  <div class="flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2.5 text-sm">
-                    <button type="button" class="min-w-0 space-y-0.5 rounded-sm text-left transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50" @click="emit('open-driver-store', 'jdbc')">
-                      <div class="font-medium">{{ t("settings.updateJdbc") }}</div>
-                      <div class="flex items-center gap-1.5" :class="updateCheckLoading.jdbc ? 'text-muted-foreground' : props.jdbcUpdateAvailable ? 'text-primary' : 'text-muted-foreground'">
-                        <Loader2 v-if="updateCheckLoading.jdbc" class="h-3 w-3 animate-spin" />
-                        <span>{{ updateCheckLoading.jdbc ? t("updates.checking") : props.jdbcUpdateAvailable ? t("settings.updateAvailable") : t("settings.upToDate") }}</span>
-                      </div>
-                    </button>
-                    <div class="flex shrink-0 items-center gap-2">
-                      <Label for="auto-update-jdbc" class="text-xs font-normal text-muted-foreground">{{ t("settings.autoUpdate") }}</Label>
-                      <Switch id="auto-update-jdbc" v-model="editAutoUpdateJdbc" :aria-label="t('settings.autoUpdateJdbc')" />
-                    </div>
-                  </div>
+
                   <div class="flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2.5 text-sm">
                     <button type="button" class="min-w-0 space-y-0.5 rounded-sm text-left transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50" @click="emit('open-mcp-settings')">
                       <div class="font-medium">{{ t("settings.updateMcp") }}</div>

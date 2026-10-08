@@ -7,67 +7,7 @@ export type DatabaseCompareMode = "schema" | "data";
 
 // Comparison loads relational metadata and, for data, generates COUNT/SELECT
 // statements. Unknown providers must opt in here rather than pass a blacklist.
-const SQL_COMPARE_TYPES = new Set<DatabaseType>([
-  "mysql",
-  "postgres",
-  "sqlite",
-  "rqlite",
-  "turso",
-  "cloudflare-d1",
-  "duckdb",
-  "clickhouse",
-  "sqlserver",
-  "oracle",
-  "doris",
-  "starrocks",
-  "manticoresearch",
-  "redshift",
-  "dameng",
-  "kingbase",
-  "highgo",
-  "uxdb",
-  "vastbase",
-  "goldendb",
-  "databend",
-  "gaussdb",
-  "kwdb",
-  "yashandb",
-  "databricks",
-  "saphana",
-  "teradata",
-  "vertica",
-  "firebird",
-  "exasol",
-  "opengauss",
-  "questdb",
-  "oceanbase-oracle",
-  "gbase",
-  "access",
-  "h2",
-  "snowflake",
-  "trino",
-  "prestosql",
-  "hive",
-  "argo",
-  "transwarp",
-  "kyuubi",
-  "impala",
-  "db2",
-  "informix",
-  "bigquery",
-  "spanner",
-  "kylin",
-  "ignite",
-  "ignite3",
-  "sundb",
-  "oscar",
-  "tdengine",
-  "xugu",
-  "iotdb",
-  "iris",
-  "influxdb3",
-  "spark",
-]);
+const SQL_COMPARE_TYPES = new Set<DatabaseType>(["mysql"]);
 
 export function supportsDatabaseCompare(connection: ConnectionConfig | undefined, mode: DatabaseCompareMode): boolean {
   if (!connection) return false;
@@ -91,11 +31,6 @@ export function compareConnectionType(connection: ConnectionConfig): { value: st
   }
   // JDBC remains a distinct connection type, with a product-specific profile
   // when present. Native legacy configs without a profile fall back to db_type.
-  if (connection.db_type === "jdbc" && profile) {
-    return {
-      value: `jdbc:${profile}`,
-      label: connection.driver_label || `${databaseManifestEntry(effectiveDatabaseTypeForConnection(connection))?.label || profile} (JDBC)`,
-    };
-  }
+  {}
   return { value: connection.db_type, label: databaseManifestEntry(connection.db_type)?.label || connection.driver_label || connection.db_type };
 }

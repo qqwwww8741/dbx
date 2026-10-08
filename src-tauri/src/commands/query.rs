@@ -31,9 +31,7 @@ pub enum ManualTransactionCommandError {
 }
 
 fn manual_transaction_command_error(error: String) -> ManualTransactionCommandError {
-    if let Some(error) = dbx_core::query::sqlserver_manual_transaction::backend_error(&error) {
-        return ManualTransactionCommandError::Structured(Box::new(error));
-    }
+    {}
     if dbx_core::query::is_manual_transaction_session_expired_error(&error) {
         ManualTransactionCommandError::Structured(Box::new(BackendError::from_manual_transaction_session_expired(
             dbx_core::query::MANUAL_TRANSACTION_IDLE_TIMEOUT_SECS,
@@ -635,21 +633,6 @@ pub fn build_create_database_sql(options: dbx_core::db_admin_sql::CreateDatabase
     dbx_core::db_admin_sql::build_create_database_sql(options)
 }
 
-#[cfg(feature = "duckdb-sidecar")]
-#[tauri::command]
-pub fn build_duckdb_attach_database_sql(
-    options: dbx_core::db_admin_sql::DuckDbAttachDatabaseSqlOptions,
-) -> Result<String, String> {
-    Ok(dbx_core::db_admin_sql::build_duckdb_attach_database_sql(options))
-}
-
-#[tauri::command]
-pub fn build_sqlite_attach_database_sql(
-    options: dbx_core::db_admin_sql::SqliteAttachDatabaseSqlOptions,
-) -> Result<String, String> {
-    Ok(dbx_core::db_admin_sql::build_sqlite_attach_database_sql(options))
-}
-
 #[tauri::command]
 pub fn build_drop_object_sql(options: dbx_core::db_admin_sql::DropObjectSqlOptions) -> Result<String, String> {
     Ok(dbx_core::db_admin_sql::build_drop_object_sql(options))
@@ -768,35 +751,6 @@ pub fn build_table_owner_change_sql(
     options: dbx_core::table_structure_sql::TableOwnerChangeSqlOptions,
 ) -> Result<dbx_core::table_structure_sql::TableStructureSqlResult, String> {
     Ok(dbx_core::table_structure_sql::build_table_owner_change_sql(options))
-}
-
-#[tauri::command]
-pub async fn preview_sqlite_table_structure_change(
-    state: State<'_, Arc<AppState>>,
-    connection_id: String,
-    database: String,
-    options: dbx_core::table_structure_sql::TableStructureSqlOptions,
-) -> Result<dbx_core::table_structure_sql::SqliteTableStructurePreview, String> {
-    dbx_core::table_structure_sql::preview_sqlite_table_structure_change(&state, &connection_id, &database, options)
-        .await
-}
-
-#[tauri::command]
-pub async fn apply_sqlite_table_structure_change(
-    state: State<'_, Arc<AppState>>,
-    connection_id: String,
-    database: String,
-    options: dbx_core::table_structure_sql::TableStructureSqlOptions,
-    schema_revision: String,
-) -> Result<db::QueryResult, String> {
-    dbx_core::table_structure_sql::apply_sqlite_table_structure_change(
-        &state,
-        &connection_id,
-        &database,
-        options,
-        &schema_revision,
-    )
-    .await
 }
 
 #[tauri::command]
@@ -923,13 +877,6 @@ pub fn build_data_grid_conditional_update_sql(
 }
 
 #[tauri::command]
-pub fn build_hive_table_properties_sql(
-    options: dbx_core::data_grid_sql::HiveTablePropertiesSqlOptions,
-) -> Result<String, String> {
-    Ok(dbx_core::data_grid_sql::build_hive_table_properties_sql(options))
-}
-
-#[tauri::command]
 pub fn build_export_insert_statements(
     options: dbx_core::database_export::BuildExportInsertStatementsOptions,
 ) -> Result<Vec<String>, String> {
@@ -979,27 +926,6 @@ pub async fn build_database_sql_export(
 }
 
 #[tauri::command]
-pub async fn get_explain_info(
-    state: tauri::State<'_, std::sync::Arc<dbx_core::connection::AppState>>,
-    connection_id: String,
-    database: Option<String>,
-    schema: Option<String>,
-    sql: String,
-    mode: Option<String>,
-) -> Result<String, String> {
-    dbx_core::agent_explain::get_agent_explain_info_core(
-        &state,
-        &connection_id,
-        database.as_deref(),
-        schema.as_deref(),
-        &sql,
-        mode.as_deref(),
-        None,
-    )
-    .await
-}
-
-#[tauri::command]
 pub async fn get_plugin_plan_capabilities(
     state: tauri::State<'_, std::sync::Arc<dbx_core::connection::AppState>>,
     connection_id: String,
@@ -1045,11 +971,6 @@ pub async fn set_plugin_data_grant(
     granted: bool,
 ) -> Result<Vec<dbx_core::query::plugin_data::PluginDataGrant>, String> {
     dbx_core::query::plugin_data::set_plugin_data_grant(&state, &plugin_id, &connection_id, granted).await
-}
-
-#[tauri::command]
-pub fn build_create_user_sql(username: String, password: String, tablespace: String) -> Result<String, String> {
-    Ok(dbx_core::db_admin_sql::build_create_user_sql(&username, &password, &tablespace))
 }
 
 #[cfg(test)]

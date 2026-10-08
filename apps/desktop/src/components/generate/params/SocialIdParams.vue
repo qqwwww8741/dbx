@@ -6,7 +6,7 @@ import type { GeneratorParams } from "@/lib/dataGrid/dataGenerate";
 import CommonOptions from "./CommonOptions.vue";
 import { useI18n } from "vue-i18n";
 
-const props = defineProps<{ params: GeneratorParams }>();
+defineProps<{ params: GeneratorParams }>();
 
 const { t } = useI18n();
 

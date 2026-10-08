@@ -29,76 +29,7 @@ pub(super) struct JdbcLogicalSession {
     close_done: tokio::sync::watch::Sender<bool>,
 }
 
-impl PluginRegistry {
-    pub async fn start_shared_jdbc_session_for_connection(
-        &self,
-        runtime_key: &str,
-        env: PluginRuntimeEnv,
-        connection_label: &str,
-    ) -> Result<Arc<PluginDriverSession>, String> {
-        let key = serde_json::to_string(&(runtime_key, &env.vars)).map_err(|error| error.to_string())?;
-        let mut cache = self.jdbc_runtimes.0.lock().await;
-        cache.retain(|_, runtime| runtime.strong_count() > 0);
-        let mut runtime = cache.get(&key).and_then(Weak::upgrade);
-        if let Some(existing) = &runtime {
-            let mut members = existing.members.lock().await;
-            if !members.1 && existing.process.sidecar.status().state == super::PluginSessionState::Running {
-                members.0 += 1;
-            } else {
-                if let Err(error) = existing.process.sidecar.shutdown().await {
-                    log::warn!("Failed to stop the stale shared JDBC plugin runtime: {error}");
-                }
-                members.1 = true;
-                drop(members);
-                runtime = None;
-            }
-        }
-        let runtime = match runtime {
-            Some(runtime) => runtime,
-            None => {
-                let process = self.start_driver_session_for_connection("jdbc", env, connection_label).await?;
-                let mut startup = StartupGuard(Some(process.clone()));
-                let protocol = process.invoke::<serde_json::Value>("jdbcSessionProtocol", serde_json::json!({})).await;
-                if !matches!(protocol, Ok(ref value) if value["version"] == 2) {
-                    let shutdown = process.shutdown().await;
-                    startup.0 = None;
-                    return Err(match shutdown {
-                        Ok(()) => {
-                            "Update the JDBC plugin to a version supporting embedded H2 logical sessions".to_string()
-                        }
-                        Err(error) => format!(
-                            "Update the JDBC plugin to a version supporting embedded H2 logical sessions; additionally \
-                             failed to stop its runtime: {error}"
-                        ),
-                    });
-                }
-                startup.0 = None;
-                let runtime = Arc::new(JdbcRuntime { process, members: Mutex::new((1, false)) });
-                cache.insert(key, Arc::downgrade(&runtime));
-                runtime
-            }
-        };
-        let logical = Arc::new(JdbcLogicalSession {
-            runtime: runtime.clone(),
-            id: uuid::Uuid::new_v4().to_string(),
-            closed: AtomicBool::new(false),
-            operation: Mutex::new(()),
-            close_done: tokio::sync::watch::channel(false).0,
-        });
-        let opened: Result<serde_json::Value, _> =
-            logical.invoke("openJdbcSession", serde_json::json!({}), Some(Duration::from_secs(3))).await;
-        if let Err(error) = opened {
-            logical.close().await;
-            return Err(error);
-        }
-        Ok(Arc::new(PluginDriverSession {
-            sidecar: runtime.process.sidecar.clone(),
-            driver_id: "jdbc".into(),
-            _activity: None,
-            logical: Some(logical),
-        }))
-    }
-}
+impl PluginRegistry {}
 
 impl JdbcLogicalSession {
     pub(super) fn is_available(&self) -> bool {

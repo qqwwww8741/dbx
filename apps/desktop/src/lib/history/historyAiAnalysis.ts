@@ -8,7 +8,7 @@ export type HistoryAiAnalysisEntry = {
   execution_time_ms: number;
   success: boolean;
   error?: string | null;
-  activity_kind?: "query" | "data_change" | "schema_change" | "import" | "transfer" | "redis_command";
+  activity_kind?: "query" | "data_change" | "schema_change" | "import" | "transfer";
   operation?: string;
   target?: string;
   affected_rows?: number | null;

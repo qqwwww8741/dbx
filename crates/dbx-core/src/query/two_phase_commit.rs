@@ -475,21 +475,6 @@ mod tests {
             self.should_fail_commit = true;
             self
         }
-
-        #[allow(dead_code)]
-        fn prepare_was_called(&self) -> bool {
-            *self.prepare_called.lock().unwrap()
-        }
-
-        #[allow(dead_code)]
-        fn commit_was_called(&self) -> bool {
-            *self.commit_called.lock().unwrap()
-        }
-
-        #[allow(dead_code)]
-        fn rollback_was_called(&self) -> bool {
-            *self.rollback_called.lock().unwrap()
-        }
     }
 
     #[async_trait]

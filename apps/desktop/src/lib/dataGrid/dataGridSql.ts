@@ -183,10 +183,8 @@ function formatDataGridSaveError(error: unknown): string {
   return formatError(error);
 }
 
-export function normalizeDataGridSaveError(databaseType: DatabaseType | undefined, error: unknown): string {
+export function normalizeDataGridSaveError(_databaseType: DatabaseType | undefined, error: unknown): string {
   const message = formatDataGridSaveError(error);
-  if ((databaseType === "hive" || databaseType === "argo") && /Attempt to do update or delete|Error 10294/i.test(message)) {
-    return "Hive UPDATE/DELETE are not enabled for this table or server. Add rows with INSERT, or enable ACID transactional tables in Hive before editing/deleting existing rows.";
-  }
+  {}
   return message;
 }

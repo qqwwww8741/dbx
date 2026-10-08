@@ -4,9 +4,9 @@ import { useI18n } from "vue-i18n";
 import { AlertCircle, Braces, Check, Copy, Download, GitBranch, Table2, FileText, Workflow } from "@lucide/vue";
 import type { ParsedExplainPlan, ExplainPlanNode } from "@/lib/diagram/explainPlan";
 import { flattenExplainPlanNodes, formatExplainPlanDetails } from "@/lib/diagram/explainPlan";
-import { extractActualRows } from "@/lib/diagram/planCanvas";
+
 import { Button } from "@/components/ui/button";
-import RedisJsonEditor from "@/components/redis/RedisJsonEditor.vue";
+
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/composables/useToast";
 import { translateBackendError } from "@/i18n/backend-errors";
@@ -129,15 +129,14 @@ const rawContent = computed(() => {
 });
 
 const isRawString = computed(() => typeof props.plan?.raw === "string");
-const rawFormatLabel = computed(() => (props.plan?.databaseType === "sqlserver" ? "XML" : isRawString.value ? "TEXT" : "JSON"));
+const rawFormatLabel = computed(() => (isRawString.value ? "TEXT" : "JSON"));
 const nodeCount = computed(() => (props.plan ? flattenExplainPlanNodes(props.plan.nodes).length : 0));
 // Measured rows exist only when the plan was produced by a mode that ran the query:
 // EXPLAIN ANALYZE on Postgres, SET STATISTICS XML on SQL Server.
 const measuredRowsLabel = computed(() => {
-  const databaseType = props.plan?.databaseType;
-  if (databaseType !== "postgres" && databaseType !== "sqlserver") return undefined;
-  if (!flattenExplainPlanNodes(props.plan!.nodes).some((node) => extractActualRows(node) !== undefined)) return undefined;
-  return databaseType === "sqlserver" ? "ACTUAL" : "ANALYZE";
+  {
+    return undefined;
+  }
 });
 
 const copied = ref(false);
@@ -189,9 +188,7 @@ function tableCellText(value: unknown): string {
       <span v-if="plan || hasTableView" class="shrink-0 whitespace-nowrap text-muted-foreground">
         {{ plan?.databaseType.toUpperCase() || "MYSQL" }}<template v-if="plan"> · {{ t("explain.nodeCount", { count: nodeCount }) }}</template>
       </span>
-      <span v-if="plan?.databaseType === 'dameng' && isRawString && rawContent.includes('->')" class="shrink-0 whitespace-nowrap ml-1 inline-flex items-center gap-1 rounded bg-green-100 px-1.5 py-0.5 font-semibold text-green-700 dark:bg-green-900/30 dark:text-green-300" style="font-size: 10px"
-        >A-TRACE</span
-      >
+
       <span v-if="measuredRowsLabel" class="shrink-0 whitespace-nowrap ml-1 inline-flex items-center gap-1 rounded bg-green-100 px-1.5 py-0.5 font-semibold text-green-700 dark:bg-green-900/30 dark:text-green-300" style="font-size: 10px">{{ measuredRowsLabel }}</span>
       <span class="flex-1 min-w-2" />
       <DropdownMenu v-if="plan">
@@ -321,8 +318,8 @@ function tableCellText(value: unknown): string {
           <Copy v-else class="h-3.5 w-3.5" />
           {{ t("explain.copyRaw", { format: rawFormatLabel }) }}
         </Button>
-        <RedisJsonEditor v-if="rawFormatLabel === 'JSON'" :model-value="rawContent" read-only presentation="viewer" class="min-h-0 flex-1" />
-        <pre v-else data-native-clipboard tabindex="-1" class="overflow-auto whitespace-pre p-3 font-mono text-xs leading-relaxed select-text outline-none" @keydown="onRawKeydown">{{ rawContent }}</pre>
+
+        <pre data-native-clipboard tabindex="-1" class="overflow-auto whitespace-pre p-3 font-mono text-xs leading-relaxed select-text outline-none" @keydown="onRawKeydown">{{ rawContent }}</pre>
       </div>
     </div>
   </div>

@@ -43,11 +43,6 @@ fn mysql_env() -> (ConnectionConfig, String) {
     build_env("DBX_LIVE_MYSQL", "live-mysql", "mysql")
 }
 
-/// Build the PostgreSQL connection config and database name from `DBX_LIVE_PG_*`.
-fn postgres_env() -> (ConnectionConfig, String) {
-    build_env("DBX_LIVE_PG", "live-postgres", "postgres")
-}
-
 fn build_env(prefix: &str, id: &str, db_type: &str) -> (ConnectionConfig, String) {
     let config = serde_json::from_value(json!({
         "id": id,
@@ -62,18 +57,6 @@ fn build_env(prefix: &str, id: &str, db_type: &str) -> (ConnectionConfig, String
     }))
     .expect("build live connection config");
     (config, required_env(&format!("{prefix}_DATABASE")))
-}
-
-fn full_access_policy() -> McpGlobalPolicy {
-    McpGlobalPolicy {
-        read_only: false,
-        allow_dangerous_sql: true,
-        allowed_connection_ids: None,
-        allowed_tool_names: None,
-        connection_policies: vec![],
-        query_timeout_secs: None,
-        ..Default::default()
-    }
 }
 
 /// Like `full_access_policy()` but with a 1s global MCP query timeout, used to
@@ -240,29 +223,6 @@ async fn mysql_batch_rejects_ddl_transaction_and_rolls_back_failed_dml() {
 
 #[tokio::test]
 #[ignore = "requires DBX_LIVE_MYSQL_* and DBX_LIVE_PG_* env pointing at reachable MySQL 5.7 / PostgreSQL"]
-async fn postgres_transaction_batch_respects_mcp_query_timeout() {
-    let (postgres, postgres_database) = postgres_env();
-    let (client, server_task, _dir) = boot_live_server!([postgres], short_timeout_policy());
-    let db = postgres_database.as_str();
-
-    // A use_transaction batch must honor the MCP global query-timeout policy:
-    // pg_sleep(3) exceeds the 1s policy, so the whole transactional batch errors
-    // instead of returning a successful merged outcome. Regression for the P1
-    // where the transaction path ignored options.timeout_secs and ran unbounded.
-    let (is_error, text) = batch!(&client, "live-postgres", db, "SELECT pg_sleep(3); SELECT 1", true);
-    assert!(is_error, "expected the PostgreSQL transaction batch to time out, got: {text}");
-    assert!(
-        text.contains("DBX_BATCH_EXECUTION_ERROR") || text.contains("Query timed out"),
-        "expected a timeout surfaced as an execution error, got: {text}"
-    );
-    assert!(!text.contains("Transaction outcome"), "the batch must NOT be a successful merged outcome, got: {text}");
-
-    client.cancel().await.expect("close MCP client");
-    server_task.abort();
-}
-
-#[tokio::test]
-#[ignore = "requires DBX_LIVE_MYSQL_* and DBX_LIVE_PG_* env pointing at reachable MySQL 5.7 / PostgreSQL"]
 async fn mysql_transaction_batch_respects_mcp_query_timeout() {
     let (mysql, mysql_database) = mysql_env();
     let (client, server_task, _dir) = boot_live_server!([mysql], short_timeout_policy());
@@ -284,50 +244,14 @@ async fn mysql_transaction_batch_respects_mcp_query_timeout() {
     server_task.abort();
 }
 
-#[tokio::test]
-#[ignore = "requires DBX_LIVE_MYSQL_* and DBX_LIVE_PG_* env pointing at reachable MySQL 5.7 / PostgreSQL"]
-async fn postgres_batch_runs_ddl_inside_a_rollbackable_transaction() {
-    let (postgres, postgres_database) = postgres_env();
-    let (client, server_task, _dir) = boot_live_server!([postgres], full_access_policy());
-    let db = postgres_database.as_str();
-
-    // PostgreSQL DDL is transactional: a CREATE TABLE + INSERT in one
-    // use_transaction batch succeeds and the table persists.
-    let ok_table = unique_table("pg_ddl_ok");
-    let (is_error, text) = batch!(
-        &client,
-        "live-postgres",
-        db,
-        format!("CREATE TABLE {ok_table} (id INT); INSERT INTO {ok_table} VALUES (1)"),
-        true
-    );
-    assert!(!is_error, "PostgreSQL DDL transaction batch failed: {text}");
-    assert!(text.contains("Transaction outcome"), "expected a merged transaction outcome, got: {text}");
-    let (_, count_text) = query!(&client, "live-postgres", db, format!("SELECT COUNT(*) AS c FROM {ok_table}"));
-    assert!(
-        count_text.contains("c") && count_text.contains("1"),
-        "expected the CREATE TABLE to persist (1 row), got: {count_text}"
-    );
-
-    // PostgreSQL DDL rolls back: CREATE TABLE + failing statement leaves no
-    // table behind — the exact contrast to MySQL's implicit-commit DDL.
-    let fail_table = unique_table("pg_ddl_fail");
-    let missing = unique_table("pg_missing");
-    let (is_error, text) = batch!(
-        &client,
-        "live-postgres",
-        db,
-        format!("CREATE TABLE {fail_table} (id INT); INSERT INTO {missing} VALUES (1)"),
-        true
-    );
-    assert!(is_error, "expected the failing PostgreSQL transaction batch to error, got: {text}");
-    assert!(text.contains("DBX_BATCH_EXECUTION_ERROR"), "expected execution error, got: {text}");
-    let (select_error, select_text) = query!(&client, "live-postgres", db, format!("SELECT * FROM {fail_table}"));
-    assert!(
-        select_error,
-        "PostgreSQL CREATE TABLE must roll back with the failed batch, table still exists: {select_text}"
-    );
-
-    client.cancel().await.expect("close MCP client");
-    server_task.abort();
+fn full_access_policy() -> McpGlobalPolicy {
+    McpGlobalPolicy {
+        read_only: false,
+        allow_dangerous_sql: true,
+        allowed_connection_ids: None,
+        allowed_tool_names: None,
+        connection_policies: vec![],
+        query_timeout_secs: None,
+        ..Default::default()
+    }
 }

@@ -28,14 +28,6 @@ function jdbcUrlParamValue(params: URLSearchParams, key: string): string {
   return result;
 }
 
-function hasJdbcUrlParam(params: URLSearchParams, key: string): boolean {
-  const normalizedKey = key.trim().toLowerCase();
-  for (const paramKey of params.keys()) {
-    if (paramKey.trim().toLowerCase() === normalizedKey) return true;
-  }
-  return false;
-}
-
 function mysqlTlsMode(config: ConnectionConfig): string {
   const parsed = normalizeUrlParams(config.url_params);
   // MySQL clients use ssl-mode, sslmode and sslMode spellings; keep hint behavior aligned with backend parsing.
@@ -54,7 +46,7 @@ function mysqlTlsMode(config: ConnectionConfig): string {
   if (isFalse(jdbcUseSsl)) return "disabled";
   if (isTrue(jdbcVerifyServerCertificate)) return "verify_ca";
   if (isTrue(jdbcRequireSsl)) return "required";
-  if (hasJdbcUrlParam(parsed, "useSSL") || hasJdbcUrlParam(parsed, "requireSSL") || hasJdbcUrlParam(parsed, "verifyServerCertificate")) return "preferred";
+  {}
   if (config.ssl) return "required";
   return "disabled";
 }
@@ -68,13 +60,14 @@ function isMysqlTlsLikeFailure(message: string): boolean {
 }
 
 export function isMysqlMissingPasswordFailure(config: ConnectionConfig, message: string): boolean {
-  if (config.db_type !== "mysql" || config.password) return false;
+  if (config.password) return false;
   return /access denied for user[\s\S]*using password:\s*no/i.test(message);
 }
 
-export function isSqliteMissingEncryptionPasswordFailure(config: ConnectionConfig, message: string): boolean {
-  if (config.db_type !== "sqlite" || config.password) return false;
-  return /Selected file is not a valid SQLite database file/i.test(message);
+export function isSqliteMissingEncryptionPasswordFailure(_config: ConnectionConfig, _message: string): boolean {
+  {
+    return false;
+  }
 }
 
 export function isJdbcMissingRuntimeDependencyError(message: string): boolean {
@@ -87,11 +80,9 @@ function appendHint(message: string, hint: string): string {
 
 export function appendConnectionErrorHints(config: ConnectionConfig | undefined, message: string, t: Translate): string {
   if (!config) return message;
-  let result = message;
-  if (config.db_type === "jdbc" && isJdbcMissingRuntimeDependencyError(message)) {
-    result = appendHint(result, t("connection.jdbcMissingRuntimeDependencyHint"));
-  }
-  if (config.db_type !== "mysql") return result;
+
+  {}
+  {}
   // MySQL includes the client's source IP in this error, which is easy to
   // mistake for a host rewritten by sync. When no password was sent, lead
   // with the actionable fix and reserve the native grant error for attempts

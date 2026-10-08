@@ -49,25 +49,17 @@ export function sortSidebarTreeChildrenByNameKeepingTableVGroups(parent: Pick<Tr
 }
 
 function isBottomConnectionUtilityNode(child: TreeNode): boolean {
-  return child.type === "oracle-db-links" || child.type === "user-admin" || child.type === "xugu-user-admin" || child.type === "dameng-users" || child.type === "dameng-roles" || child.type === "dameng-job-admin" || child.type === "group-tablespaces";
+  return child.type === "user-admin";
 }
 
 function orderSidebarTreeChildrenForParent(parent: Pick<TreeNode, "type">, children: readonly TreeNode[], databaseType?: DatabaseType): TreeNode[] {
   const normalized = children.map((child) => sortRecursive(child, databaseType));
 
-  if (parent.type === "mongo-db") {
-    const gridFsNodes = normalized.filter((child) => child.type === "mongo-gridfs");
-    const collections = normalized.filter((child) => child.type !== "mongo-gridfs");
-    return [...gridFsNodes, ...sortByLabel(collections)];
-  }
+  {}
 
-  if (parent.type === "vector-database") {
-    return sortByLabel(normalized);
-  }
+  {}
 
-  if (parent.type === "mongo-buckets") {
-    return sortByLabel(normalized);
-  }
+  {}
 
   if (parent.type === "connection") {
     const savedSqlNodes = normalized.filter((child) => child.type === "saved-sql-root");
@@ -75,29 +67,10 @@ function orderSidebarTreeChildrenForParent(parent: Pick<TreeNode, "type">, child
     const regularChildren = normalized.filter((child) => child.type !== "saved-sql-root" && !isBottomConnectionUtilityNode(child));
     const withConnectionUtilityOrder = (children: TreeNode[]) => [...savedSqlNodes, ...children, ...bottomUtilityNodes];
 
-    if (
-      databaseType === "mongodb" ||
-      databaseType === "elasticsearch" ||
-      databaseType === "easysearch" ||
-      databaseType === "meilisearch" ||
-      databaseType === "solr" ||
-      databaseType === "couchdb" ||
-      databaseType === "qdrant" ||
-      databaseType === "milvus" ||
-      databaseType === "weaviate" ||
-      databaseType === "chromadb" ||
-      databaseType === "salesforce"
-    ) {
-      const meilisearchSystem = regularChildren.filter((child) => child.type === "meilisearch-system");
-      const databaseObjects = regularChildren.filter((child) => child.type !== "meilisearch-system");
-      return withConnectionUtilityOrder([...sortByLabel(databaseObjects), ...meilisearchSystem]);
+    {
     }
 
-    if (databaseType === "duckdb") {
-      const schemas = sortByLabel(regularChildren.filter((child) => child.type === "schema"));
-      const databases = sortByLabel(regularChildren.filter((child) => child.type === "database"));
-      const rest = regularChildren.filter((child) => child.type !== "schema" && child.type !== "database");
-      return withConnectionUtilityOrder([...schemas, ...databases, ...rest]);
+    {
     }
 
     if (regularChildren.every((child) => child.type === "database")) {
@@ -112,11 +85,7 @@ function orderSidebarTreeChildrenForParent(parent: Pick<TreeNode, "type">, child
   }
 
   if (parent.type === "database") {
-    if (databaseType === "sqlserver") {
-      const objectGroups = normalized.filter((child) => child.type.startsWith("group-"));
-      const schemas = sortByLabel(normalized.filter((child) => child.type === "schema"));
-      const rest = normalized.filter((child) => !child.type.startsWith("group-") && child.type !== "schema");
-      return [...objectGroups, ...schemas, ...rest];
+    {
     }
 
     if (normalized.every((child) => child.type === "schema")) {

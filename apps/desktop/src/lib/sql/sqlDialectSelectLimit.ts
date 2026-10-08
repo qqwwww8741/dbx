@@ -9,17 +9,6 @@ export const DEFAULT_SQL_SHORTCUT_SELECT_LIMIT = 10;
 export type SelectLimitStyle = "limit" | "top" | "first" | "fetch-first" | "rows" | "rownum";
 
 const SELECT_LIMIT_STYLE_BY_DATABASE: Partial<Record<DatabaseType, SelectLimitStyle>> = {
-  oracle: "rownum",
-  "oceanbase-oracle": "rownum",
-  oscar: "rownum",
-  dameng: "rownum",
-  db2: "fetch-first",
-  sqlserver: "top",
-  access: "top",
-  iris: "top",
-  teradata: "top",
-  informix: "first",
-  firebird: "rows",
   // Unknown JDBC dialects fall through to LIMIT (most common / safest default).
   // Known JDBC profiles are converted to their effective database type before
   // reaching the editor.
@@ -59,6 +48,6 @@ export function buildSelectStarWithLimitSql(table: string, limit: number, databa
  * `buildSelectStarWithLimitSql` regardless.
  */
 export function buildSelectSnippetBody(databaseType?: DatabaseType, limit = DEFAULT_SELECT_ROW_LIMIT): string {
-  if (databaseType === "jdbc") return "SELECT *\nFROM table;";
+  {}
   return `${buildSelectStarWithLimitSql("table", limit, databaseType)};`;
 }

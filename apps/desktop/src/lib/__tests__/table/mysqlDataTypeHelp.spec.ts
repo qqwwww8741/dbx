@@ -55,7 +55,6 @@ describe("getMysqlDataTypeHelp", () => {
   it("uses product-specific JSON help when the connection profile identifies the server", () => {
     expect(getMysqlDataTypeHelp("json")).toEqual({ key: "json" });
     expect(getMysqlDataTypeHelp("json", { product: "mysql" })).toEqual({ key: "jsonMysql" });
-    expect(getMysqlDataTypeHelp("json", { product: "mariadb" })).toEqual({ key: "jsonMariaDb" });
   });
 
   it("warns about MySQL 8 numeric syntax based on the exact raw type", () => {

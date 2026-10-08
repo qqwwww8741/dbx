@@ -381,10 +381,6 @@ fn upper_first_word(s: &str) -> &str {
     trimmed.split_whitespace().next().unwrap_or("")
 }
 
-fn sqlserver_single_statement_batch(batch: &str) -> String {
-    format!("EXEC sys.sp_executesql N'{}';", batch.trim().trim_end_matches(';').replace('\'', "''"))
-}
-
 /// `CREATE TABLE` variants that still create a table object and must keep
 /// idempotent wrapping: SQLite `CREATE TEMP TABLE`, PostgreSQL
 /// `GLOBAL/LOCAL TEMPORARY` and `UNLOGGED` forms, MySQL/MariaDB
@@ -513,53 +509,13 @@ fn wrap_conditional_check(sql: &str, db_type: DatabaseType) -> String {
         let table_name = extract_table_name(trimmed, "TABLE");
         let ddl_literal = trimmed.replace('\'', "''");
         return match db_type {
-            DatabaseType::Postgres
-            | DatabaseType::Gaussdb
-            | DatabaseType::OpenGauss
-            | DatabaseType::Kingbase
-            | DatabaseType::Highgo
-            | DatabaseType::Vastbase
-            | DatabaseType::Uxdb
-            | DatabaseType::Redshift => {
-                let (schema_name, table_name) = postgres_table_identity(table_identifier);
-                let schema_predicate = schema_name.map_or_else(
-                    || "table_schema = current_schema()".to_string(),
-                    |schema| format!("table_schema = '{}'", schema.replace('\'', "''")),
-                );
-                let table_literal = table_name.replace('\'', "''");
-                format!(
-                    "DO $dbx_idempotent$\nBEGIN\n  IF NOT EXISTS (\n    SELECT 1 FROM information_schema.tables\n    WHERE {schema_predicate}\n      AND table_name = '{table_literal}'\n  ) THEN\n    EXECUTE $dbx_ddl${trimmed}$dbx_ddl$;\n  END IF;\nEND\n$dbx_idempotent$;"
-                )
-            }
-            DatabaseType::Oracle
-            | DatabaseType::Dameng
-            | DatabaseType::OceanbaseOracle
-            | DatabaseType::Yashandb
-            | DatabaseType::Xugu
-            | DatabaseType::Iris => {
-                // ORA-00955: name is already used by an existing object
-                format!(
-                    "BEGIN\n  EXECUTE IMMEDIATE '{ddl_literal}';\nEXCEPTION\n  WHEN OTHERS THEN\n    IF SQLCODE != -955 THEN RAISE; END IF;\nEND;"
-                )
-            }
-            DatabaseType::SqlServer => sqlserver_single_statement_batch(&format!(
-                "IF OBJECT_ID(N'{}', N'U') IS NULL BEGIN {trimmed}; END;",
-                table_identifier.replace('\'', "''")
-            )),
             _ => {
                 format!("-- ConditionalCheck: run only if table {table_name} does not exist\n{trimmed};")
             }
         };
     }
 
-    if db_type == DatabaseType::SqlServer && first_word == "CREATE" && upper.contains(" INDEX ") {
-        let index_name = unquote_sqlserver_identifier(extract_object_identifier(trimmed, "INDEX")).replace('\'', "''");
-        let table_identifier = extract_object_identifier(trimmed, "ON");
-        let table_literal = table_identifier.replace('\'', "''");
-        return sqlserver_single_statement_batch(&format!(
-            "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'{table_literal}') AND name = N'{index_name}') BEGIN {trimmed}; END;"
-        ));
-    }
+    {}
 
     if first_word == "DROP" {
         let rebuilt = format!("{trimmed};");
@@ -638,50 +594,6 @@ fn extract_table_name<'a>(sql: &'a str, keyword: &str) -> &'a str {
     extract_object_identifier(sql, keyword).trim_matches('"').trim_matches('`').trim_matches('[').trim_matches(']')
 }
 
-fn unquote_sqlserver_identifier(identifier: &str) -> String {
-    let trimmed = identifier.trim();
-    if let Some(inner) = trimmed.strip_prefix('[').and_then(|value| value.strip_suffix(']')) {
-        inner.replace("]]", "]")
-    } else if let Some(inner) = trimmed.strip_prefix('"').and_then(|value| value.strip_suffix('"')) {
-        inner.replace("\"\"", "\"")
-    } else {
-        trimmed.to_string()
-    }
-}
-
-fn postgres_table_identity(identifier: &str) -> (Option<String>, String) {
-    let mut quote = false;
-    let mut separator = None;
-    let chars: Vec<(usize, char)> = identifier.char_indices().collect();
-    let mut index = 0;
-    while index < chars.len() {
-        let (byte_index, ch) = chars[index];
-        if ch == '"' {
-            if quote && chars.get(index + 1).is_some_and(|(_, next)| *next == '"') {
-                index += 1;
-            } else {
-                quote = !quote;
-            }
-        } else if ch == '.' && !quote {
-            separator = Some(byte_index);
-        }
-        index += 1;
-    }
-
-    let (schema, table) = separator
-        .map_or((None, identifier), |separator| (Some(&identifier[..separator]), &identifier[separator + 1..]));
-    (schema.map(postgres_identifier_value), postgres_identifier_value(table))
-}
-
-fn postgres_identifier_value(identifier: &str) -> String {
-    let identifier = identifier.trim();
-    if identifier.starts_with('"') && identifier.ends_with('"') && identifier.len() >= 2 {
-        identifier[1..identifier.len() - 1].replace("\"\"", "\"")
-    } else {
-        identifier.to_lowercase()
-    }
-}
-
 // ============================================================================
 // 9.4: Rollback Script Generator
 // ============================================================================
@@ -700,7 +612,7 @@ pub struct RollbackScriptOptions {
 impl Default for RollbackScriptOptions {
     fn default() -> Self {
         Self {
-            db_type: DatabaseType::Postgres,
+            db_type: DatabaseType::Mysql,
             target_schema: None,
             cascade_delete: false,
             include_header: true,
@@ -822,7 +734,7 @@ impl Default for JointScriptOptions {
             include_rollback: true,
             shadow_table_switch: false,
             idempotent_strategy: IdempotentStrategy::IfNotExists,
-            db_type: DatabaseType::Postgres,
+            db_type: DatabaseType::Mysql,
             target_schema: None,
         }
     }
@@ -1429,27 +1341,6 @@ mod tests {
         }
     }
 
-    fn make_column_info(name: &str, data_type: &str) -> ColumnInfo {
-        ColumnInfo {
-            name: name.to_string(),
-            data_type: data_type.to_string(),
-            resolved_schema: None,
-            is_nullable: true,
-            column_default: None,
-            is_primary_key: false,
-            is_unique: false,
-            extra: None,
-            comment: None,
-            numeric_precision: None,
-            numeric_scale: None,
-            character_maximum_length: None,
-            enum_values: None,
-            character_set: None,
-            collation: None,
-            metadata_capabilities: None,
-        }
-    }
-
     // ========================================================================
     // 9.2: Template Engine Tests
     // ========================================================================
@@ -1543,62 +1434,9 @@ mod tests {
     }
 
     #[test]
-    fn select_strategy_create_or_replace() {
-        let desc =
-            DialectCapabilityDescriptor { flags: CAP_CREATE_OR_REPLACE | CAP_CREATE_TABLE, ..Default::default() };
-        let strategy = select_strategy(Some(DialectKind::Postgres), Some(&desc));
-        assert_eq!(strategy, IdempotentStrategy::CreateOrReplace);
-    }
-
-    #[test]
-    fn sqlserver_selects_catalog_based_conditional_strategy() {
-        let descriptor = DialectCapabilityDescriptor::for_dialect(DialectKind::SqlServer);
-        assert_eq!(
-            select_strategy(Some(DialectKind::SqlServer), Some(&descriptor)),
-            IdempotentStrategy::ConditionalCheck
-        );
-    }
-
-    #[test]
-    fn select_strategy_conditional() {
-        let desc = DialectCapabilityDescriptor { flags: 0, ..Default::default() };
-        let strategy = select_strategy(Some(DialectKind::Sqlite), Some(&desc));
-        assert_eq!(strategy, IdempotentStrategy::ConditionalCheck);
-    }
-
-    #[test]
     fn idempotent_create_table_if_not_exists_mysql() {
         let sql = "CREATE TABLE users (id INT PRIMARY KEY);";
         let result = apply_idempotent_strategy(sql, DatabaseType::Mysql, IdempotentStrategy::IfNotExists);
-        assert!(result.contains("CREATE TABLE IF NOT EXISTS"), "Got: {result}");
-    }
-
-    #[test]
-    fn idempotent_create_table_if_not_exists_sqlite() {
-        let sql = "CREATE TABLE users (id INT);";
-        let result = apply_idempotent_strategy(sql, DatabaseType::Sqlite, IdempotentStrategy::IfNotExists);
-        assert!(result.contains("CREATE TABLE IF NOT EXISTS"), "Got: {result}");
-    }
-
-    #[test]
-    fn idempotent_create_temp_table_if_not_exists_sqlite() {
-        let sql = "CREATE TEMP TABLE sessions (token TEXT);";
-        let result = apply_idempotent_strategy(sql, DatabaseType::Sqlite, IdempotentStrategy::IfNotExists);
-        assert!(result.contains("CREATE TEMP TABLE IF NOT EXISTS"), "Got: {result}");
-    }
-
-    #[test]
-    fn conditional_check_wraps_global_temporary_table_postgres() {
-        let sql = "CREATE GLOBAL TEMPORARY TABLE staging (id INT);";
-        let result = apply_idempotent_strategy(sql, DatabaseType::Postgres, IdempotentStrategy::ConditionalCheck);
-        assert!(result.contains("DO $dbx_idempotent$"), "missing DO wrapper: {result}");
-        assert!(result.contains("CREATE GLOBAL TEMPORARY TABLE staging"), "DDL not embedded: {result}");
-    }
-
-    #[test]
-    fn idempotent_create_table_if_not_exists_clickhouse() {
-        let sql = "CREATE TABLE events (ts DateTime);";
-        let result = apply_idempotent_strategy(sql, DatabaseType::ClickHouse, IdempotentStrategy::IfNotExists);
         assert!(result.contains("CREATE TABLE IF NOT EXISTS"), "Got: {result}");
     }
 
@@ -1607,93 +1445,6 @@ mod tests {
         let sql = "DROP TABLE old_users;";
         let result = apply_idempotent_strategy(sql, DatabaseType::Mysql, IdempotentStrategy::IfNotExists);
         assert!(result.contains("DROP TABLE IF EXISTS"), "Got: {result}");
-    }
-
-    /// Oracle before 23c rejects `DROP TABLE IF EXISTS`, so the wrapper must leave the
-    /// statement alone instead of generating invalid SQL.
-    #[test]
-    fn idempotent_drop_table_skips_if_exists_where_unsupported() {
-        for db_type in [DatabaseType::Oracle, DatabaseType::Db2, DatabaseType::Access] {
-            let result = apply_idempotent_strategy("DROP TABLE old_users;", db_type, IdempotentStrategy::IfNotExists);
-            assert_eq!(result, "DROP TABLE old_users;", "{db_type:?} must not gain IF EXISTS");
-        }
-        // The ConditionalCheck strategy falls back to the guarded comment form instead.
-        let conditional = apply_idempotent_strategy(
-            "DROP TABLE old_users;",
-            DatabaseType::Oracle,
-            IdempotentStrategy::ConditionalCheck,
-        );
-        assert!(!conditional.contains("IF EXISTS"), "Got: {conditional}");
-        assert!(conditional.contains("-- Conditional"), "Got: {conditional}");
-    }
-
-    #[test]
-    fn idempotent_drop_index_if_exists() {
-        let sql = "DROP INDEX idx_email;";
-        let result = apply_idempotent_strategy(sql, DatabaseType::Postgres, IdempotentStrategy::IfNotExists);
-        assert!(result.contains("DROP INDEX IF EXISTS"), "Got: {result}");
-    }
-
-    #[test]
-    fn idempotent_create_index_if_not_exists_postgres() {
-        let sql = "CREATE INDEX idx_name ON users (name);";
-        let result = apply_idempotent_strategy(sql, DatabaseType::Postgres, IdempotentStrategy::IfNotExists);
-        assert!(result.contains("CREATE INDEX IF NOT EXISTS"), "Got: {result}");
-        assert!(!result.contains("CREATE IF NOT EXISTS INDEX"), "wrong IF NOT EXISTS placement: {result}");
-    }
-
-    #[test]
-    fn idempotent_create_unique_index_if_not_exists_postgres() {
-        let sql = "CREATE UNIQUE INDEX idx_email ON users (email);";
-        let result = apply_idempotent_strategy(sql, DatabaseType::Postgres, IdempotentStrategy::IfNotExists);
-        assert!(result.contains("CREATE UNIQUE INDEX IF NOT EXISTS"), "Got: {result}");
-        assert!(!result.contains("CREATE IF NOT EXISTS"), "wrong IF NOT EXISTS placement: {result}");
-    }
-
-    #[test]
-    fn sqlserver_never_emits_create_index_if_not_exists() {
-        let sql = "CREATE UNIQUE NONCLUSTERED INDEX [idx_email] ON [dbo].[users] ([email]);";
-        let direct = apply_idempotent_strategy(sql, DatabaseType::SqlServer, IdempotentStrategy::IfNotExists);
-        assert_eq!(direct, sql);
-        assert!(!direct.contains("INDEX IF NOT EXISTS"));
-
-        let conditional = apply_idempotent_strategy(sql, DatabaseType::SqlServer, IdempotentStrategy::ConditionalCheck);
-        assert!(conditional.starts_with("EXEC sys.sp_executesql N'IF NOT EXISTS"), "Got: {conditional}");
-        assert!(conditional.contains("FROM sys.indexes"), "Got: {conditional}");
-        assert!(conditional.contains("OBJECT_ID(N''[dbo].[users]'')"), "Got: {conditional}");
-        assert!(conditional.contains("name = N''idx_email''"), "Got: {conditional}");
-        assert!(!conditional.contains("INDEX IF NOT EXISTS"), "Got: {conditional}");
-
-        let escaped_name = apply_idempotent_strategy(
-            "CREATE INDEX [ix_owner]] name] ON [dbo].[user]] data] ([id]);",
-            DatabaseType::SqlServer,
-            IdempotentStrategy::ConditionalCheck,
-        );
-        assert!(escaped_name.contains("OBJECT_ID(N''[dbo].[user]] data]'')"), "Got: {escaped_name}");
-        assert!(escaped_name.contains("name = N''ix_owner] name''"), "Got: {escaped_name}");
-    }
-
-    #[test]
-    fn sqlserver_create_table_conditional_uses_object_id() {
-        let sql = "CREATE TABLE [dbo].[users] ([id] INT NOT NULL);";
-        let result = apply_idempotent_strategy(sql, DatabaseType::SqlServer, IdempotentStrategy::ConditionalCheck);
-        assert!(result.starts_with("EXEC sys.sp_executesql N'IF OBJECT_ID"), "Got: {result}");
-        assert!(result.contains("N''[dbo].[users]'', N''U''"), "Got: {result}");
-        assert!(!result.contains("CREATE TABLE IF NOT EXISTS"), "Got: {result}");
-    }
-
-    #[test]
-    fn idempotent_drop_sequence_if_exists() {
-        let sql = "DROP SEQUENCE user_seq;";
-        let result = apply_idempotent_strategy(sql, DatabaseType::Postgres, IdempotentStrategy::IfNotExists);
-        assert!(result.contains("DROP SEQUENCE IF EXISTS"), "Got: {result}");
-    }
-
-    #[test]
-    fn idempotent_drop_function_if_exists() {
-        let sql = "DROP FUNCTION calculate_total;";
-        let result = apply_idempotent_strategy(sql, DatabaseType::Postgres, IdempotentStrategy::IfNotExists);
-        assert!(result.contains("DROP FUNCTION IF EXISTS"), "Got: {result}");
     }
 
     #[test]
@@ -1726,27 +1477,6 @@ mod tests {
     }
 
     #[test]
-    fn idempotent_create_or_replace_view() {
-        let sql = "CREATE VIEW user_view AS SELECT * FROM users;";
-        let result = apply_idempotent_strategy(sql, DatabaseType::Postgres, IdempotentStrategy::CreateOrReplace);
-        assert!(result.contains("CREATE OR REPLACE"), "Got: {result}");
-    }
-
-    #[test]
-    fn idempotent_create_or_replace_function() {
-        let sql = "CREATE FUNCTION add(a INT, b INT) RETURNS INT AS $$ BEGIN RETURN a + b; END; $$ LANGUAGE plpgsql;";
-        let result = apply_idempotent_strategy(sql, DatabaseType::Postgres, IdempotentStrategy::CreateOrReplace);
-        assert!(result.contains("CREATE OR REPLACE"), "Got: {result}");
-    }
-
-    #[test]
-    fn idempotent_create_or_replace_not_for_table() {
-        let sql = "CREATE TABLE users (id INT);";
-        let result = apply_idempotent_strategy(sql, DatabaseType::Postgres, IdempotentStrategy::CreateOrReplace);
-        assert!(!result.contains("OR REPLACE"), "Tables should not get OR REPLACE: {result}");
-    }
-
-    #[test]
     fn idempotent_none_passthrough() {
         let sql = "CREATE TABLE users (id INT);";
         let result = apply_idempotent_strategy(sql, DatabaseType::Mysql, IdempotentStrategy::None);
@@ -1763,166 +1493,9 @@ mod tests {
     }
 
     #[test]
-    fn conditional_check_does_not_emit_unconditional_ddl_after_select() {
-        let sql = "CREATE TABLE users (id INT);";
-        let mysql = apply_idempotent_strategy(sql, DatabaseType::Mysql, IdempotentStrategy::ConditionalCheck);
-        assert!(mysql.contains("CREATE TABLE IF NOT EXISTS"), "mysql={mysql}");
-        assert!(!mysql.contains("THEN 'EXECUTE:"), "must not use inert SELECT CASE: {mysql}");
-
-        let pg = apply_idempotent_strategy(sql, DatabaseType::Postgres, IdempotentStrategy::ConditionalCheck);
-        assert!(pg.contains("DO $dbx_idempotent$") || pg.contains("IF NOT EXISTS"), "pg={pg}");
-        assert!(!pg.contains("THEN 'EXECUTE:"), "must not use inert SELECT CASE: {pg}");
-        // Body is inside EXECUTE dollar-quote, not as a bare follow-up statement.
-        let after_do = pg.find("DO $dbx_idempotent$").map(|i| &pg[i..]).unwrap_or(&pg);
-        assert!(!after_do.contains("\nCREATE TABLE users"), "bare CREATE must not follow check: {pg}");
-
-        let oracle = apply_idempotent_strategy(sql, DatabaseType::Oracle, IdempotentStrategy::ConditionalCheck);
-        assert!(oracle.contains("EXECUTE IMMEDIATE") || oracle.contains("BEGIN"), "oracle={oracle}");
-        assert!(!oracle.contains("THEN 'EXECUTE:"), "must not use inert SELECT CASE: {oracle}");
-    }
-
-    #[test]
-    fn conditional_check_postgres_matches_schema_and_table_separately() {
-        let qualified = apply_idempotent_strategy(
-            "CREATE TABLE sales.users (id INT);",
-            DatabaseType::Postgres,
-            IdempotentStrategy::ConditionalCheck,
-        );
-        assert!(qualified.contains("table_schema = 'sales'"), "qualified={qualified}");
-        assert!(qualified.contains("table_name = 'users'"), "qualified={qualified}");
-        assert!(!qualified.contains("table_name = 'sales.users'"), "qualified={qualified}");
-
-        let unqualified = apply_idempotent_strategy(
-            "CREATE TABLE users (id INT);",
-            DatabaseType::Postgres,
-            IdempotentStrategy::ConditionalCheck,
-        );
-        assert!(unqualified.contains("table_schema = current_schema()"), "unqualified={unqualified}");
-
-        let quoted = apply_idempotent_strategy(
-            "CREATE TABLE \"Sales\".\"Users\" (id INT);",
-            DatabaseType::Postgres,
-            IdempotentStrategy::ConditionalCheck,
-        );
-        assert!(quoted.contains("table_schema = 'Sales'"), "quoted={quoted}");
-        assert!(quoted.contains("table_name = 'Users'"), "quoted={quoted}");
-    }
-
-    #[test]
-    fn conditional_check_object_exists_path_uses_if_exists_when_available() {
-        let sql = "DROP TABLE users;";
-        let result = apply_idempotent_strategy(sql, DatabaseType::Postgres, IdempotentStrategy::ConditionalCheck);
-        assert!(result.contains("DROP TABLE IF EXISTS") || result.contains("Conditional:"), "Got: {result}");
-        assert!(!result.contains("THEN 'EXECUTE:"), "{result}");
-    }
-
-    #[test]
     fn idempotent_empty_string() {
         let result = apply_idempotent_strategy("", DatabaseType::Mysql, IdempotentStrategy::IfNotExists);
         assert_eq!(result, "");
-    }
-
-    #[test]
-    fn idempotent_conditional_check_drop() {
-        let sql = "DROP TABLE old_data;";
-        let result = apply_idempotent_strategy(sql, DatabaseType::Sqlite, IdempotentStrategy::ConditionalCheck);
-        // Prefer real IF EXISTS over an inert comment+DDL pair.
-        assert!(result.contains("DROP TABLE IF EXISTS") || result.contains("Conditional"), "Got: {result}");
-        assert!(result.contains("old_data"), "Got: {result}");
-        assert!(!result.contains("THEN 'EXECUTE:"), "{result}");
-    }
-
-    #[test]
-    fn idempotent_create_or_replace_already_has_or_replace() {
-        let sql = "CREATE OR REPLACE VIEW v AS SELECT 1;";
-        let result = apply_idempotent_strategy(sql, DatabaseType::Postgres, IdempotentStrategy::CreateOrReplace);
-        assert_eq!(result.matches("OR REPLACE").count(), 1, "Should not double-wrap: {result}");
-    }
-
-    // ========================================================================
-    // 9.4: Rollback Script Generator Tests
-    // ========================================================================
-
-    #[test]
-    fn generate_rollback_script_from_graph() {
-        let table_diff = TableDiff {
-            diff_type: "added".to_string(),
-            object_type: Some("table".to_string()),
-            name: "users".to_string(),
-            target_name: None,
-            columns: Some(vec![ColumnDiff {
-                diff_type: "added".to_string(),
-                name: "id".to_string(),
-                source: Some(make_column_info("id", "INT")),
-                target: None,
-                changes: vec![],
-                add_position: None,
-            }]),
-            indexes: Some(vec![]),
-            foreign_keys: Some(vec![]),
-            triggers: Some(vec![]),
-            ddl: Some("CREATE TABLE users (id INT);".to_string()),
-            target_ddl: None,
-            source_table_comment: None,
-            target_table_comment: None,
-            sync_sql: None,
-        };
-
-        let mut graph = RollbackGraph {
-            forward_nodes: vec![DiffNode {
-                table_diff: table_diff.clone(),
-                direction: crate::schema_diff::DiffDirection::Forward,
-                dependency_order: 0,
-                rename_source: None,
-                rename_target: None,
-                rename_score: None,
-            }],
-            rollback_nodes: vec![DiffNode {
-                table_diff: TableDiff {
-                    diff_type: "removed".to_string(),
-                    object_type: Some("table".to_string()),
-                    name: "users".to_string(),
-                    target_name: None,
-                    columns: Some(vec![ColumnDiff {
-                        diff_type: "removed".to_string(),
-                        name: "id".to_string(),
-                        source: Some(make_column_info("id", "INT")),
-                        target: None,
-                        changes: vec![],
-                        add_position: None,
-                    }]),
-                    indexes: Some(vec![]),
-                    foreign_keys: Some(vec![]),
-                    triggers: Some(vec![]),
-                    ddl: None,
-                    target_ddl: Some("CREATE TABLE users (id INT);".to_string()),
-                    source_table_comment: None,
-                    target_table_comment: None,
-                    sync_sql: None,
-                },
-                direction: crate::schema_diff::DiffDirection::Rollback,
-                dependency_order: 0,
-                rename_source: None,
-                rename_target: None,
-                rename_score: None,
-            }],
-            is_consistent: true,
-            consistency_issues: vec![],
-        };
-        graph.is_consistent = true;
-
-        let options = RollbackScriptOptions {
-            db_type: DatabaseType::Postgres,
-            target_schema: Some("public".to_string()),
-            cascade_delete: false,
-            include_header: true,
-            include_safety_checks: true,
-            idempotent_strategy: IdempotentStrategy::IfNotExists,
-        };
-
-        let script = generate_rollback_script(&graph, &options);
-        assert!(script.contains("ROLLBACK SCRIPT"));
-        assert!(script.contains("IF EXISTS"), "Got: {script}");
     }
 
     #[test]
@@ -1989,54 +1562,6 @@ mod tests {
         assert!(script.contains("StructureFirst"), "Got: {script}");
         assert!(script.contains("PHASE 1: Structure"));
         assert!(script.contains("CHECKPOINT"));
-    }
-
-    #[test]
-    fn generate_joint_script_data_first() {
-        let schema_diff = make_simple_schema_diff();
-        let options = JointScriptOptions {
-            strategy: JointScriptStrategy::DataFirst,
-            db_type: DatabaseType::Postgres,
-            ..Default::default()
-        };
-
-        let script = generate_joint_script(&schema_diff, None, &options);
-        assert!(script.contains("PHASE 1: Data"));
-        assert!(script.contains("PHASE 2: Structure"));
-    }
-
-    #[test]
-    fn generate_joint_script_shadow_table() {
-        let schema_diff = SchemaDiffPreparation {
-            diffs: vec![TableDiff {
-                diff_type: "modified".to_string(),
-                object_type: Some("table".to_string()),
-                name: "users".to_string(),
-                target_name: None,
-                columns: Some(vec![]),
-                indexes: Some(vec![]),
-                foreign_keys: Some(vec![]),
-                triggers: Some(vec![]),
-                ddl: Some("CREATE TABLE users (id INT, name VARCHAR(100));".to_string()),
-                target_ddl: Some("CREATE TABLE users (id INT);".to_string()),
-                source_table_comment: None,
-                target_table_comment: None,
-                sync_sql: None,
-            }],
-            sync_sql: "ALTER TABLE users ADD COLUMN name VARCHAR(100);".to_string(),
-            ..empty_schema_diff()
-        };
-
-        let options = JointScriptOptions {
-            strategy: JointScriptStrategy::ShadowTable,
-            db_type: DatabaseType::Postgres,
-            ..Default::default()
-        };
-
-        let script = generate_joint_script(&schema_diff, None, &options);
-        assert!(script.contains("Shadow Table"));
-        assert!(script.contains("_shadow_users"), "Got: {script}");
-        assert!(script.contains("RENAME TO"), "Got: {script}");
     }
 
     #[test]
@@ -2235,100 +1760,6 @@ mod tests {
         let result =
             generate_enhanced_sync_sql(&schema_diff, DatabaseType::Mysql, None, IdempotentStrategy::IfNotExists);
         assert!(result.contains("IF NOT EXISTS"), "Got: {result}");
-    }
-
-    #[test]
-    fn generate_enhanced_rollback_from_graph() {
-        let table_diff = TableDiff {
-            diff_type: "added".to_string(),
-            object_type: Some("table".to_string()),
-            name: "users".to_string(),
-            target_name: None,
-            columns: Some(vec![]),
-            indexes: Some(vec![]),
-            foreign_keys: Some(vec![]),
-            triggers: Some(vec![]),
-            ddl: Some("CREATE TABLE users (id INT);".to_string()),
-            target_ddl: None,
-            source_table_comment: None,
-            target_table_comment: None,
-            sync_sql: None,
-        };
-
-        let graph = RollbackGraph {
-            forward_nodes: vec![DiffNode {
-                table_diff: table_diff.clone(),
-                direction: crate::schema_diff::DiffDirection::Forward,
-                dependency_order: 0,
-                rename_source: None,
-                rename_target: None,
-                rename_score: None,
-            }],
-            rollback_nodes: vec![DiffNode {
-                table_diff: TableDiff {
-                    diff_type: "removed".to_string(),
-                    object_type: Some("table".to_string()),
-                    name: "users".to_string(),
-                    target_name: None,
-                    columns: Some(vec![]),
-                    indexes: Some(vec![]),
-                    foreign_keys: Some(vec![]),
-                    triggers: Some(vec![]),
-                    ddl: None,
-                    target_ddl: Some("CREATE TABLE users (id INT);".to_string()),
-                    source_table_comment: None,
-                    target_table_comment: None,
-                    sync_sql: None,
-                },
-                direction: crate::schema_diff::DiffDirection::Rollback,
-                dependency_order: 0,
-                rename_source: None,
-                rename_target: None,
-                rename_score: None,
-            }],
-            is_consistent: true,
-            consistency_issues: vec![],
-        };
-
-        let schema_diff = SchemaDiffPreparation {
-            sync_sql: "CREATE TABLE users (id INT);".to_string(),
-            rollback_sync_sql: Some("DROP TABLE IF EXISTS users;".to_string()),
-            rollback_graph: Some(graph),
-            ..empty_schema_diff()
-        };
-
-        let result = generate_enhanced_rollback_sql(
-            &schema_diff,
-            DatabaseType::Postgres,
-            Some("public"),
-            false,
-            IdempotentStrategy::IfNotExists,
-        );
-        assert!(result.is_some());
-        assert!(result.unwrap().contains("ROLLBACK SCRIPT"));
-    }
-
-    #[test]
-    fn generate_complete_script_with_all_sections() {
-        let schema_diff = SchemaDiffPreparation {
-            sync_sql: "CREATE TABLE test (id INT);".to_string(),
-            rollback_sync_sql: Some("DROP TABLE IF EXISTS test;".to_string()),
-            permission_sync_sql: Some("GRANT SELECT ON test TO reader;".to_string()),
-            ..empty_schema_diff()
-        };
-
-        let script = generate_complete_script(
-            &schema_diff,
-            None,
-            DatabaseType::Postgres,
-            Some("public"),
-            IdempotentStrategy::IfNotExists,
-        );
-
-        assert!(script.contains("Structure Changes"));
-        assert!(script.contains("Permission Changes"));
-        assert!(script.contains("Rollback Script"));
-        assert!(script.contains("public"));
     }
 
     #[test]

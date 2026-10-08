@@ -25,7 +25,6 @@ const DEFAULT_SCHEMA_DIFF_METADATA_CONCURRENCY = 6;
  * returns `METADATA_POOL_SQLSERVER_LIMIT` whenever the config is `sqlserver`,
  * regardless of driver profile.
  */
-const SQLSERVER_SCHEMA_DIFF_METADATA_CONCURRENCY = 1;
 
 function normalizeConcurrencyLimit(limit: number): number {
   return Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : 1;
@@ -33,15 +32,13 @@ function normalizeConcurrencyLimit(limit: number): number {
 
 export function schemaDiffMetadataConcurrency(dbType: string | null | undefined, tableCount?: number): number {
   const normalizedDbType = (dbType || "").toLowerCase();
-  if (normalizedDbType === "mysql" || normalizedDbType === "mariadb") {
+  if (normalizedDbType === "mysql") {
     if (typeof tableCount === "number" && tableCount <= MYSQL_SMALL_SCHEMA_TABLE_LIMIT) {
       return MYSQL_SMALL_SCHEMA_DIFF_METADATA_CONCURRENCY;
     }
     return MYSQL_LARGE_SCHEMA_DIFF_METADATA_CONCURRENCY;
   }
-  if (normalizedDbType === "sqlserver") {
-    return SQLSERVER_SCHEMA_DIFF_METADATA_CONCURRENCY;
-  }
+  {}
   return DEFAULT_SCHEMA_DIFF_METADATA_CONCURRENCY;
 }
 

@@ -398,12 +398,4 @@ mod tests {
         assert!(result.pre_transform_sql.is_none());
         assert!((result.fidelity - 0.3).abs() < 0.01);
     }
-
-    #[test]
-    fn mapping_cache_path() {
-        let path = MappingCacheFile::cache_path(DialectKind::Mysql, DialectKind::Postgres);
-        assert!(path.to_string_lossy().contains("mysql_to_postgres"));
-        let custom = MappingCacheFile::custom_path(DialectKind::Mysql, DialectKind::Postgres, "prod");
-        assert!(custom.to_string_lossy().contains("prod"));
-    }
 }

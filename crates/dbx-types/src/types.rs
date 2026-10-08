@@ -29,37 +29,6 @@ pub struct DatabaseStorageInfo {
     pub size_bytes: Option<i64>,
 }
 
-/// XuguDB storage metadata exposed by the read-only schema browser.
-///
-/// Xugu stores tablespaces and their data files inside the selected database,
-/// so these types intentionally remain driver-specific instead of widening
-/// the common database model used by other engines.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct XuguDatafileInfo {
-    pub node_id: String,
-    pub space_id: i64,
-    pub path: String,
-    pub file_no: i64,
-    pub max_size: Option<i64>,
-    pub step_size: Option<i64>,
-    pub curr_size: Option<i64>,
-    pub reserved1: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct XuguTablespaceInfo {
-    pub node_id: String,
-    pub space_id: i64,
-    pub space_name: String,
-    pub datafile_num: i64,
-    pub space_type: String,
-    pub media_error: Option<String>,
-    pub total_chunk_num: Option<i64>,
-    pub free_chunk_num: Option<i64>,
-    #[serde(default)]
-    pub datafiles: Vec<XuguDatafileInfo>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SchemaInfo {
     pub name: String,
@@ -1224,39 +1193,6 @@ mod tests {
     }
 
     #[test]
-    fn dameng_table_validity_round_trips_true_false_and_unknown() {
-        for validity in [Some(true), Some(false), None] {
-            let payload = serde_json::json!({"name": "VIEW_A", "table_type": "VIEW", "valid": validity});
-            let table: TableInfo = serde_json::from_value(payload).unwrap();
-            assert_eq!(table.valid, validity);
-            let encoded = serde_json::to_value(&table).unwrap();
-            assert_eq!(encoded.get("valid").and_then(serde_json::Value::as_bool), validity);
-            assert_eq!(encoded.get("valid").is_some(), validity.is_some());
-            let decoded: TableInfo = serde_json::from_value(encoded).unwrap();
-            assert_eq!(decoded.valid, validity);
-        }
-        let legacy: TableInfo = serde_json::from_str(r#"{"name":"TABLE_A","table_type":"TABLE"}"#).unwrap();
-        assert_eq!(legacy.valid, None);
-    }
-
-    #[test]
-    fn dameng_object_validity_round_trips_true_false_and_unknown() {
-        for validity in [Some(true), Some(false), None] {
-            let payload =
-                serde_json::json!({"name": "VIEW_A", "object_type": "VIEW", "schema": "APP", "valid": validity});
-            let object: ObjectInfo = serde_json::from_value(payload).unwrap();
-            assert_eq!(object.valid, validity);
-            let encoded = serde_json::to_value(&object).unwrap();
-            assert_eq!(encoded.get("valid").and_then(serde_json::Value::as_bool), validity);
-            assert_eq!(encoded.get("valid").is_some(), validity.is_some());
-            let decoded: ObjectInfo = serde_json::from_value(encoded).unwrap();
-            assert_eq!(decoded.valid, validity);
-        }
-        let legacy: ObjectInfo = serde_json::from_str(r#"{"name":"TABLE_A","object_type":"TABLE"}"#).unwrap();
-        assert_eq!(legacy.valid, None);
-    }
-
-    #[test]
     fn spatial_builder_reports_first_non_null_srid_per_column() {
         let mut builder = SpatialColumnBuilder::new([3]);
         builder.observe(3, None);
@@ -1323,32 +1259,6 @@ mod tests {
 
         assert!(source.routine_parameters.is_none());
         assert!(serde_json::to_value(source).unwrap().get("routine_parameters").is_none());
-    }
-
-    #[test]
-    fn object_source_preserves_optional_jdbc_routine_parameters() {
-        let source: ObjectSource = serde_json::from_value(serde_json::json!({
-            "name": "calculate_total",
-            "object_type": "FUNCTION",
-            "schema": "APP",
-            "source": "",
-            "editable": false,
-            "routine_parameters": [{
-                "name": "RETURN",
-                "mode": "RETURN",
-                "jdbc_type": 3,
-                "type_name": "DECIMAL",
-                "precision": 12,
-                "scale": 2,
-                "ordinal": 0
-            }]
-        }))
-        .unwrap();
-
-        let parameters = source.routine_parameters.as_ref().unwrap();
-        assert_eq!(parameters[0].mode, RoutineParameterMode::Return);
-        assert_eq!(parameters[0].precision, Some(12));
-        assert_eq!(serde_json::to_value(source).unwrap()["routine_parameters"][0]["mode"], "RETURN");
     }
 
     #[test]

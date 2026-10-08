@@ -29,7 +29,7 @@ export function resolveRowIdentifierColumns(requestedColumns: readonly string[],
     const exact = availableColumns.find((column) => column.name === requested);
     const foldedMatches = exact ? [] : availableColumns.filter((column) => column.name.toLowerCase() === requested.toLowerCase());
     const canonical = exact?.name ?? (foldedMatches.length === 1 ? foldedMatches[0]!.name : undefined);
-    if (!canonical || resolved.includes(canonical)) return null;
+    if (!canonical) return null;
     resolved.push(canonical);
   }
 

@@ -7,7 +7,6 @@ publish = false
 
 [features]
 default = []
-duckdb-sidecar = ["dbx-sql-schema/duckdb-sidecar"]
 openapi = ["dbx-sql-data/openapi", "dbx-types/openapi"]
 
 [dependencies]

@@ -9,7 +9,7 @@ mod indexes;
 mod mysql_engine;
 mod owner;
 mod partitions;
-mod transwarp;
+
 mod triggers;
 mod types;
 mod util;
@@ -23,12 +23,6 @@ pub use create_table::build_create_table_sql;
 pub use owner::build_table_owner_change_sql;
 pub use partitions::{build_create_partitioned_table_sql, build_table_partition_operation_sql};
 pub use types::*;
-
-pub use column_alter::{
-    build_sqlserver_alter_column_preserving_default_sql, build_sqlserver_drop_default_constraint_sql,
-};
-pub use comments::{build_sqlserver_column_comment_sql, build_sqlserver_table_comment_sql};
-pub use util::{oracle_new_object_reference, sqlserver_unicode_string_literal};
 
 use crate::models::connection::DatabaseType;
 
@@ -49,9 +43,7 @@ pub fn build_table_structure_change_sql(mut options: TableStructureSqlOptions) -
     }
     // GaussDB M-mode uses MySQL-compatible SQL dialect with backtick quoting.
     // Map to StructureDialect::Mysql so DDL is generated correctly.
-    if options.is_gaussdb_m_mode {
-        options.database_type = Some(DatabaseType::Mysql);
-    }
+    {}
     strip_inherited_mysql_column_charsets(&mut options);
     let primary_key_errors = validate_primary_key_change_scope(&options);
     if !primary_key_errors.is_empty() {

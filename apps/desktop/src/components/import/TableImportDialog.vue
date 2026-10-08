@@ -17,7 +17,6 @@ import { useToast } from "@/composables/useToast";
 import {
   autoMapImportColumns,
   buildTableImportParseOptions,
-  defaultTableImportEmptyStringAsNull,
   formatTableImportElapsed,
   nextTableImportWizardStep,
   previousTableImportWizardStep,
@@ -32,8 +31,7 @@ import {
 import { importPreviewInput, importSourceDisplayName, uploadedImportSourceFromPreview } from "@/lib/import/importSource";
 import { getDataTypeOptions } from "@/lib/table/tableStructureEditorState";
 import { metadataSchemaForConnection, tableStructureDatabaseTypeForConnection } from "@/lib/database/jdbcDialect";
-import { isSchemaAware } from "@/lib/database/databaseFeatureSupport";
-import { schemaOptionsForConnection } from "@/composables/useSchemaOptions";
+
 import type { ColumnInfo, DatabaseType } from "@/types/database";
 import * as api from "@/lib/backend/api";
 
@@ -144,7 +142,7 @@ const dataStartRow = ref(2);
 const lastDataRow = ref(0);
 const trimValues = ref(false);
 const conflictPolicy = ref<api.TableImportConflictPolicy>("error");
-const emptyStringAsNull = ref(defaultTableImportEmptyStringAsNull(sourceFormat.value));
+const emptyStringAsNull = ref(false);
 const selectedSheet = ref("");
 const jsonShape = ref<api.TableImportJsonShape>("auto");
 const previewLimit = ref(50);
@@ -180,20 +178,19 @@ const wizardSteps: Array<{ value: TableImportWizardStep; labelKey: string }> = [
 
 const selectedConnection = computed(() => (props.prefillConnectionId ? store.getConfig(props.prefillConnectionId) : undefined));
 const structureDatabaseType = computed(() => tableStructureDatabaseTypeForConnection(selectedConnection.value));
-const supportsDuckDbParquetImport = computed(() => structureDatabaseType.value === "duckdb");
-const availableFormatOptions = computed(() => formatOptions.filter((format) => format.value !== "parquet" || supportsDuckDbParquetImport.value));
-const importFileExtensions = computed(() => ["csv", "tsv", "txt", "json", "xlsx", "xlsm", "xls", "sql", ...(supportsDuckDbParquetImport.value ? ["parquet"] : [])]);
+
+const availableFormatOptions = computed(() => formatOptions.filter((format) => format.value !== "parquet"));
+const importFileExtensions = computed(() => ["csv", "tsv", "txt", "json", "xlsx", "xlsm", "xls", "sql", ...[]]);
 // Mirrors the conflict SQL dispatch in transfer.rs. Other dialects must keep
 // ordinary INSERT/error behavior instead of approximating an upsert.
-const IMPORT_CONFLICT_DATABASE_TYPES = new Set<DatabaseType>(["postgres", "kingbase", "opengauss", "sqlite", "cloudflare-d1", "duckdb", "mysql", "doris", "starrocks"]);
+const IMPORT_CONFLICT_DATABASE_TYPES = new Set<DatabaseType>(["mysql"]);
 const supportsImportConflictPolicy = computed(() => structureDatabaseType.value !== undefined && IMPORT_CONFLICT_DATABASE_TYPES.has(structureDatabaseType.value));
 function defaultInitialSchema() {
   if (props.prefillSchema !== undefined) return props.prefillSchema;
   return metadataSchemaForConnection(selectedConnection.value, props.prefillDatabase || "", props.prefillSchema) || "";
 }
 
-const isSchemaCapable = computed(() => isSchemaAware(structureDatabaseType.value));
-const showSchemaSelector = computed(() => isSchemaCapable.value && !!props.prefillConnectionId);
+const showSchemaSelector = computed(() => false);
 const selectedSchema = ref(defaultInitialSchema());
 const schemaOptions = ref<string[]>([]);
 const loadingSchemas = ref(false);
@@ -428,7 +425,7 @@ function resetState() {
   lastDataRow.value = 0;
   trimValues.value = false;
   conflictPolicy.value = "error";
-  emptyStringAsNull.value = defaultTableImportEmptyStringAsNull(sourceFormat.value);
+  emptyStringAsNull.value = false;
   selectedSheet.value = "";
   jsonShape.value = "auto";
   previewLimit.value = 50;
@@ -645,58 +642,6 @@ async function loadDataTypeOptions() {
   }
 }
 
-async function loadSchemaOptions() {
-  const connectionId = props.prefillConnectionId;
-  const database = props.prefillDatabase || "";
-  if (!connectionId || !isSchemaCapable.value) {
-    schemaOptions.value = [];
-    loadingSchemas.value = false;
-    return;
-  }
-  const requestId = ++schemaOptionsRequestId;
-  loadingSchemas.value = true;
-  try {
-    await store.ensureConnected(connectionId);
-    const rawSchemas = await api.listSchemas(connectionId, database);
-    if (requestId !== schemaOptionsRequestId) return;
-    const filtered = schemaOptionsForConnection(rawSchemas, selectedConnection.value, database);
-    const active = selectedSchema.value || targetSchema.value;
-    if (active && !filtered.includes(active)) {
-      schemaOptions.value = [active, ...filtered];
-    } else {
-      schemaOptions.value = filtered;
-    }
-  } catch {
-    if (requestId === schemaOptionsRequestId) {
-      const active = selectedSchema.value || targetSchema.value;
-      schemaOptions.value = active ? [active] : [];
-    }
-  } finally {
-    if (requestId === schemaOptionsRequestId) {
-      loadingSchemas.value = false;
-    }
-  }
-}
-
-function handleSchemaChange(newSchema: string) {
-  const trimmed = newSchema.trim();
-  if (selectedSchema.value === trimmed) return;
-  selectedSchema.value = trimmed;
-  if (trimmed && !schemaOptions.value.includes(trimmed)) {
-    schemaOptions.value = [trimmed, ...schemaOptions.value];
-  }
-  existingTableNames.value = [];
-  selectedExistingTable.value = "";
-  targetColumns.value = [];
-  loadedTargetTableName.value = "";
-  if (targetMode.value === "existing") {
-    columnMapping.value = {};
-  }
-  if (targetMode.value === "existing" || wizardStep.value === "options") {
-    void loadExistingTables(true);
-  }
-}
-
 async function loadExistingTables(force = false) {
   if (props.prefillTable || (!force && (loadingExistingTables.value || existingTableNames.value.length > 0)) || !props.prefillConnectionId || !props.prefillDatabase) return;
   const requestId = ++existingTablesRequestId;
@@ -791,7 +736,7 @@ async function loadPreview(fileOrPath = selectedSource.value) {
 
 function assignSelectedSource(source: string | File) {
   const detectedFormat = detectFormat(typeof source === "string" ? source : source.name);
-  if (detectedFormat === "parquet" && !supportsDuckDbParquetImport.value) {
+  if (detectedFormat === "parquet") {
     selectedSource.value = null;
     preview.value = null;
     errorMessage.value = t("tableImport.parquetOnlyDuckdb");
@@ -806,7 +751,7 @@ function assignSelectedSource(source: string | File) {
   errorMessage.value = "";
   const name = typeof source === "string" ? source : source.name;
   sourceFormat.value = detectedFormat;
-  emptyStringAsNull.value = defaultTableImportEmptyStringAsNull(sourceFormat.value);
+  emptyStringAsNull.value = false;
   if (!newTableName.value.trim()) {
     newTableName.value = suggestedTableName(name);
   }
@@ -843,12 +788,12 @@ async function prepareBatchSources(sources: ImportSource[]) {
   const tasks: BatchImportTask[] = [];
   const usedNames = new Set<string>();
   const formats = sources.map((source) => detectFormat(sourceName(source)));
-  if (formats.includes("parquet") && !supportsDuckDbParquetImport.value) {
+  if (formats.includes("parquet")) {
     errorMessage.value = t("tableImport.parquetOnlyDuckdb");
     loadingPreview.value = false;
     return;
   }
-  emptyStringAsNull.value = formats.length && formats.every((format) => format === formats[0]) ? defaultTableImportEmptyStringAsNull(formats[0]!) : defaultTableImportEmptyStringAsNull(formats[0] ?? "csv");
+  emptyStringAsNull.value = formats.length && formats.every((format) => format === formats[0]) ? false : false;
   try {
     for (const [index, source] of sources.entries()) {
       const format = formats[index]!;
@@ -910,14 +855,7 @@ async function selectFile() {
   const { open } = await import("@tauri-apps/plugin-dialog");
   const selected = await open({
     multiple: targetMode.value === "create",
-    filters: [
-      { name: "Data files", extensions: importFileExtensions.value },
-      { name: "Text", extensions: ["csv", "tsv", "txt"] },
-      { name: "JSON", extensions: ["json"] },
-      { name: "Excel", extensions: ["xlsx", "xlsm", "xls"] },
-      { name: "SQL", extensions: ["sql"] },
-      ...(supportsDuckDbParquetImport.value ? [{ name: "Parquet", extensions: ["parquet"] }] : []),
-    ],
+    filters: [{ name: "Data files", extensions: importFileExtensions.value }, { name: "Text", extensions: ["csv", "tsv", "txt"] }, { name: "JSON", extensions: ["json"] }, { name: "Excel", extensions: ["xlsx", "xlsm", "xls"] }, { name: "SQL", extensions: ["sql"] }, ...[]],
   });
   if (!selected) return;
   const sources = Array.isArray(selected) ? selected : [selected];
@@ -1287,7 +1225,8 @@ watch(
   (value) => {
     if (value) {
       resetState();
-      if (showSchemaSelector.value) void loadSchemaOptions();
+      {
+      }
       void loadTargetColumns();
       void loadDataTypeOptions();
     } else {
@@ -1308,7 +1247,8 @@ watch([newTableName, columnMapping, columnDataTypes], saveActiveBatchTask, { dee
 watch(wizardStep, (step) => {
   if (step !== "mapping") closeDataTypePicker();
   if (step === "options") {
-    if (showSchemaSelector.value) void loadSchemaOptions();
+    {
+    }
     void loadExistingTables();
   }
 });
@@ -1496,31 +1436,7 @@ watch(rawProgressPercent, (percent) => {
                 </button>
               </div>
             </div>
-            <div v-if="showSchemaSelector" class="space-y-1.5">
-              <Label class="text-xs">{{ t("transfer.targetSchema") }}</Label>
-              <div v-if="props.prefillTable" class="flex h-8 items-center rounded-md border px-2 text-xs font-mono">
-                <span class="truncate">{{ targetSchema || props.prefillSchema || "-" }}</span>
-              </div>
-              <SearchableSelect
-                v-else
-                data-testid="target-schema-select"
-                :model-value="selectedSchema"
-                :options="schemaOptions.length ? schemaOptions : selectedSchema ? [selectedSchema] : []"
-                :placeholder="t('transfer.selectSchema')"
-                :search-placeholder="t('transfer.searchSchema')"
-                :empty-text="t('common.noResults')"
-                :loading-text="t('common.loading')"
-                :loading="loadingSchemas"
-                :allow-custom="true"
-                trigger-class="h-8 font-mono text-xs"
-                @update:model-value="handleSchemaChange"
-                @update:open="
-                  (isOpen) => {
-                    if (isOpen) void loadSchemaOptions();
-                  }
-                "
-              />
-            </div>
+
             <div class="space-y-1.5">
               <Label class="text-xs">{{ t("tableImport.targetTableName") }}</Label>
               <Input v-if="targetMode === 'create'" v-model="newTableName" class="h-8 text-xs font-mono" />

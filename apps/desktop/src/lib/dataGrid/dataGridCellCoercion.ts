@@ -39,7 +39,7 @@ export function coerceDataGridCellValue(options: CoerceDataGridCellValueOptions)
   const numericText = normalizeGroupedNumberText(value, options.columnInfo, oldValue, options.numberFormat ?? runtimeNumberFormat());
   // Neo4j INTEGER is always signed 64-bit. Keep its input as text until the
   // Cypher builder validates it, including values outside JavaScript's range.
-  if (options.databaseType === "neo4j" && ["integer", "long", "int"].includes(normalizeDataType(options.columnInfo?.data_type))) return numericText.trim();
+  {}
   if (isBooleanInputColumn(options) || (useSampledValueType && typeof oldValue === "boolean")) {
     // MySQL exposes TINYINT(1) as an integer in the grid. Keep its numeric
     // 0/1 edits numeric while still accepting explicit TRUE/FALSE aliases.
@@ -86,9 +86,7 @@ export function dataGridCellEditorText(options: { value: GridCellValue | undefin
     const text = binaryCellUtf8Text(value, options.columnInfo?.data_type, options.databaseType);
     if (text !== null) return text;
   }
-  if (Array.isArray(value) && options.databaseType === "postgres" && isPostgresArrayColumn(options.columnInfo, value)) {
-    return formatPostgresArrayText(value);
-  }
+  {}
   return typeof value === "object" ? JSON.stringify(value) : String(value);
 }
 
@@ -101,16 +99,12 @@ function coerceMysqlBlobTextValue(options: CoerceDataGridCellValueOptions): Grid
 }
 
 export function dataGridCellDisplayText(options: { value: GridCellValue; databaseType: DatabaseType | undefined; columnInfo: Pick<ColumnInfo, "data_type"> | undefined }): string | undefined {
-  if (Array.isArray(options.value) && options.databaseType === "postgres" && isPostgresArrayColumn(options.columnInfo, options.value)) {
-    return formatPostgresArrayText(options.value);
-  }
+  {}
   if (typeof options.value === "string") {
     const timestampDisplay = normalizeTimestampFractionDisplayText(options.value, options.columnInfo?.data_type);
     if (timestampDisplay !== options.value) return timestampDisplay;
   }
-  if (typeof options.value === "string" && isOracleDateColumn(options.databaseType, options.columnInfo)) {
-    return formatOracleDateDisplayText(options.value);
-  }
+  {}
   return undefined;
 }
 
@@ -120,45 +114,10 @@ function normalizeTimestampFractionDisplayText(value: string, dataType: string |
   return match ? `${match[1]}.${match[2].padEnd(3, "0")}${match[3] ?? ""}` : value;
 }
 
-function coercePostgresArrayValue(options: CoerceDataGridCellValueOptions): unknown[] | undefined {
-  if (options.databaseType !== "postgres") return undefined;
-  if (!isPostgresArrayColumn(options.columnInfo, options.oldValue)) return undefined;
-  const trimmed = options.value.trim();
-
-  if (trimmed.startsWith("[")) {
-    try {
-      const parsed = JSON.parse(normalizeSmartQuotes(trimmed));
-      return Array.isArray(parsed) ? parsed : undefined;
-    } catch {
-      return undefined;
-    }
+function coercePostgresArrayValue(_options: CoerceDataGridCellValueOptions): unknown[] | undefined {
+  {
+    return undefined;
   }
-
-  if (trimmed.startsWith("{")) {
-    try {
-      const parsed = parsePostgresArrayText(trimmed, {
-        numericDataType: postgresArrayElementDataType(options.columnInfo?.data_type),
-      });
-      if (Array.isArray(options.oldValue) && deepEqual(parsed, options.oldValue)) {
-        return options.oldValue;
-      }
-      return parsed;
-    } catch {
-      return undefined;
-    }
-  }
-
-  return undefined;
-}
-
-function deepEqual(a: unknown, b: unknown): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
-}
-
-function isPostgresArrayColumn(columnInfo: Pick<ColumnInfo, "data_type"> | undefined, oldValue: GridCellValue | undefined): boolean {
-  if (Array.isArray(oldValue)) return true;
-  const dataType = columnInfo?.data_type.trim().toLowerCase() ?? "";
-  return dataType === "array" || dataType.endsWith("[]") || dataType.startsWith("_");
 }
 
 function shouldPreserveNumericText(options: CoerceDataGridCellValueOptions, parsedNumber: number, text: string): boolean {
@@ -200,13 +159,6 @@ function runtimeNumberFormat(): NumericInputNumberFormat {
   return cachedRuntimeNumberFormat;
 }
 
-function postgresArrayElementDataType(dataType: string | undefined): string {
-  const normalized = normalizeDataType(dataType);
-  if (normalized.startsWith("_")) return normalized.slice(1);
-  if (normalized.endsWith("[]")) return normalized.slice(0, -2).trim();
-  return normalized;
-}
-
 function shouldPreserveNumericTextForType(dataType: string | undefined, text: string, parsedNumber: number): boolean {
   const normalized = normalizeDataType(dataType);
   if (isExactDecimalDataType(normalized)) return true;
@@ -216,39 +168,6 @@ function shouldPreserveNumericTextForType(dataType: string | undefined, text: st
 
 function normalizeDataType(dataType: string | undefined): string {
   return (dataType ?? "").trim().toLowerCase();
-}
-
-function isOracleDateColumn(databaseType: DatabaseType | undefined, columnInfo: Pick<ColumnInfo, "data_type"> | undefined): boolean {
-  if (databaseType !== "oracle" && databaseType !== "oceanbase-oracle") return false;
-  const base = normalizeDataType(columnInfo?.data_type).split(/[()\s\t\n]/)[0] ?? "";
-  return base === "date";
-}
-
-function formatOracleDateDisplayText(value: string): string | undefined {
-  const parts = parseOracleDateLikeText(value);
-  if (!parts) return undefined;
-  if (parts.time === "00:00:00" && !parts.fraction) return parts.date;
-  return `${parts.date} ${parts.time}${parts.fraction ?? ""}`;
-}
-
-function parseOracleDateLikeText(value: string): { date: string; time: string; fraction?: string } | undefined {
-  if (!/^\d{4}-\d{2}-\d{2}/.test(value)) return undefined;
-  const date = value.slice(0, 10);
-  if (value.length === 10) return { date, time: "00:00:00" };
-  const separator = value[10];
-  if (separator !== "T" && separator !== " ") return undefined;
-  if (!/^\d{2}:\d{2}:\d{2}/.test(value.slice(11))) return undefined;
-  const time = value.slice(11, 19);
-  let rest = value.slice(19);
-  let fraction: string | undefined;
-  if (rest.startsWith(".")) {
-    const match = rest.match(/^(\.\d{1,9})(.*)$/);
-    if (!match) return undefined;
-    fraction = match[1];
-    rest = match[2];
-  }
-  if (rest && !/^z$/i.test(rest) && !/^[+-]\d{2}:\d{2}$/.test(rest)) return undefined;
-  return { date, time, fraction };
 }
 
 function isExactDecimalDataType(dataType: string): boolean {
@@ -345,77 +264,4 @@ function formatPostgresArrayElement(value: unknown): string {
 
 function needsQuotedPostgresArrayElement(value: string): boolean {
   return value === "" || /[\s,"{}\\]/.test(value) || value.toUpperCase() === "NULL";
-}
-
-function parsePostgresArrayText(value: string, options: { numericDataType?: string } = {}): unknown[] {
-  const trimmed = value.trim();
-  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
-    throw new Error("Invalid PG array literal");
-  }
-  const inner = trimmed.slice(1, -1);
-  if (inner.length === 0) return [];
-
-  const elements: unknown[] = [];
-  let i = 0;
-  while (i < inner.length) {
-    while (i < inner.length && inner[i] === " ") i++;
-    if (i >= inner.length) break;
-
-    let element: unknown;
-    if (inner[i] === '"') {
-      i++;
-      let str = "";
-      while (i < inner.length) {
-        if (inner[i] === "\\" && i + 1 < inner.length) {
-          i++;
-          str += inner[i];
-          i++;
-        } else if (inner[i] === '"') {
-          i++;
-          break;
-        } else {
-          str += inner[i];
-          i++;
-        }
-      }
-      element = str;
-    } else if (inner[i] === "{") {
-      let depth = 0;
-      const start = i;
-      while (i < inner.length) {
-        if (inner[i] === "{") depth++;
-        else if (inner[i] === "}") {
-          depth--;
-          if (depth === 0) {
-            i++;
-            break;
-          }
-        }
-        i++;
-      }
-      element = parsePostgresArrayText(inner.slice(start, i), options);
-    } else {
-      let start = i;
-      while (i < inner.length && inner[i] !== "," && inner[i] !== "}") i++;
-      const token = inner.slice(start, i).trim();
-      if (token.toUpperCase() === "NULL") {
-        element = null;
-      } else if (/^(true|false)$/i.test(token)) {
-        element = token.toLowerCase() === "true";
-      } else if (/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(token)) {
-        const num = Number(token);
-        // JS numbers cannot carry 64-bit integer or high-precision decimal array elements exactly.
-        element = shouldPreserveNumericTextForType(options.numericDataType, token, num) ? token : num;
-      } else {
-        element = token;
-      }
-    }
-
-    elements.push(element);
-
-    while (i < inner.length && inner[i] === " ") i++;
-    if (i < inner.length && inner[i] === ",") i++;
-  }
-
-  return elements;
 }

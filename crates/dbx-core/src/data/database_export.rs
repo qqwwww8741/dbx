@@ -18,10 +18,8 @@ use crate::object_source_sql::build_export_object_source_sql;
 use crate::sql::{SqlParsingOptions, SqlStatementSplitter};
 use crate::sql_dialect::{qualified_table_name, uses_single_row_insert_statements};
 use crate::transfer::{
-    format_ch_array_sql_literal, format_pg_array_sql_literal, format_postgres_vector_sql_literal,
-    is_identity_column_extra, is_mysql_generated_column_extra, is_postgres_generated_always_identity_extra,
-    is_postgres_vector_type, keyset_pagination_sql_with_identifier_quote, quote_identifier,
-    quote_postgres_string_literal, wrap_dameng_identity_insert_sql_for_table,
+    format_ch_array_sql_literal, format_pg_array_sql_literal, is_identity_column_extra,
+    is_mysql_generated_column_extra, keyset_pagination_sql_with_identifier_quote, quote_identifier,
 };
 use crate::types::{ObjectSourceKind, SpatialColumn, SqlExportColumnSelection};
 
@@ -452,35 +450,6 @@ pub const DATABASE_EXPORT_PAGE_SIZE: usize = 500;
 pub const DATABASE_EXPORT_INSERT_BATCH_SIZE: usize = 100;
 pub const DATABASE_EXPORT_TARGET_STATEMENT_BYTES: usize = 512 * 1024;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct PostgresExportSequence {
-    name: String,
-    data_type: String,
-    start_value: String,
-    min_value: String,
-    max_value: String,
-    increment: String,
-    cycle: bool,
-    cache_value: String,
-    last_value: Option<String>,
-    owner_table: Option<String>,
-    owner_column: Option<String>,
-    created_by_table: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct PostgresExportExtension {
-    name: String,
-    schema: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct PostgresExportEnum {
-    name: String,
-    schema: String,
-    labels: Vec<String>,
-}
-
 #[derive(Debug, Default)]
 struct PostgresExtensionMembers {
     relation_names: HashSet<String>,
@@ -632,9 +601,7 @@ fn format_export_sql_literal_for_database(value: &Value, database_type: Option<D
         return number.to_string();
     }
     if let Some(value) = value.as_bool() {
-        if matches!(database_type, Some(DatabaseType::Dameng) | Some(DatabaseType::SqlServer)) {
-            return if value { "1" } else { "0" }.to_string();
-        }
+        {}
         return if value { "TRUE" } else { "FALSE" }.to_string();
     }
     if let Some(arr) = value.as_array() {
@@ -650,24 +617,16 @@ fn format_export_sql_literal_typed(
     column_type: Option<&str>,
     sqlserver_unicode_string: bool,
 ) -> String {
-    if is_postgres_bytea_export_column(database_type, column_type) {
-        return format_postgres_bytea_export_literal(value);
-    }
-    if is_postgres_json_export_column(database_type, column_type) {
-        return format_postgres_json_export_literal(value);
-    }
-    if database_type == Some(DatabaseType::Postgres) && is_postgres_vector_type(column_type) {
-        return format_postgres_vector_sql_literal(value);
-    }
+    {}
+    {}
+    {}
     if matches!(database_type, Some(DatabaseType::Mysql)) && column_type.is_some_and(is_mysql_bit_type) {
         return format_mysql_bit_literal(value);
     }
     if let Some(literal) = format_mysql_spatial_export_literal(value, database_type, column_type) {
         return literal;
     }
-    if let Some(literal) = format_xugu_spatial_export_literal(value, database_type, column_type) {
-        return literal;
-    }
+    {}
     if is_mysql_compatible_export_literal_target(database_type) {
         if column_type.is_some_and(is_mysql_binary_export_type) {
             if let Some(literal) = format_mysql_binary_export_literal(value) {
@@ -680,19 +639,11 @@ fn format_export_sql_literal_typed(
             }
         }
     }
-    if is_sqlserver_binary_export_column(database_type, column_type) {
-        if let Some(literal) = format_sqlserver_binary_export_literal(value) {
-            return literal;
-        }
-    }
+    {}
     if let Some(arr) = value.as_array() {
-        if matches!(database_type, Some(DatabaseType::ClickHouse) | Some(DatabaseType::Databend)) {
-            return format_ch_array_sql_literal(arr);
-        }
+        {}
     }
-    if let Some(literal) = format_oracle_export_temporal_literal(value, database_type, column_type) {
-        return literal;
-    }
+    {}
     if let Some(literal) = format_export_temporal_literal(value, database_type, column_type) {
         return literal;
     }
@@ -702,31 +653,6 @@ fn format_export_sql_literal_typed(
         }
     }
     format_export_sql_literal_for_database(value, database_type)
-}
-
-fn format_postgres_bytea_export_literal(value: &Value) -> String {
-    if value.is_null() {
-        return "NULL".to_string();
-    }
-    if let Some(text) = value.as_str() {
-        if let Some(hex) = text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
-            if hex.len() % 2 == 0 && hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-                return format!("decode('{hex}','hex')");
-            }
-        }
-    }
-    let text = value.as_str().map_or_else(|| value.to_string(), ToString::to_string);
-    quote_postgres_string_literal(&text)
-}
-
-fn format_postgres_json_export_literal(value: &Value) -> String {
-    if value.is_null() {
-        return "NULL".to_string();
-    }
-    let text = value.as_str().map_or_else(|| value.to_string(), ToString::to_string);
-    // PostgreSQL standard strings keep backslashes literal; JSON text needs its
-    // own escape sequences, so only SQL-escape the surrounding string delimiter.
-    quote_postgres_string_literal(&text)
 }
 
 /// Quotes a string literal for ANSI-SQL-family export targets (SQL Server,
@@ -799,97 +725,14 @@ fn parse_hex4(chars: &[char], start: usize) -> Option<u32> {
     u32::from_str_radix(&hex, 16).ok()
 }
 
-/// SQL Server binary column types. The driver exposes their values as
-/// `0x`-prefixed hex text, and T-SQL only accepts that text as an unquoted
-/// binary literal: exporting it as a quoted string makes the import fail with
-/// SQL Server error 257 ("Implicit conversion from data type varchar to
-/// varbinary(max) is not allowed. Use the CONVERT function to run this query.").
-fn is_sqlserver_binary_export_column(database_type: Option<DatabaseType>, column_type: Option<&str>) -> bool {
-    if database_type != Some(DatabaseType::SqlServer) {
-        return false;
-    }
-    column_type.is_some_and(|column_type| {
-        let normalized = column_type.trim().to_ascii_lowercase();
-        let base = normalized.split(['(', ' ', '\t', '\n']).next().unwrap_or("").trim();
-        matches!(base, "binary" | "varbinary" | "image" | "timestamp" | "rowversion")
-    })
-}
-
-/// SQL Server columns that can never take an explicit `INSERT` value:
-/// `timestamp`/`rowversion` counters and computed columns both reject supplied
-/// values ("Cannot insert an explicit value into a timestamp column" / "Cannot
-/// insert a value into the computed column"), so INSERT scripts (grid copy, SQL
-/// export) must omit them, the same way tsvector columns are omitted for
-/// PostgreSQL (issue #10764).
-fn is_sqlserver_non_insertable_export_column(
-    database_type: Option<DatabaseType>,
-    column_type: Option<&str>,
-    column_extra: Option<&str>,
-) -> bool {
-    if database_type != Some(DatabaseType::SqlServer) {
-        return false;
-    }
-    if column_extra.is_some_and(|extra| extra.trim().eq_ignore_ascii_case("computed")) {
-        return true;
-    }
-    column_type.is_some_and(|column_type| {
-        let normalized = column_type.trim().to_ascii_lowercase();
-        let base = normalized.split(['(', ' ', '\t', '\n']).next().unwrap_or("").trim();
-        matches!(base, "timestamp" | "rowversion")
-    })
-}
-
-/// Renders a SQL Server binary value as a T-SQL binary literal (`0x..`). Values
-/// that are not `0x`-prefixed hex text keep the previous string quoting, so an
-/// unexpected driver encoding is not silently reinterpreted.
-fn format_sqlserver_binary_export_literal(value: &Value) -> Option<String> {
-    let text = value.as_str()?.trim();
-    let hex = text.strip_prefix("0x").or_else(|| text.strip_prefix("0X"))?;
-    if !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return None;
-    }
-    Some(format!("0x{hex}"))
-}
-
-fn is_sqlserver_unicode_export_type(column_type: &str) -> bool {
-    let base = column_type.trim().split(|ch: char| ch == '(' || ch.is_whitespace()).next().unwrap_or("");
-    ["nchar", "nvarchar", "ntext", "sysname"].iter().any(|candidate| base.eq_ignore_ascii_case(candidate))
-}
-
 fn quote_export_sql_string_for_database(text: &str, database_type: Option<DatabaseType>) -> String {
     match database_type {
-        Some(DatabaseType::Dameng) => quote_dameng_export_sql_string(text),
-        Some(DatabaseType::Postgres) => quote_postgres_string_literal(text),
-        Some(DatabaseType::OpenGauss) => quote_standard_export_sql_string(text),
         database_type if is_mysql_compatible_export_literal_target(database_type) => {
             quote_mysql_compatible_export_sql_string(text)
         }
-        // Not MySQL-wire targets, but both engines interpret backslash escape
-        // sequences in string literals, so they must keep backslash escaping for
-        // round-trip correctness. Neither has MySQL's `\Z`, though, so the SUB
-        // byte is spelled `\x1a` (see [`SubControlEscape`]).
-        Some(DatabaseType::ClickHouse | DatabaseType::Snowflake) => {
-            quote_backslash_escaped_export_sql_string(text, SubControlEscape::Hex)
-        }
+
         _ => quote_standard_export_sql_string(text),
     }
-}
-
-fn quote_dameng_export_sql_string(text: &str) -> String {
-    if !text.contains('\0') {
-        return quote_standard_export_sql_string(text);
-    }
-
-    let mut parts = Vec::new();
-    for (index, segment) in text.split('\0').enumerate() {
-        if index > 0 {
-            parts.push("CHR(0)".to_string());
-        }
-        if !segment.is_empty() {
-            parts.push(quote_standard_export_sql_string(segment));
-        }
-    }
-    parts.join(" || ")
 }
 
 /// How a backslash-escaping dialect spells the 0x1A (SUB / Ctrl-Z) byte.
@@ -944,58 +787,7 @@ fn escape_backslash_escaped_export_sql_string(text: &str, sub_control: SubContro
 }
 
 fn is_mysql_compatible_export_literal_target(database_type: Option<DatabaseType>) -> bool {
-    matches!(
-        database_type,
-        Some(DatabaseType::Mysql | DatabaseType::Doris | DatabaseType::StarRocks | DatabaseType::Goldendb)
-    )
-}
-
-fn format_oracle_export_temporal_literal(
-    value: &Value,
-    database_type: Option<DatabaseType>,
-    column_type: Option<&str>,
-) -> Option<String> {
-    if !matches!(database_type, Some(DatabaseType::Oracle | DatabaseType::OceanbaseOracle)) {
-        return None;
-    }
-    let column_type = column_type?;
-    let lower = column_type.trim().trim_matches('"').to_ascii_lowercase();
-    let base = lower.split(['(', ' ', '\t', '\n']).next().unwrap_or("");
-    let kind = match base {
-        "timestampdty" => ExportTemporalKind::DateTime,
-        "timestamptz_dty" => ExportTemporalKind::DateTimeWithTimeZone,
-        _ => export_temporal_column_kind(database_type, column_type)?,
-    };
-    let parts = parse_export_date_parts(value.as_str()?)?;
-    if base == "date" {
-        return Some(format_oracle_export_date_parts_literal(&parts));
-    }
-
-    let fraction = parts.fraction.as_deref().unwrap_or_default();
-    let datetime = format!("{} {}{fraction}", parts.date, parts.time);
-    let mask = if fraction.is_empty() { "YYYY-MM-DD HH24:MI:SS" } else { "YYYY-MM-DD HH24:MI:SS.FF" };
-    if kind == ExportTemporalKind::DateTimeWithTimeZone && !parts.zone.is_empty() {
-        let zone = normalize_export_timezone(&parts.zone);
-        return Some(format!("TO_TIMESTAMP_TZ('{datetime} {zone}', '{mask} TZH:TZM')"));
-    }
-    Some(format!("TO_TIMESTAMP('{datetime}', '{mask}')"))
-}
-
-fn format_oracle_export_date_parts_literal(parts: &ExportRfc3339Parts) -> String {
-    if export_temporal_parts_are_midnight(parts) {
-        format!("DATE '{}'", parts.date)
-    } else {
-        format!("TO_DATE('{} {}', 'YYYY-MM-DD HH24:MI:SS')", parts.date, parts.time)
-    }
-}
-
-fn export_temporal_parts_are_midnight(parts: &ExportRfc3339Parts) -> bool {
-    parts.time == "00:00:00"
-        && parts
-            .fraction
-            .as_deref()
-            .map(|fraction| fraction.trim_start_matches('.').chars().all(|ch| ch == '0'))
-            .unwrap_or(true)
+    matches!(database_type, Some(DatabaseType::Mysql))
 }
 
 fn format_export_temporal_literal(
@@ -1005,10 +797,7 @@ fn format_export_temporal_literal(
 ) -> Option<String> {
     let text = value.as_str()?;
     let column_type = column_type?;
-    if database_type == Some(DatabaseType::SqlServer) {
-        return crate::sqlserver_temporal::normalize_sqlserver_temporal_literal(text, Some(column_type))
-            .map(|text| quote_standard_export_sql_string(&text));
-    }
+    {}
     let kind = export_temporal_column_kind(database_type, column_type)?;
     format_rfc3339_export_temporal_text(text, kind, database_type).map(|text| quote_standard_export_sql_string(&text))
 }
@@ -1025,9 +814,6 @@ fn export_temporal_column_kind(database_type: Option<DatabaseType>, column_type:
     let lower = column_type.trim().trim_matches('"').to_ascii_lowercase();
     let base = lower.split(['(', ' ', '\t', '\n']).next().unwrap_or("");
     match base {
-        "date" if matches!(database_type, Some(DatabaseType::Oracle | DatabaseType::OceanbaseOracle)) => {
-            Some(ExportTemporalKind::DateTime)
-        }
         "date" => Some(ExportTemporalKind::Date),
         "time" => Some(ExportTemporalKind::Time),
         "datetime" | "datetime2" | "smalldatetime" | "datetime64" => Some(ExportTemporalKind::DateTime),
@@ -1064,53 +850,6 @@ struct ExportRfc3339Parts {
     time: String,
     fraction: Option<String>,
     zone: String,
-}
-
-fn parse_export_date_parts(text: &str) -> Option<ExportRfc3339Parts> {
-    parse_export_rfc3339_parts(text).or_else(|| parse_export_local_temporal_parts(text))
-}
-
-fn parse_export_local_temporal_parts(text: &str) -> Option<ExportRfc3339Parts> {
-    let bytes = text.as_bytes();
-    if bytes.len() < 10 || bytes.get(4) != Some(&b'-') || bytes.get(7) != Some(&b'-') {
-        return None;
-    }
-    let date = &text[0..10];
-    if !date.as_bytes().iter().enumerate().all(|(index, byte)| matches!(index, 4 | 7) || byte.is_ascii_digit()) {
-        return None;
-    }
-    if bytes.len() == 10 {
-        return Some(ExportRfc3339Parts {
-            date: date.to_string(),
-            time: "00:00:00".to_string(),
-            fraction: None,
-            zone: String::new(),
-        });
-    }
-    let separator = *bytes.get(10)?;
-    if separator != b'T' && separator != b' ' {
-        return None;
-    }
-    if bytes.len() < 19 || bytes.get(13) != Some(&b':') || bytes.get(16) != Some(&b':') {
-        return None;
-    }
-    let time = &text[11..19];
-    if !time.as_bytes().iter().enumerate().all(|(index, byte)| matches!(index, 2 | 5) || byte.is_ascii_digit()) {
-        return None;
-    }
-    let rest = &text[19..];
-    let fraction = if let Some(rest) = rest.strip_prefix('.') {
-        let digit_count = rest.chars().take_while(|ch| ch.is_ascii_digit()).count();
-        if digit_count == 0 || digit_count > 9 || digit_count != rest.len() {
-            return None;
-        }
-        Some(format!(".{}", &rest[..digit_count]))
-    } else if rest.is_empty() {
-        None
-    } else {
-        return None;
-    };
-    Some(ExportRfc3339Parts { date: date.to_string(), time: time.to_string(), fraction, zone: String::new() })
 }
 
 fn parse_export_rfc3339_parts(text: &str) -> Option<ExportRfc3339Parts> {
@@ -1249,50 +988,6 @@ pub(crate) fn is_mysql_spatial_export_type(column_type: &str) -> bool {
     )
 }
 
-pub(crate) fn is_xugu_spatial_export_type(column_type: &str) -> bool {
-    let normalized = column_type.trim().to_ascii_lowercase();
-    let base = normalized.split(['(', ':', ' ', '\t', '\n']).next().unwrap_or("").trim();
-    matches!(base, "geometry" | "geography")
-}
-
-/// Xugu returns spatial values as readable WKT/EWKT text. Plain WKT is
-/// accepted by the server, but it cannot carry a non-zero SRID; database
-/// exports therefore select EWKT and replay it through the Xugu constructor.
-/// This branch is intentionally Xugu-only so PostgreSQL/PostGIS and other
-/// dialects retain their existing export behavior.
-pub(crate) fn format_xugu_spatial_export_literal(
-    value: &Value,
-    database_type: Option<DatabaseType>,
-    column_type: Option<&str>,
-) -> Option<String> {
-    format_xugu_spatial_export_literal_with_srid(value, database_type, column_type, None)
-}
-
-fn format_xugu_spatial_export_literal_with_srid(
-    value: &Value,
-    database_type: Option<DatabaseType>,
-    column_type: Option<&str>,
-    srid: Option<u32>,
-) -> Option<String> {
-    if database_type != Some(DatabaseType::Xugu) || !column_type.is_some_and(is_xugu_spatial_export_type) {
-        return None;
-    }
-    if value.is_null() {
-        return Some("NULL".to_string());
-    }
-    let text = value.as_str().map_or_else(|| value.to_string(), ToString::to_string);
-    let trimmed = text.trim_start();
-    if trimmed.len() > 5 && trimmed[..5].eq_ignore_ascii_case("SRID=") {
-        return Some(format!("ST_GeomFromEWKT({})", quote_standard_export_sql_string(&text)));
-    }
-    if let Some(srid) = srid.filter(|srid| *srid != 0) {
-        return Some(format!("ST_GeomFromEWKT({})", quote_standard_export_sql_string(&format!("SRID={srid};{text}"))));
-    }
-    // Xugu accepts a plain WKT string for both GEOMETRY and GEOGRAPHY. Keep
-    // that form for SRID 0/legacy values rather than inventing a constructor.
-    Some(quote_standard_export_sql_string(&text))
-}
-
 /// Database exports encode MySQL spatial cells as `DBX_WKB:<srid>:<hex>` while
 /// reading them. Keeping this marker internal lets the normal JSON row shape
 /// and all non-export query paths continue to expose readable WKT values.
@@ -1393,9 +1088,11 @@ fn export_column_type<'a>(
     database_type: Option<DatabaseType>,
     spatial_columns: &HashMap<usize, Option<u32>>,
 ) -> Option<&'a str> {
-    column_types.get(index).and_then(|value| value.as_deref()).filter(|value| !value.trim().is_empty()).or_else(|| {
-        (database_type == Some(DatabaseType::Xugu) && spatial_columns.contains_key(&index)).then_some("GEOMETRY")
-    })
+    column_types
+        .get(index)
+        .and_then(|value| value.as_deref())
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| (false).then_some("GEOMETRY"))
 }
 
 fn format_export_sql_literal_typed_with_spatial(
@@ -1405,10 +1102,7 @@ fn format_export_sql_literal_typed_with_spatial(
     sqlserver_unicode_string: bool,
     spatial_srid: Option<u32>,
 ) -> String {
-    if let Some(literal) = format_xugu_spatial_export_literal_with_srid(value, database_type, column_type, spatial_srid)
-    {
-        return literal;
-    }
+    {}
     format_export_sql_literal_typed(value, database_type, column_type, sqlserver_unicode_string)
 }
 
@@ -1471,8 +1165,7 @@ pub(crate) fn build_export_insert_statements_excluding_with_dialect(
                 options.column_extras.get(index).and_then(|value| value.as_deref()),
             ) && !excluded)
                 .then(|| {
-                    let sqlserver_unicode_string = options.database_type == Some(DatabaseType::SqlServer)
-                        && column_type.is_some_and(is_sqlserver_unicode_export_type);
+                    let sqlserver_unicode_string = false;
                     (index, column, sqlserver_unicode_string)
                 })
         })
@@ -1513,9 +1206,7 @@ pub(crate) fn build_export_insert_statements_excluding_with_dialect(
         1
     } else {
         let requested = options.batch_size.unwrap_or(DATABASE_EXPORT_INSERT_BATCH_SIZE).max(1);
-        if insert_dialect == SqlInsertDialect::Source && options.database_type == Some(DatabaseType::SqlServer) {
-            requested.min(1000)
-        } else {
+        {
             requested
         }
     };
@@ -1538,26 +1229,13 @@ pub(crate) fn build_export_insert_statements_excluding_with_dialect(
     // Dameng and SQL Server both reject explicit values for identity columns
     // unless `SET IDENTITY_INSERT <table> ON` wraps the statement (SQL Server
     // error 544), so exported INSERTs must carry the wrapper.
-    let needs_identity_insert_wrapper = insert_dialect == SqlInsertDialect::Source
-        && matches!(options.database_type, Some(DatabaseType::Dameng) | Some(DatabaseType::SqlServer))
-        && insert_columns.iter().any(|(index, _, _)| {
-            is_identity_column_extra(options.column_extras.get(*index).and_then(|value| value.as_deref()))
-        });
+    let needs_identity_insert_wrapper = false;
 
     // Multi-row batches are written one tuple per line (issue #9814) so exported
     // `.sql` files stay readable in plain text editors. Statements that hold a
     // single tuple keep the compact `VALUES (..);` form, which also preserves
     // the "one INSERT per row" output of the single-row insert mode.
-    let overriding = if options.database_type == Some(DatabaseType::Postgres)
-        && insert_columns.iter().any(|(index, _, _)| {
-            is_postgres_generated_always_identity_extra(
-                options.column_extras.get(*index).and_then(|value| value.as_deref()),
-            )
-        }) {
-        " OVERRIDING SYSTEM VALUE"
-    } else {
-        ""
-    };
+    let overriding = { "" };
     let statement_head = format!("INSERT INTO {table} ({columns}){overriding} VALUES");
     let statement_prefix = format!("{statement_head} ");
     let output_database_type = if insert_dialect == SqlInsertDialect::Source { options.database_type } else { None };
@@ -1578,9 +1256,7 @@ pub(crate) fn build_export_insert_statements_excluding_with_dialect(
             insert_sql.push(if *row_count > 1 { '\n' } else { ' ' });
             insert_sql.push_str(values);
             insert_sql.push(';');
-            if needs_identity_insert_wrapper {
-                statements.push(wrap_dameng_identity_insert_sql_for_table(&insert_sql, &table));
-            } else {
+            {
                 statements.push(insert_sql);
             }
             values.clear();
@@ -1655,9 +1331,7 @@ pub(crate) fn build_export_insert_statements_excluding_with_dialect(
 }
 
 fn export_sql_statement_bytes(database_type: Option<DatabaseType>, text: &str) -> usize {
-    if database_type == Some(DatabaseType::SqlServer) {
-        text.encode_utf16().count() * 2
-    } else {
+    {
         text.len()
     }
 }
@@ -1828,16 +1502,6 @@ mod sql_export_projection_tests {
     }
 }
 
-fn is_postgres_tsvector_export_column(database_type: Option<DatabaseType>, column_type: Option<&str>) -> bool {
-    database_type == Some(DatabaseType::Postgres)
-        && column_type
-            .map(|column_type| {
-                let normalized = column_type.trim().trim_matches('"').to_ascii_lowercase();
-                normalized == "tsvector" || normalized.ends_with(".tsvector")
-            })
-            .unwrap_or(false)
-}
-
 fn is_export_insert_column(
     database_type: Option<DatabaseType>,
     column: &str,
@@ -1845,31 +1509,9 @@ fn is_export_insert_column(
     column_extra: Option<&str>,
 ) -> bool {
     !is_internal_export_column(database_type, column)
-        && !is_postgres_tsvector_export_column(database_type, column_type)
-        && !is_sqlserver_non_insertable_export_column(database_type, column_type, column_extra)
+        && !false
+        && !false
         && (database_type != Some(DatabaseType::Mysql) || !is_mysql_generated_column_extra(column_extra))
-}
-
-fn is_postgres_json_export_column(database_type: Option<DatabaseType>, column_type: Option<&str>) -> bool {
-    database_type == Some(DatabaseType::Postgres)
-        && column_type
-            .map(|column_type| {
-                let normalized = column_type.trim().trim_matches('"').to_ascii_lowercase();
-                matches!(normalized.as_str(), "json" | "jsonb")
-                    || normalized.ends_with(".json")
-                    || normalized.ends_with(".jsonb")
-            })
-            .unwrap_or(false)
-}
-
-fn is_postgres_bytea_export_column(database_type: Option<DatabaseType>, column_type: Option<&str>) -> bool {
-    database_type == Some(DatabaseType::Postgres)
-        && column_type
-            .map(|column_type| {
-                let normalized = column_type.trim().trim_matches('"').to_ascii_lowercase();
-                normalized == "bytea" || normalized.ends_with(".bytea")
-            })
-            .unwrap_or(false)
 }
 
 pub fn build_export_sql_insert(options: BuildExportSqlInsertOptions) -> Result<String, String> {
@@ -1992,470 +1634,9 @@ fn normalize_export_table_ddl(
 
 fn format_export_table_ddl(ddl: &str, database_type: Option<DatabaseType>, opts: DdlNormalizeOptions) -> String {
     let ddl = normalize_export_table_ddl(ddl, database_type, opts);
-    let ddl = if database_type == Some(DatabaseType::OpenGauss) {
-        crate::schema::normalize_opengauss_table_ddl_comments(&ddl)
-    } else {
-        ddl
-    };
+    let ddl = { ddl };
     let ddl = ddl.trim().trim_end_matches(';').trim_end();
     format!("{ddl};")
-}
-
-fn split_postgres_export_table_triggers(ddl: &str, database_type: DatabaseType) -> (String, Vec<String>) {
-    if database_type != DatabaseType::Postgres {
-        return (ddl.to_string(), Vec::new());
-    }
-
-    let mut table_statements = Vec::new();
-    let mut trigger_statements = Vec::new();
-    for range in crate::db::ddl_scan::top_level_statement_ranges(ddl) {
-        let statement = ddl[range].trim();
-        if statement.is_empty() {
-            continue;
-        }
-        let mut words = statement.split_ascii_whitespace().take(3).map(str::to_ascii_uppercase);
-        let first = words.next();
-        let second = words.next();
-        let third = words.next();
-        if first.as_deref() == Some("CREATE")
-            && (second.as_deref() == Some("TRIGGER")
-                || (second.as_deref() == Some("CONSTRAINT") && third.as_deref() == Some("TRIGGER")))
-        {
-            trigger_statements.push(statement.to_string());
-        } else {
-            table_statements.push(statement.to_string());
-        }
-    }
-    (table_statements.join("\n"), trigger_statements)
-}
-
-/// PostgreSQL database export: split inline `FOREIGN KEY` constraints out of a
-/// relation's `CREATE TABLE` and return them as deferred
-/// `ALTER TABLE ... ADD CONSTRAINT ...` statements.
-///
-/// Inline foreign keys tie the script's replay to table creation order. The
-/// exporter sorts tables by dependency, but a foreign key cycle can never
-/// satisfy that order, so a backup that inlines its foreign keys cannot be
-/// restored (`ERROR: relation ... does not exist` — issue #10575). Emitting
-/// the constraints after every table and row exists (pg_dump's post-data
-/// position) removes the ordering requirement entirely.
-fn extract_postgres_deferred_foreign_keys(ddl: &str, schema: &str, table: &str) -> (String, Vec<String>) {
-    let fallback_qualified = crate::transfer::qualified_table(table, schema, &DatabaseType::Postgres, None);
-    let mut statements = Vec::new();
-    let mut deferred = Vec::new();
-    for range in crate::db::ddl_scan::top_level_statement_ranges(ddl) {
-        let statement = ddl[range].trim();
-        if statement.is_empty() {
-            continue;
-        }
-        let (stripped, removed) = crate::transfer::strip_inline_foreign_key_constraint_lines_collecting(statement);
-        if !removed.is_empty() {
-            // Qualify the ALTER from the statement's own relation name: whole-
-            // database exports leave `schema` empty and rely on each statement
-            // to carry its schema, so a mismatch here would fail the replay.
-            let qualified = crate::db::ddl_scan::parse_create_table_relation(statement)
-                .map(|(statement_schema, statement_table)| {
-                    crate::transfer::qualified_table(&statement_table, &statement_schema, &DatabaseType::Postgres, None)
-                })
-                .unwrap_or_else(|| fallback_qualified.clone());
-            for clause in removed {
-                deferred.push(format!("ALTER TABLE {qualified} ADD {clause};"));
-            }
-        }
-        statements.push(stripped);
-    }
-    (statements.join("\n"), deferred)
-}
-
-fn postgres_sequence_qualified_name(schema: &str, sequence_name: &str) -> String {
-    let db_type = DatabaseType::Postgres;
-    if schema.trim().is_empty() {
-        quote_identifier(sequence_name, &db_type)
-    } else {
-        format!("{}.{}", quote_identifier(schema, &db_type), quote_identifier(sequence_name, &db_type))
-    }
-}
-
-fn postgres_sequence_options(sequence: &PostgresExportSequence) -> String {
-    let cycle = if sequence.cycle { "CYCLE" } else { "NO CYCLE" };
-    format!(
-        "  AS {data_type}\n  START WITH {start_value}\n  INCREMENT BY {increment}\n  MINVALUE {min_value}\n  MAXVALUE {max_value}\n  CACHE {cache_value}\n  {cycle}",
-        data_type = sequence.data_type,
-        start_value = sequence.start_value,
-        increment = sequence.increment,
-        min_value = sequence.min_value,
-        max_value = sequence.max_value,
-        cache_value = sequence.cache_value,
-    )
-}
-
-fn generate_postgres_sequence_create_ddl(sequence: &PostgresExportSequence, schema: &str) -> String {
-    format!(
-        "CREATE SEQUENCE IF NOT EXISTS {}\n{}",
-        postgres_sequence_qualified_name(schema, &sequence.name),
-        postgres_sequence_options(sequence),
-    )
-}
-
-fn generate_postgres_sequence_post_table_ddl(sequence: &PostgresExportSequence, schema: &str) -> Option<String> {
-    let owner_table = sequence.owner_table.as_deref()?;
-    let owner_column = sequence.owner_column.as_deref()?;
-    let owner_table = crate::transfer::qualified_table(owner_table, schema, &DatabaseType::Postgres, None);
-    if sequence.created_by_table {
-        // CREATE TABLE owns the sequence. Configure that actual binding without
-        // relying on its name, and quote the whole DO body (identifiers may contain dollar tags).
-        let body = format!(
-            "BEGIN EXECUTE 'ALTER SEQUENCE ' || pg_get_serial_sequence({}, {}) || {}; END;",
-            quote_postgres_string_literal(&owner_table),
-            quote_postgres_string_literal(owner_column),
-            quote_postgres_string_literal(&format!(
-                "\n{} RESTART WITH {}",
-                postgres_sequence_options(sequence),
-                sequence.start_value
-            )),
-        );
-        return Some(format!("DO {}", quote_postgres_string_literal(&body)));
-    }
-    Some(format!(
-        "ALTER SEQUENCE {} OWNED BY {}.{}",
-        postgres_sequence_qualified_name(schema, &sequence.name),
-        owner_table,
-        quote_identifier(owner_column, &DatabaseType::Postgres)
-    ))
-}
-
-fn generate_postgres_sequence_setval_sql(sequence: &PostgresExportSequence, schema: &str) -> Option<String> {
-    let last_value = sequence.last_value.as_deref().map(str::trim).filter(|value| !value.is_empty());
-    let mut sequence_literal = quote_postgres_string_literal(&postgres_sequence_qualified_name(schema, &sequence.name));
-    match (sequence.owner_table.as_deref(), sequence.owner_column.as_deref()) {
-        (Some(owner_table), Some(owner_column)) => {
-            let owner_table = crate::transfer::qualified_table(owner_table, schema, &DatabaseType::Postgres, None);
-            if sequence.created_by_table {
-                sequence_literal = format!(
-                    "pg_get_serial_sequence({}, {})",
-                    quote_postgres_string_literal(&owner_table),
-                    quote_postgres_string_literal(owner_column),
-                );
-            }
-            if let Some(value) = last_value.filter(|_| sequence.cycle) {
-                // A cycled counter may be below/above the table's extrema after wrapping.
-                return Some(format!("SELECT setval({sequence_literal}, {value}, true)"));
-            }
-            let owner_column = quote_identifier(owner_column, &DatabaseType::Postgres);
-            let descending = sequence.increment.trim().starts_with('-');
-            let (aggregate, extreme, comparison) =
-                if descending { ("MIN", "LEAST", "<=") } else { ("MAX", "GREATEST", ">=") };
-            let fallback = last_value.unwrap_or(&sequence.start_value);
-            let called = if last_value.is_some() {
-                "true".to_string()
-            } else {
-                format!("COALESCE({aggregate}({owner_column}) {comparison} {fallback}, false)")
-            };
-            Some(format!(
-                "SELECT setval({sequence_literal}, {extreme}(COALESCE({aggregate}({owner_column}), {fallback}), {fallback}), {called}) FROM {owner_table}"
-            ))
-        }
-        _ => last_value.map(|value| format!("SELECT setval({sequence_literal}, {value}, true)")),
-    }
-}
-
-fn generate_postgres_extension_ddl(extension: &PostgresExportExtension) -> String {
-    // Match pg_dump: omit VERSION so the target installation selects its
-    // default compatible version, while preserving the source schema.
-    format!(
-        "CREATE EXTENSION IF NOT EXISTS {} WITH SCHEMA {};",
-        quote_identifier(&extension.name, &DatabaseType::Postgres),
-        quote_identifier(&extension.schema, &DatabaseType::Postgres)
-    )
-}
-
-fn generate_postgres_enum_ddl(enum_type: &PostgresExportEnum) -> String {
-    let labels =
-        enum_type.labels.iter().map(|label| quote_postgres_string_literal(label)).collect::<Vec<_>>().join(", ");
-    format!(
-        "CREATE TYPE {}.{} AS ENUM ({});",
-        quote_identifier(&enum_type.schema, &DatabaseType::Postgres),
-        quote_identifier(&enum_type.name, &DatabaseType::Postgres),
-        labels
-    )
-}
-
-async fn list_postgres_extension_members(
-    state: &crate::connection::AppState,
-    pool_key: &str,
-    schema: &str,
-) -> Result<PostgresExtensionMembers, String> {
-    let pool = {
-        let pool_handle = state.pool_handle(pool_key).await;
-        match pool_handle.as_ref() {
-            Some(crate::connection::PoolKind::Postgres(pool)) => pool.clone(),
-            _ => return Ok(PostgresExtensionMembers::default()),
-        }
-    };
-    let mut members = PostgresExtensionMembers::default();
-    for (kind, name, signature) in crate::db::postgres::list_extension_member_objects(&pool, schema).await? {
-        if kind == "RELATION" {
-            members.relation_names.insert(name);
-        } else if kind == "FUNCTION" {
-            members.function_keys.insert((name, signature));
-        }
-    }
-    Ok(members)
-}
-
-const POSTGRES_EXPORT_ENUMS_SQL: &str = "SELECT t.typname, \
-      COALESCE(array_to_json(array_agg(e.enumlabel ORDER BY e.enumsortorder))::text, '[]') \
-     FROM pg_catalog.pg_type t \
-     JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace \
-     LEFT JOIN pg_catalog.pg_enum e ON e.enumtypid = t.oid \
-     WHERE n.nspname = $1 AND t.typtype = 'e' \
-     GROUP BY t.typname \
-     ORDER BY t.typname";
-
-async fn list_postgres_export_enums(
-    state: &crate::connection::AppState,
-    pool_key: &str,
-    schema: &str,
-) -> Result<Vec<PostgresExportEnum>, String> {
-    let pool = {
-        let pool_handle = state.pool_handle(pool_key).await;
-        match pool_handle.as_ref() {
-            Some(crate::connection::PoolKind::Postgres(pool)) => pool.clone(),
-            _ => return Ok(Vec::new()),
-        }
-    };
-    let client = pool.get().await.map_err(|e| e.to_string())?;
-    let rows = client.query(POSTGRES_EXPORT_ENUMS_SQL, &[&schema]).await.map_err(|e| e.to_string())?;
-    rows.into_iter()
-        .map(|row| {
-            let name: String = row.get(0);
-            let labels_json: String = row.get(1);
-            let labels = serde_json::from_str::<Vec<String>>(&labels_json)
-                .map_err(|e| format!("invalid PostgreSQL enum labels for {name}: {e}"))?;
-            Ok(PostgresExportEnum { name, schema: schema.to_string(), labels })
-        })
-        .collect()
-}
-
-fn is_postgres_extension_member_routine(object: &crate::types::ObjectInfo, members: &PostgresExtensionMembers) -> bool {
-    members.function_keys.contains(&(object.name.clone(), object.signature.clone().unwrap_or_default()))
-}
-
-const POSTGRES_EXPORT_SEQUENCES_SQL: &str = "SELECT c.relname, \
-      COALESCE(format_type(s.seqtypid, NULL), 'bigint'), \
-      COALESCE(s.seqstart::text, '1'), \
-      COALESCE(s.seqmin::text, '1'), \
-      COALESCE(s.seqmax::text, '9223372036854775807'), \
-      COALESCE(s.seqincrement::text, '1'), \
-      COALESCE(s.seqcycle, false), \
-      COALESCE(s.seqcache::text, '1'), \
-      t.relname, \
-      a.attname, \
-      COALESCE(d.deptype = 'i', false) OR \
-      COALESCE(a.atttypid IN (20, 21, 23) AND \
-        pg_get_expr(ad.adbin, ad.adrelid) = format('nextval(%L::regclass)', c.oid::regclass::text), false) \
-     FROM pg_class c \
-     JOIN pg_namespace n ON n.oid = c.relnamespace \
-     LEFT JOIN pg_sequence s ON s.seqrelid = c.oid \
-     LEFT JOIN pg_depend d ON d.classid = 'pg_class'::regclass \
-       AND d.objid = c.oid \
-       AND d.refclassid = 'pg_class'::regclass \
-       AND d.deptype IN ('a', 'i') \
-     LEFT JOIN pg_class t ON t.oid = d.refobjid \
-     LEFT JOIN pg_namespace tn ON tn.oid = t.relnamespace AND tn.nspname = n.nspname \
-     LEFT JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = d.refobjsubid \
-     LEFT JOIN pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum \
-     WHERE c.relkind = 'S' AND n.nspname = $1 \
-     ORDER BY c.relname";
-
-/// PostgreSQL 9.x sibling of [`POSTGRES_EXPORT_SEQUENCES_SQL`]: the `pg_sequence`
-/// catalog only exists from PostgreSQL 10 on, so that query aborts the whole
-/// structure export with `db error` on older servers (#10079). Sequence
-/// parameters are filled in per sequence by
-/// [`postgres_export_sequence_parameters_legacy`] instead.
-const POSTGRES_EXPORT_SEQUENCES_COMPAT_SQL: &str = "SELECT c.relname, \
-      'bigint', \
-      '1', \
-      '1', \
-      '9223372036854775807', \
-      '1', \
-      false, \
-      '1', \
-      t.relname, \
-      a.attname, \
-      COALESCE(a.atttypid IN (20, 21, 23) AND \
-        pg_get_expr(ad.adbin, ad.adrelid) = format('nextval(%L::regclass)', c.oid::regclass::text), false) \
-     FROM pg_class c \
-     JOIN pg_namespace n ON n.oid = c.relnamespace \
-     LEFT JOIN pg_depend d ON d.classid = 'pg_class'::regclass \
-       AND d.objid = c.oid \
-       AND d.refclassid = 'pg_class'::regclass \
-       AND d.deptype IN ('a', 'i') \
-     LEFT JOIN pg_class t ON t.oid = d.refobjid \
-     LEFT JOIN pg_namespace tn ON tn.oid = t.relnamespace AND tn.nspname = n.nspname \
-     LEFT JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = d.refobjsubid \
-     LEFT JOIN pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum \
-     WHERE c.relkind = 'S' AND n.nspname = $1 \
-     ORDER BY c.relname";
-
-#[derive(Debug)]
-struct PostgresExportSequenceParameters {
-    start_value: String,
-    min_value: String,
-    max_value: String,
-    increment: String,
-    cycle: bool,
-    cache_value: String,
-    last_value: Option<String>,
-}
-
-/// Pre-10 servers store sequence parameters in the sequence relation itself
-/// (`SELECT ... FROM <sequence>`), which is also the only way to read a
-/// sequence's current value there. `last_value` is reported only once the
-/// sequence has been called, matching `pg_sequence_last_value()`'s NULL on an
-/// untouched sequence.
-async fn postgres_export_sequence_parameters_legacy(
-    client: &deadpool_postgres::Client,
-    schema: &str,
-    sequence: &str,
-) -> Result<Option<PostgresExportSequenceParameters>, tokio_postgres::Error> {
-    let qualified = format!(
-        "{}.{}",
-        quote_identifier(schema, &DatabaseType::Postgres),
-        quote_identifier(sequence, &DatabaseType::Postgres)
-    );
-    let sql = format!(
-        "SELECT start_value::text, min_value::text, max_value::text, increment_by::text, is_cycled, \
-         cache_value::text, CASE WHEN is_called THEN last_value::text END FROM {qualified}"
-    );
-    let rows = client.query(sql.as_str(), &[]).await?;
-    let Some(row) = rows.first() else {
-        return Ok(None);
-    };
-    Ok(Some(PostgresExportSequenceParameters {
-        start_value: row.get(0),
-        min_value: row.get(1),
-        max_value: row.get(2),
-        increment: row.get(3),
-        cycle: row.get(4),
-        cache_value: row.get(5),
-        last_value: row.get(6),
-    }))
-}
-
-async fn list_postgres_export_sequences(
-    state: &crate::connection::AppState,
-    pool_key: &str,
-    schema: &str,
-    selected_tables: &[String],
-    excluded_tables: &[String],
-    include_objects: bool,
-    fail_on_error: bool,
-) -> Result<Vec<PostgresExportSequence>, String> {
-    let pool = {
-        let pool_handle = state.pool_handle(pool_key).await;
-        match pool_handle.as_ref() {
-            Some(crate::connection::PoolKind::Postgres(pool)) => pool.clone(),
-            _ => return Ok(Vec::new()),
-        }
-    };
-    let client = pool.get().await.map_err(|e| e.to_string())?;
-    // PostgreSQL 10+ keeps sequence parameters in `pg_sequence`; older servers
-    // have neither that catalog nor `pg_sequence_last_value()`, so the compat
-    // tier lists sequences (and owners) without it and reads each sequence
-    // relation directly afterwards.
-    let (rows, legacy_parameters) = match client.query(POSTGRES_EXPORT_SEQUENCES_SQL, &[&schema]).await {
-        Ok(rows) => (rows, false),
-        Err(primary_error) => match client.query(POSTGRES_EXPORT_SEQUENCES_COMPAT_SQL, &[&schema]).await {
-            Ok(rows) => {
-                log::debug!(
-                    "[postgres][database-export:sequences-compat-used] pg_sequence catalog unavailable ({}); reading sequence parameters from each sequence relation",
-                    primary_error
-                );
-                (rows, true)
-            }
-            Err(_) => return Err(primary_error.to_string()),
-        },
-    };
-
-    let selected: HashSet<&str> = selected_tables.iter().map(String::as_str).collect();
-    let excluded: HashSet<&str> = excluded_tables.iter().map(String::as_str).collect();
-    let mut sequences = rows
-        .iter()
-        .map(|row| PostgresExportSequence {
-            name: row.get::<_, String>(0),
-            data_type: row.get::<_, String>(1),
-            start_value: row.get::<_, String>(2),
-            min_value: row.get::<_, String>(3),
-            max_value: row.get::<_, String>(4),
-            increment: row.get::<_, String>(5),
-            cycle: row.get::<_, bool>(6),
-            cache_value: row.get::<_, String>(7),
-            last_value: None,
-            owner_table: row.get::<_, Option<String>>(8),
-            owner_column: row.get::<_, Option<String>>(9),
-            created_by_table: row.get::<_, bool>(10),
-        })
-        .filter(|sequence| {
-            sequence.owner_table.as_deref().is_none_or(|owner_table| !excluded.contains(owner_table))
-                && (selected.is_empty()
-                    || sequence.owner_table.as_deref().is_some_and(|owner_table| selected.contains(owner_table)))
-        })
-        .filter(|sequence| sequence.owner_table.is_some() || (include_objects && selected.is_empty()))
-        .collect::<Vec<_>>();
-
-    if sequences.is_empty() {
-        return Ok(sequences);
-    }
-
-    if legacy_parameters {
-        for sequence in sequences.iter_mut() {
-            match postgres_export_sequence_parameters_legacy(&client, schema, &sequence.name).await {
-                Ok(Some(parameters)) => {
-                    sequence.start_value = parameters.start_value;
-                    sequence.min_value = parameters.min_value;
-                    sequence.max_value = parameters.max_value;
-                    sequence.increment = parameters.increment;
-                    sequence.cycle = parameters.cycle;
-                    sequence.cache_value = parameters.cache_value;
-                    sequence.last_value = parameters.last_value;
-                }
-                Ok(None) => {}
-                Err(error) => log::debug!(
-                    "[postgres][database-export:sequences-compat-read-failed] sequence={} schema={} error={}",
-                    sequence.name,
-                    schema,
-                    error
-                ),
-            }
-        }
-        return Ok(sequences);
-    }
-
-    let last_values = client
-        .query(
-            "SELECT c.relname, pg_sequence_last_value(c.oid)::text \
-             FROM pg_class c \
-             JOIN pg_namespace n ON n.oid = c.relnamespace \
-             WHERE c.relkind = 'S' AND n.nspname = $1",
-            &[&schema],
-        )
-        .await;
-    match last_values {
-        Ok(rows) => {
-            for row in rows {
-                let name: String = row.get(0);
-                let last_value: Option<String> = row.get(1);
-                if let Some(sequence) = sequences.iter_mut().find(|sequence| sequence.name == name) {
-                    sequence.last_value = last_value;
-                }
-            }
-        }
-        Err(error) if fail_on_error => return Err(error.to_string()),
-        Err(_) => {}
-    }
-
-    Ok(sequences)
 }
 
 pub fn is_export_cancelled_now(export_id: &str) -> bool {
@@ -2562,7 +1743,7 @@ async fn get_export_table_columns_isolated(
 }
 
 fn snapshot_batch_cancelled(db_type: &DatabaseType, export_id: &str) -> bool {
-    *db_type != DatabaseType::Postgres && is_export_cancelled_now(export_id)
+    true && is_export_cancelled_now(export_id)
 }
 
 /// Unlike metadata operations, a database row stream owns a live server query
@@ -2627,9 +1808,7 @@ pub async fn begin_database_backup_snapshot_core_for_export(
         .get(connection_id)
         .map(|config| config.db_type)
         .ok_or_else(|| format!("Connection config not found: {connection_id}"))?;
-    if !matches!(db_type, DatabaseType::Mysql | DatabaseType::Postgres) {
-        return Err("Consistent database backup snapshots are only supported for MySQL and PostgreSQL".to_string());
-    }
+    {}
 
     let session_id = if let Some(export_id) = export_id {
         // Do not use `await_export_operation` here: if the transaction is
@@ -2658,38 +1837,7 @@ pub async fn begin_database_backup_snapshot_core_for_export(
         crate::query::begin_database_backup_snapshot(state, connection_id, database).await?
     };
 
-    let schemas_result = if matches!(db_type, DatabaseType::Postgres) {
-        const POSTGRES_BACKUP_SCHEMAS_SQL: &str = "SELECT n.nspname FROM pg_catalog.pg_namespace n \
-             WHERE n.nspname NOT IN ('information_schema', 'pg_catalog', 'pg_toast') \
-             AND n.nspname NOT LIKE 'pg_toast_temp_%' \
-             AND n.nspname NOT LIKE 'pg_temp_%' ORDER BY n.nspname";
-        let operation = crate::query::execute_in_manual_transaction(
-            state,
-            &session_id,
-            POSTGRES_BACKUP_SCHEMAS_SQL,
-            database,
-            None,
-            Some(10_000),
-        );
-        let results = match export_id {
-            Some(export_id) => await_export_operation(export_id, Box::pin(operation)).await,
-            None => operation.await,
-        }?;
-        Ok(results
-            .into_iter()
-            .next()
-            .map(|result| {
-                result
-                    .rows
-                    .into_iter()
-                    .filter_map(|row| row.into_iter().next())
-                    .filter_map(|value| value.as_str().map(str::to_string))
-                    .collect()
-            })
-            .unwrap_or_default())
-    } else {
-        Ok(vec![database.to_string()])
-    };
+    let schemas_result = { Ok(vec![database.to_string()]) };
     let schemas = match schemas_result {
         Ok(schemas) => schemas,
         Err(error) => {
@@ -2712,12 +1860,7 @@ pub async fn begin_database_backup_snapshot_core_for_export(
 /// SqlServer（Arc<Mutex> 串行客户端）、Agent/ExternalDriver（插件请求超时覆盖
 /// 排队时间且超时会终止 sidecar）、SQLite/DuckDB 等单连接类型都必须回退串行。
 fn concurrent_metadata_prefetch_allowed(pool_kind: Option<&crate::connection::PoolKind>) -> bool {
-    matches!(
-        pool_kind,
-        Some(crate::connection::PoolKind::Postgres(_))
-            | Some(crate::connection::PoolKind::Mysql(..))
-            | Some(crate::connection::PoolKind::ClickHouse(_))
-    )
+    matches!(pool_kind, Some(crate::connection::PoolKind::Mysql(..)))
 }
 
 /// 预取实际使用的连接池能同时 checkout 出来的请求数。
@@ -2728,14 +1871,12 @@ fn concurrent_metadata_prefetch_allowed(pool_kind: Option<&crate::connection::Po
 /// 就会以 "DBX metadata pool is busy; please retry" 失败（issue #10018）。
 fn metadata_prefetch_pool_capacity(pool: Option<&crate::connection::PoolKind>) -> usize {
     match pool {
-        Some(crate::connection::PoolKind::Postgres(pool)) => pool.status().max_size,
         Some(crate::connection::PoolKind::Mysql(pool, _)) => {
             // 会话级 MySQL 池同样只有一个连接；`None` 表示驱动未暴露上限，
             // 交由 `database_export_metadata_prefetch_concurrency` 按类型收敛。
             crate::db::mysql::MySqlPoolAccess::checkout_max_connections(pool).unwrap_or(usize::MAX)
         }
-        // ClickHouse 走 HTTP，不存在按物理连接排队的上限。
-        Some(crate::connection::PoolKind::ClickHouse(_)) => usize::MAX,
+
         // 其余驱动（含串行客户端与单连接句柄）一律按单连接处理，回退逐表串行直查。
         _ => 1,
     }
@@ -2745,9 +1886,7 @@ fn database_export_metadata_prefetch_concurrency(db_type: DatabaseType) -> usize
     // PostgreSQL exports can hold a snapshot connection while metadata and UI
     // requests share the base pool. Keep enough capacity available for normal
     // browsing instead of filling nearly the entire ten-connection pool.
-    if db_type == DatabaseType::Postgres {
-        4
-    } else {
+    {
         8
     }
 }
@@ -2786,15 +1925,10 @@ fn database_export_select_list(columns: &[String], column_types: &[Option<String
         .iter()
         .enumerate()
         .map(|(index, column)| {
-            if *db_type == DatabaseType::Mysql
+            if true
                 && column_types.get(index).and_then(|value| value.as_deref()).is_some_and(is_mysql_spatial_export_type)
             {
                 mysql_spatial_export_marker_expression(column)
-            } else if *db_type == DatabaseType::Xugu
-                && column_types.get(index).and_then(|value| value.as_deref()).is_some_and(is_xugu_spatial_export_type)
-            {
-                let quoted = quote_identifier(column, db_type);
-                format!("ST_AsEWKT({quoted}) AS {quoted}")
             } else {
                 quote_identifier(column, db_type)
             }
@@ -3423,11 +2557,7 @@ pub async fn export_database_sql_core(
     // Keep the large export state machine on the heap. Besides making the
     // caller future small, this prevents the metadata-prefetch locals from
     // exhausting the bounded stack used by test and runtime worker threads.
-    let result = if matches!(db_type, DatabaseType::Postgres) && request.schema.trim().is_empty() {
-        Box::pin(export_postgres_all_schemas_sql_core(state, request, &on_progress)).await
-    } else {
-        Box::pin(export_database_sql_core_inner(state, request, &on_progress)).await
-    };
+    let result = { Box::pin(export_database_sql_core_inner(state, request, &on_progress)).await };
     let metadata_session_id = database_export_client_session_id(&request.export_id);
     if let Err(error) =
         state.close_metadata_session_pool(&request.connection_id, Some(&request.database), &metadata_session_id).await
@@ -3563,159 +2693,6 @@ async fn create_database_export_writer(
     })
 }
 
-fn postgres_export_schema_names(schemas: Vec<String>) -> Vec<String> {
-    let mut seen = HashSet::new();
-    schemas
-        .into_iter()
-        .map(|schema| schema.trim().to_string())
-        .filter(|schema| !schema.is_empty() && schema != "information_schema" && !schema.starts_with("pg_"))
-        .filter(|schema| seen.insert(schema.clone()))
-        .collect()
-}
-
-fn postgres_create_schema_sql(schema: &str) -> String {
-    format!("CREATE SCHEMA IF NOT EXISTS {};", quote_identifier(schema, &DatabaseType::Postgres))
-}
-
-fn combine_schema_sql_export<W: Write>(source: &mut dyn BufRead, destination: &mut W) -> std::io::Result<()> {
-    let mut splitter = SqlStatementSplitter::with_options(SqlParsingOptions::for_database_type(DatabaseType::Postgres));
-    let mut chunk = String::new();
-    loop {
-        chunk.clear();
-        let bytes_read = source.read_line(&mut chunk)?;
-        if bytes_read == 0 {
-            break;
-        }
-        for statement in splitter.push_chunk(&chunk) {
-            destination.write_all(format!("{statement};\n").as_bytes())?;
-        }
-    }
-    for statement in splitter.finish() {
-        destination.write_all(format!("{statement};\n").as_bytes())?;
-    }
-    Ok(())
-}
-
-async fn export_postgres_all_schemas_sql_core(
-    state: &Arc<crate::connection::AppState>,
-    request: &DatabaseExportRequest,
-    on_progress: impl Fn(ExportProgress) + Sync,
-) -> Result<(), String> {
-    let schemas = postgres_export_schema_names(
-        crate::schema::list_schemas_core(state, &request.connection_id, &request.database).await?,
-    );
-    if schemas.is_empty() {
-        return Err(format!("No exportable schemas found in database '{}'.", request.database));
-    }
-
-    // Validate the destination before exporting every schema to temporary
-    // files: the writer below only runs after the loop, which for large
-    // databases can be hours away, and a missing or unwritable destination
-    // must fail fast instead. This is an early fail, not a replacement -- the
-    // writer still performs its own checks when it opens the output file.
-    if let Some(parent) = export_destination_parent_dir(&request.file_path) {
-        ensure_export_destination_dir(state, parent).await?;
-    }
-
-    let temp_dir =
-        tempfile::tempdir().map_err(|error| format!("Failed to create temporary export directory: {error}"))?;
-    let result = async {
-        let mut schema_outputs = Vec::with_capacity(schemas.len());
-        let mut rows_exported = 0_u64;
-        let mut error_count = 0_u64;
-        let mut error_summary = None;
-
-        for (schema_index, schema_name) in schemas.iter().enumerate() {
-            let mut schema_request = request.clone();
-            schema_request.schema = schema_name.clone();
-            schema_request.file_path = temp_dir.path().join(format!("schema-{schema_index}.sql")).display().to_string();
-            schema_request.output_compression = DatabaseExportOutputCompression::None;
-            schema_request.split_max_mb = None;
-
-            let terminal = Arc::new(std::sync::Mutex::new(None::<ExportProgress>));
-            let terminal_for_callback = terminal.clone();
-            let schema_name_for_callback = schema_name.clone();
-            let completed_rows = rows_exported;
-            let child_progress = |mut progress: ExportProgress| {
-                if matches!(progress.status, ExportStatus::Done | ExportStatus::Cancelled) {
-                    *terminal_for_callback.lock().expect("export terminal mutex poisoned") = Some(progress);
-                    return;
-                }
-                progress.export_id = request.export_id.clone();
-                progress.current_object = if progress.current_object.is_empty() {
-                    schema_name_for_callback.clone()
-                } else {
-                    format!("{schema_name_for_callback}: {}", progress.current_object)
-                };
-                progress.rows_exported = completed_rows.saturating_add(progress.rows_exported);
-                on_progress(progress);
-            };
-
-            Box::pin(export_database_sql_core_inner(state, &schema_request, child_progress)).await?;
-            let terminal = terminal.lock().expect("export terminal mutex poisoned").clone();
-            if terminal.as_ref().is_some_and(|progress| matches!(progress.status, ExportStatus::Cancelled)) {
-                return Err(EXPORT_CANCELLED_ERROR.to_string());
-            }
-            if let Some(progress) = terminal {
-                rows_exported = rows_exported.saturating_add(progress.rows_exported);
-                error_count = error_count.saturating_add(progress.error_count);
-                // Aggregate lenient failure summaries across schemas; keeping
-                // only the first schema's summary would understate the errors
-                // behind an error_count that accumulates over all schemas.
-                if let Some(summary) = progress.error_summary {
-                    error_summary = Some(match error_summary.take() {
-                        Some(existing) => format!("{existing}; {summary}"),
-                        None => summary,
-                    });
-                }
-            }
-            schema_outputs.push((schema_name.clone(), schema_request.file_path));
-        }
-
-        let mut file = create_database_export_writer(state, request).await?;
-        let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
-        writeln!(file, "-- Database export: {}", request.database).map_err(|e| format!("Failed to write file: {e}"))?;
-        writeln!(file, "-- Date: {timestamp}").map_err(|e| format!("Failed to write file: {e}"))?;
-        writeln!(file, "-- Generated by DBX").map_err(|e| format!("Failed to write file: {e}"))?;
-        writeln!(file, "-- PostgreSQL schemas: {}", schemas.join(", "))
-            .map_err(|e| format!("Failed to write file: {e}"))?;
-        writeln!(file).map_err(|e| format!("Failed to write file: {e}"))?;
-        for schema_name in &schemas {
-            writeln!(file, "{}", postgres_create_schema_sql(schema_name))
-                .map_err(|e| format!("Failed to write file: {e}"))?;
-        }
-        writeln!(file).map_err(|e| format!("Failed to write file: {e}"))?;
-
-        for (schema_name, path) in schema_outputs {
-            writeln!(file, "-- Schema export: {schema_name}").map_err(|e| format!("Failed to write file: {e}"))?;
-            let mut source = std::io::BufReader::new(
-                std::fs::File::open(path).map_err(|e| format!("Failed to read temporary schema export: {e}"))?,
-            );
-            combine_schema_sql_export(&mut source, &mut file)
-                .map_err(|e| format!("Failed to combine schema export: {e}"))?;
-            writeln!(file).map_err(|e| format!("Failed to write file: {e}"))?;
-        }
-        file.finish(&export_source_file_name(&request.file_path))?;
-        on_progress(ExportProgress {
-            export_id: request.export_id.clone(),
-            current_object: request.database.clone(),
-            object_index: schemas.len(),
-            total_objects: schemas.len(),
-            rows_exported,
-            total_rows: None,
-            status: ExportStatus::Done,
-            error: None,
-            preparing: false,
-            error_count,
-            error_summary,
-        });
-        Ok(())
-    }
-    .await;
-
-    result
-}
-
 async fn export_database_sql_core_inner(
     state: &Arc<crate::connection::AppState>,
     request: &DatabaseExportRequest,
@@ -3781,7 +2758,7 @@ async fn export_database_sql_core_inner(
     // Declare the script's encoding before the first statement that can carry non-ASCII
     // text (the database name is written by the preamble right below, and table, column
     // and DEFAULT values follow).
-    if matches!(db_type, DatabaseType::Mysql) {
+    {
         writeln!(file, "{MYSQL_EXPORT_CHARSET_STATEMENT}").map_err(|e| format!("Failed to write file: {e}"))?;
     }
 
@@ -3791,86 +2768,20 @@ async fn export_database_sql_core_inner(
     }
 
     // 6. For MySQL: disable foreign key checks
-    if matches!(db_type, DatabaseType::Mysql) {
+    {
         writeln!(file, "SET FOREIGN_KEY_CHECKS = 0;\n").map_err(|e| format!("Failed to write file: {e}"))?;
     }
 
     // 7. Separate tables and views
-    let postgres_extension_members =
-        if matches!(db_type, DatabaseType::Postgres) && (request.include_structure || request.include_objects) {
-            match list_postgres_extension_members(state, &pool_key, &request.schema).await {
-                Ok(members) => members,
-                Err(e) => {
-                    record_export_error(
-                        &mut file,
-                        request.fail_on_error,
-                        format!("reading extension members: {e}"),
-                        &mut lenient_errors,
-                    )?;
-                    PostgresExtensionMembers::default()
-                }
-            }
-        } else {
-            PostgresExtensionMembers::default()
-        };
-    let postgres_extensions = if request.include_structure && matches!(db_type, DatabaseType::Postgres) {
-        match crate::schema::list_extensions_core(
-            state,
-            &request.connection_id,
-            &request.database,
-            Some(&request.schema),
-        )
-        .await
-        {
-            Ok(extensions) => extensions
-                .into_iter()
-                .map(|extension| PostgresExportExtension {
-                    name: extension.name,
-                    schema: extension.schema.unwrap_or_else(|| request.schema.clone()),
-                })
-                .collect(),
-            Err(e) => {
-                record_export_error(
-                    &mut file,
-                    request.fail_on_error,
-                    format!("exporting extensions: {e}"),
-                    &mut lenient_errors,
-                )?;
-                Vec::new()
-            }
-        }
-    } else {
-        Vec::new()
-    };
-    let postgres_enums = if request.include_structure && matches!(db_type, DatabaseType::Postgres) {
-        match await_export_operation(
-            &request.export_id,
-            Box::pin(list_postgres_export_enums(state, &pool_key, &request.schema)),
-        )
-        .await
-        {
-            Ok(enums) => enums,
-            Err(e) if e == EXPORT_CANCELLED_ERROR => return Err(EXPORT_CANCELLED_ERROR.to_string()),
-            Err(e) => {
-                record_export_error(
-                    &mut file,
-                    request.fail_on_error,
-                    format!("exporting enums: {e}"),
-                    &mut lenient_errors,
-                )?;
-                Vec::new()
-            }
-        }
-    } else {
-        Vec::new()
-    };
+    let postgres_extension_members = { PostgresExtensionMembers::default() };
+
     let all_tables = filter_export_table_infos(all_tables, &request.selected_tables, &request.excluded_tables)
         .into_iter()
         .filter(|table| !postgres_extension_members.relation_names.contains(&table.name))
         .collect::<Vec<_>>();
     let mut tables: Vec<_> = all_tables.iter().filter(|t| !t.table_type.contains("VIEW")).collect();
     let mut views: Vec<_> = all_tables.iter().filter(|t| t.table_type.contains("VIEW")).collect();
-    if request.include_objects && db_type == DatabaseType::Mysql && views.len() > 1 {
+    if request.include_objects && true && views.len() > 1 {
         match list_mysql_export_view_dependencies(state, &request.connection_id, &request.database, &client_session_id)
             .await
         {
@@ -3883,36 +2794,6 @@ async fn export_database_sql_core_inner(
             }
         }
     }
-    let postgres_sequences = if request.include_structure && matches!(db_type, DatabaseType::Postgres) {
-        match await_export_operation(
-            &request.export_id,
-            Box::pin(list_postgres_export_sequences(
-                state,
-                &pool_key,
-                &request.schema,
-                &request.selected_tables,
-                &request.excluded_tables,
-                request.include_objects,
-                request.fail_on_error,
-            )),
-        )
-        .await
-        {
-            Ok(sequences) => sequences,
-            Err(e) if e == EXPORT_CANCELLED_ERROR => return Err(EXPORT_CANCELLED_ERROR.to_string()),
-            Err(e) => {
-                record_export_error(
-                    &mut file,
-                    request.fail_on_error,
-                    format!("exporting sequences: {e}"),
-                    &mut lenient_errors,
-                )?;
-                Vec::new()
-            }
-        }
-    } else {
-        Vec::new()
-    };
 
     // Sort tables by foreign key dependency so referenced (parent) tables are
     // exported before referencing (child) tables. MySQL exports always emit
@@ -3920,27 +2801,7 @@ async fn export_database_sql_core_inner(
     // already tolerate child-before-parent ordering; reordering away from the
     // alphabetical listing there only makes the output look shuffled to users
     // without providing any correctness benefit.
-    if tables.len() > 1 && db_type != DatabaseType::Mysql {
-        let table_names: Vec<String> = tables.iter().map(|t| t.name.clone()).collect();
-        match crate::transfer::sort_tables_by_fk_dependency(
-            state,
-            &request.connection_id,
-            &request.database,
-            &request.schema,
-            &table_names,
-            true,
-        )
-        .await
-        {
-            Ok(sorted_names) => {
-                tables.sort_by_key(|t| sorted_names.iter().position(|n| n == &t.name).unwrap_or(usize::MAX));
-            }
-            Err(error) if request.fail_on_error => {
-                return Err(format!("Failed to resolve table dependency order: {error}"));
-            }
-            Err(_) => {}
-        }
-    }
+    {}
 
     // 8. Discover optional schema-wide objects before calculating workload.
     let mut procedures: Vec<crate::types::ObjectInfo> = Vec::new();
@@ -3965,9 +2826,7 @@ async fn export_database_sql_core_inner(
             Ok(objects) => {
                 for obj in &objects {
                     let ot = obj.object_type.to_uppercase();
-                    if is_postgres_extension_member_routine(obj, &postgres_extension_members) {
-                        continue;
-                    }
+                    {}
                     if ot.contains("PROCEDURE") {
                         procedures.push(obj.clone());
                     } else if ot.contains("FUNCTION") {
@@ -3991,9 +2850,9 @@ async fn export_database_sql_core_inner(
         &DatabaseExportObjectCounts {
             tables: tables.len(),
             views: views.len(),
-            sequences: postgres_sequences.iter().filter(|sequence| !sequence.created_by_table).count(),
-            extensions: postgres_extensions.len(),
-            enums: postgres_enums.len(),
+            sequences: 0,
+            extensions: 0,
+            enums: 0,
             procedures: procedures.len(),
             functions: functions.len(),
             triggers: triggers.len(),
@@ -4003,7 +2862,7 @@ async fn export_database_sql_core_inner(
 
     let mut object_index: usize = 0;
     let mut total_rows_exported = 0_u64;
-    let mut deferred_postgres_triggers = Vec::new();
+
     // PostgreSQL foreign keys collected from table DDL while writing structure,
     // emitted at the end of the file (see `extract_postgres_deferred_foreign_keys`).
     let mut deferred_postgres_foreign_keys: Vec<String> = Vec::new();
@@ -4140,61 +2999,13 @@ async fn export_database_sql_core_inner(
         }
     }
 
-    for extension in &postgres_extensions {
-        if is_export_cancelled(&request.export_id).await {
-            return Err("Export cancelled".to_string());
-        }
-        emit_database_export_running(
-            &on_progress,
-            &request.export_id,
-            extension.name.clone(),
-            object_index,
-            total_objects,
-            total_rows_exported,
-            false,
-        );
-        writeln!(file, "{}\n", generate_postgres_extension_ddl(extension))
-            .map_err(|e| format!("Failed to write file: {e}"))?;
-        object_index += 1;
-    }
+    {}
 
-    for enum_type in &postgres_enums {
-        if is_export_cancelled(&request.export_id).await {
-            return Err("Export cancelled".to_string());
-        }
-        emit_database_export_running(
-            &on_progress,
-            &request.export_id,
-            enum_type.name.clone(),
-            object_index,
-            total_objects,
-            total_rows_exported,
-            false,
-        );
-        writeln!(file, "{}\n", generate_postgres_enum_ddl(enum_type))
-            .map_err(|e| format!("Failed to write file: {e}"))?;
-        object_index += 1;
-    }
+    {}
 
-    for sequence in postgres_sequences.iter().filter(|sequence| sequence.owner_table.is_none()) {
-        if is_export_cancelled(&request.export_id).await {
-            return Err("Export cancelled".to_string());
-        }
+    {}
 
-        emit_database_export_running(
-            &on_progress,
-            &request.export_id,
-            sequence.name.clone(),
-            object_index,
-            total_objects,
-            total_rows_exported,
-            false,
-        );
-
-        writeln!(file, "{};\n", generate_postgres_sequence_create_ddl(sequence, &request.schema))
-            .map_err(|e| format!("Failed to write file: {e}"))?;
-        object_index += 1;
-    }
+    {}
 
     for (table_index, table_info) in tables.iter().enumerate().filter(|_| exports_database_tables(request)) {
         // Check cancellation
@@ -4233,27 +3044,7 @@ async fn export_database_sql_core_inner(
                 writeln!(file, "{}\n", drop_table_if_exists_sql(table_name, &request.schema, &db_type))
                     .map_err(|e| format!("Failed to write file: {e}"))?;
             }
-            for sequence in postgres_sequences.iter().filter(|sequence| {
-                !sequence.created_by_table && sequence.owner_table.as_deref() == Some(table_name.as_str())
-            }) {
-                on_progress(ExportProgress {
-                    export_id: request.export_id.clone(),
-                    current_object: sequence.name.clone(),
-                    object_index,
-                    total_objects,
-                    rows_exported: total_rows_exported,
-                    total_rows: None,
-                    status: ExportStatus::Running,
-                    error: None,
-                    preparing: false,
-                    error_count: 0,
-                    error_summary: None,
-                });
 
-                writeln!(file, "{};\n", generate_postgres_sequence_create_ddl(sequence, &request.schema))
-                    .map_err(|e| format!("Failed to write file: {e}"))?;
-                object_index += 1;
-            }
             let ddl_result = match prefetched_table_metadata
                 .get_mut(table_index)
                 .and_then(|m| m.as_mut())
@@ -4280,18 +3071,9 @@ async fn export_database_sql_core_inner(
             }
             match ddl_result {
                 Ok(ddl) => {
-                    let (ddl, triggers) = split_postgres_export_table_triggers(&ddl, db_type);
-                    deferred_postgres_triggers.extend(triggers);
                     // Defer inline foreign keys so restore never has to satisfy
                     // the dependency graph's order (cycles included).
-                    let ddl = if db_type == DatabaseType::Postgres {
-                        let (stripped, deferred) =
-                            extract_postgres_deferred_foreign_keys(&ddl, &request.schema, table_name);
-                        deferred_postgres_foreign_keys.extend(deferred);
-                        stripped
-                    } else {
-                        ddl
-                    };
+
                     let ddl = format_export_table_ddl(
                         &ddl,
                         Some(db_type),
@@ -4536,19 +3318,6 @@ async fn export_database_sql_core_inner(
         }
 
         object_index += 1;
-    }
-
-    if request.include_structure && !postgres_sequences.is_empty() {
-        for sequence in &postgres_sequences {
-            if let Some(sql) = generate_postgres_sequence_post_table_ddl(sequence, &request.schema) {
-                writeln!(file, "{};\n", sql).map_err(|e| format!("Failed to write file: {e}"))?;
-            }
-        }
-        for sequence in &postgres_sequences {
-            if let Some(sql) = generate_postgres_sequence_setval_sql(sequence, &request.schema) {
-                writeln!(file, "{};\n", sql).map_err(|e| format!("Failed to write file: {e}"))?;
-            }
-        }
     }
 
     // Export views (if include_objects)
@@ -4800,9 +3569,7 @@ async fn export_database_sql_core_inner(
     // routines are exported below the tables. Keep triggers part of table
     // structure, but write them only after routines so the resulting script
     // is executable in file order.
-    for trigger in deferred_postgres_triggers {
-        writeln!(file, "{trigger}\n").map_err(|e| format!("Failed to write file: {e}"))?;
-    }
+    {}
 
     // PostgreSQL foreign keys come after every table and row exists, so the
     // script replays into an empty database no matter what order (or cycle)
@@ -4812,7 +3579,7 @@ async fn export_database_sql_core_inner(
     }
 
     // For MySQL: re-enable foreign key checks
-    if matches!(db_type, DatabaseType::Mysql) {
+    {
         writeln!(file, "SET FOREIGN_KEY_CHECKS = 1;").map_err(|e| format!("Failed to write file: {e}"))?;
     }
 
@@ -4851,7 +3618,7 @@ fn filter_export_table_infos(
 }
 
 fn drop_table_if_exists_sql(table_name: &str, schema: &str, db_type: &DatabaseType) -> String {
-    let cascade = if db_type == &DatabaseType::Postgres { " CASCADE" } else { "" };
+    let cascade = { "" };
     format!("DROP TABLE IF EXISTS {}{};", crate::transfer::qualified_table(table_name, schema, db_type, None), cascade)
 }
 
@@ -4863,7 +3630,7 @@ fn build_database_export_object_source_sql(
     drop_if_exists: bool,
 ) -> String {
     let source = build_export_object_source_sql(database_type, object_type.clone(), source);
-    if source.is_empty() || !drop_if_exists || database_type != DatabaseType::Mysql {
+    if source.is_empty() || !drop_if_exists || false {
         return source;
     }
 
@@ -4881,34 +3648,8 @@ fn build_database_export_object_source_sql(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        await_export_operation, await_export_stream_operation, clear_export_cancelled, combine_schema_sql_export,
-        concurrent_metadata_prefetch_allowed, database_export_metadata_prefetch_concurrency,
-        emit_database_export_cancelled, metadata_prefetch_concurrency, metadata_prefetch_pool_capacity,
-        postgres_create_schema_sql, postgres_export_schema_names, set_export_cancelled, snapshot_batch_cancelled,
-        ExportStatus, EXPORT_CANCELLED_ERROR,
-    };
-    use super::{
-        build_database_export_object_source_sql, build_database_sql_export, build_export_insert_statements,
-        build_export_insert_statements_excluding, build_export_object_source_sql, build_export_sql_insert,
-        create_database_export_writer, database_export_query_options_for_timeout, database_export_select_sql,
-        database_export_total_objects, decode_unicode_escapes_for_export, drop_table_if_exists_sql,
-        ensure_export_destination_dir, export_destination_identity_mismatch, extract_postgres_deferred_foreign_keys,
-        filter_export_table_infos, format_export_sql_literal, format_export_table_ddl,
-        format_mysql_spatial_export_literal, format_xugu_spatial_export_literal, generate_postgres_enum_ddl,
-        generate_postgres_extension_ddl, generate_postgres_sequence_create_ddl,
-        generate_postgres_sequence_post_table_ddl, generate_postgres_sequence_setval_sql,
-        is_postgres_extension_member_routine, mysql_database_export_preamble, mysql_view_dependencies_from_rows,
-        mysql_view_dependencies_sql, normalize_export_table_ddl, record_export_destination_identity,
-        record_export_error, replace_database_export_select_list, sort_export_views_by_dependencies,
-        split_postgres_export_table_triggers, write_database_export_rows, write_database_export_rows_with_mode,
-        BuildDatabaseSqlExportOptions, BuildExportInsertStatementsOptions, BuildExportSqlInsertOptions,
-        DatabaseExportObjectCounts, DatabaseExportRequest, DatabaseExportWriter, DdlNormalizeOptions, ExportedTableSql,
-        PostgresExportEnum, PostgresExportExtension, PostgresExportSequence, PostgresExtensionMembers,
-        SqlInsertDialect, SqlInsertMode, DATABASE_EXPORT_INSERT_BATCH_SIZE, DATABASE_EXPORT_ROW_LIMIT,
-        POSTGRES_EXPORT_SEQUENCES_COMPAT_SQL, POSTGRES_EXPORT_SEQUENCES_SQL,
-    };
-    use super::{ExportProgress, LenientExportErrors};
+    use super::*;
+
     use crate::connection::AppState;
     use crate::models::connection::DatabaseType;
     use crate::types::SpatialColumn;
@@ -5022,18 +3763,6 @@ mod tests {
 
         assert_eq!(result, Ok(42));
         assert!(!cancel_token.is_cancelled());
-    }
-
-    #[tokio::test]
-    async fn non_postgres_snapshot_batches_keep_existing_cancel_check() {
-        let export_id = format!("cancel-non-postgres-batch-{}", uuid::Uuid::new_v4());
-        clear_export_cancelled(&export_id).await;
-        set_export_cancelled(&export_id).await;
-
-        assert!(snapshot_batch_cancelled(&DatabaseType::Mysql, &export_id));
-        assert!(!snapshot_batch_cancelled(&DatabaseType::Postgres, &export_id));
-
-        clear_export_cancelled(&export_id).await;
     }
 
     #[test]
@@ -5312,251 +4041,6 @@ mod tests {
     }
 
     #[test]
-    fn postgres_extension_ddl_uses_target_default_version_and_source_schema() {
-        let extension = PostgresExportExtension { name: "pg_trgm".to_string(), schema: "addons".to_string() };
-
-        let ddl = generate_postgres_extension_ddl(&extension);
-
-        assert_eq!(ddl, "CREATE EXTENSION IF NOT EXISTS \"pg_trgm\" WITH SCHEMA \"addons\";");
-        assert!(!ddl.contains("VERSION"));
-    }
-
-    #[test]
-    fn postgres_enum_ddl_preserves_schema_order_and_escapes_labels() {
-        let enum_type = PostgresExportEnum {
-            name: "status\"type".to_string(),
-            schema: "app".to_string(),
-            labels: vec!["pending".to_string(), "it's\\ready".to_string(), "已完成".to_string()],
-        };
-
-        assert_eq!(
-            generate_postgres_enum_ddl(&enum_type),
-            "CREATE TYPE \"app\".\"status\"\"type\" AS ENUM ('pending', E'it''s\\\\ready', '已完成');"
-        );
-    }
-
-    #[test]
-    fn postgres_all_schema_export_filters_system_schemas_and_deduplicates() {
-        assert_eq!(
-            postgres_export_schema_names(vec![
-                " public ".to_string(),
-                "pg_catalog".to_string(),
-                "information_schema".to_string(),
-                "private".to_string(),
-                "private".to_string(),
-                "".to_string(),
-            ]),
-            vec!["public".to_string(), "private".to_string()]
-        );
-    }
-
-    #[test]
-    fn postgres_all_schema_export_creates_quoted_schema_if_missing() {
-        assert_eq!(postgres_create_schema_sql("tenant\"data"), "CREATE SCHEMA IF NOT EXISTS \"tenant\"\"data\";");
-    }
-
-    #[test]
-    fn postgres_extension_member_filter_keeps_user_overload_with_same_name() {
-        let mut members = PostgresExtensionMembers::default();
-        members.function_keys.insert(("similarity".to_string(), "text, text".to_string()));
-
-        assert!(is_postgres_extension_member_routine(&routine("similarity", "text, text"), &members));
-        assert!(!is_postgres_extension_member_routine(&routine("similarity", "integer, integer"), &members));
-        assert!(!is_postgres_extension_member_routine(&routine("user_similarity", "text, text"), &members));
-    }
-
-    #[test]
-    fn postgres_database_export_defers_table_triggers_without_splitting_function_bodies() {
-        let ddl = "CREATE TABLE \"public\".\"work_log\" (\n  \"id\" bigint,\n  \"note\" text DEFAULT ';'::text\n);\n\nCREATE INDEX \"idx_work_log\" ON \"public\".\"work_log\" (\"id\");\n\nCREATE TRIGGER trg_work_log BEFORE INSERT OR UPDATE ON public.work_log FOR EACH ROW EXECUTE FUNCTION fn_work_log_update();";
-
-        let (table_ddl, triggers) = split_postgres_export_table_triggers(ddl, DatabaseType::Postgres);
-
-        assert!(table_ddl.contains("CREATE TABLE"));
-        assert!(table_ddl.contains("DEFAULT ';'::text"));
-        assert!(table_ddl.contains("CREATE INDEX"));
-        assert!(!table_ddl.contains("CREATE TRIGGER"));
-        assert_eq!(triggers.len(), 1);
-        assert!(triggers[0].starts_with("CREATE TRIGGER trg_work_log"));
-    }
-
-    #[test]
-    fn postgres_database_export_defers_constraint_triggers_only_for_postgres() {
-        let ddl = "CREATE TABLE \"public\".\"items\" (\"id\" bigint);\nCREATE CONSTRAINT TRIGGER items_check AFTER INSERT ON public.items DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION check_items();";
-
-        let (postgres_table, postgres_triggers) = split_postgres_export_table_triggers(ddl, DatabaseType::Postgres);
-        assert!(!postgres_table.contains("CREATE CONSTRAINT TRIGGER"));
-        assert_eq!(postgres_triggers.len(), 1);
-
-        let (mysql_ddl, mysql_triggers) = split_postgres_export_table_triggers(ddl, DatabaseType::Mysql);
-        assert_eq!(mysql_ddl, ddl);
-        assert!(mysql_triggers.is_empty());
-    }
-
-    #[test]
-    fn postgres_export_defers_inline_foreign_keys_to_file_tail_statements() {
-        let ddl = "CREATE TABLE \"public\".\"child_versions\" (\n  \"id\" uuid NOT NULL,\n  \"parent_id\" uuid NOT NULL,\n  CONSTRAINT \"child_versions_pkey\" PRIMARY KEY (id),\n  CONSTRAINT \"fk_child_parent\" FOREIGN KEY (\"parent_id\") REFERENCES \"public\".\"parent_entities\"(\"id\")\n);";
-
-        let (stripped, deferred) = extract_postgres_deferred_foreign_keys(ddl, "public", "child_versions");
-
-        assert!(!stripped.contains("FOREIGN KEY"), "stripped: {stripped}");
-        // Removing the trailing foreign key must also drop the comma it left behind.
-        assert!(stripped.contains("CONSTRAINT \"child_versions_pkey\" PRIMARY KEY (id)\n)"), "stripped: {stripped}");
-        assert_eq!(
-            deferred,
-            vec![
-                "ALTER TABLE \"public\".\"child_versions\" ADD CONSTRAINT \"fk_child_parent\" FOREIGN KEY (\"parent_id\") REFERENCES \"public\".\"parent_entities\"(\"id\");".to_string()
-            ]
-        );
-    }
-
-    #[test]
-    fn postgres_export_defers_foreign_keys_and_keeps_other_constraints() {
-        let ddl = "CREATE TABLE \"public\".\"assignments\" (\n  \"id\" integer NOT NULL,\n  \"owner_id\" integer NOT NULL,\n  \"reviewer_id\" integer NOT NULL,\n  CONSTRAINT \"assignments_owner_fk\" FOREIGN KEY (\"owner_id\") REFERENCES \"users\"(\"id\"),\n  CONSTRAINT \"assignments_owner_check\" CHECK (owner_id > 0),\n  CONSTRAINT \"assignments_reviewer_fk\" FOREIGN KEY (\"reviewer_id\") REFERENCES \"users\"(\"id\"),\n  CONSTRAINT \"assignments_pair_unique\" UNIQUE (\"owner_id\", \"reviewer_id\")\n);";
-
-        let (stripped, deferred) = extract_postgres_deferred_foreign_keys(ddl, "public", "assignments");
-
-        assert!(!stripped.contains("FOREIGN KEY"), "stripped: {stripped}");
-        assert!(
-            stripped.contains("CONSTRAINT \"assignments_owner_check\" CHECK (owner_id > 0),"),
-            "stripped: {stripped}"
-        );
-        assert!(
-            stripped.contains("CONSTRAINT \"assignments_pair_unique\" UNIQUE (\"owner_id\", \"reviewer_id\")"),
-            "stripped: {stripped}"
-        );
-        assert_eq!(deferred.len(), 2);
-        assert!(deferred[0]
-            .starts_with("ALTER TABLE \"public\".\"assignments\" ADD CONSTRAINT \"assignments_owner_fk\" FOREIGN KEY"));
-        assert!(deferred[1].starts_with(
-            "ALTER TABLE \"public\".\"assignments\" ADD CONSTRAINT \"assignments_reviewer_fk\" FOREIGN KEY"
-        ));
-    }
-
-    #[test]
-    fn postgres_export_defers_foreign_keys_across_multiple_statements() {
-        let no_foreign_keys = "CREATE TABLE \"public\".\"parent_entities\" (\n  \"id\" integer NOT NULL,\n  CONSTRAINT \"parent_entities_pkey\" PRIMARY KEY (id)\n);\nALTER TABLE ONLY \"public\".\"events_2027_h1\" ALTER COLUMN \"status\" DROP DEFAULT;";
-        let (stripped, deferred) = extract_postgres_deferred_foreign_keys(no_foreign_keys, "public", "parent_entities");
-        assert_eq!(stripped, no_foreign_keys);
-        assert!(deferred.is_empty());
-
-        let with_cycle = "CREATE TABLE \"public\".\"cyc_x\" (\n  \"id\" integer NOT NULL,\n  CONSTRAINT \"cyc_x_pkey\" PRIMARY KEY (id),\n  CONSTRAINT \"cyc_x_y_fk\" FOREIGN KEY (\"id\") REFERENCES \"public\".\"cyc_y\"(\"id\")\n);\nALTER TABLE ONLY \"public\".\"cyc_x\" ALTER COLUMN \"id\" DROP DEFAULT;";
-        let (stripped, deferred) = extract_postgres_deferred_foreign_keys(with_cycle, "public", "cyc_x");
-        assert!(!stripped.contains("cyc_x_y_fk"), "stripped: {stripped}");
-        assert!(
-            stripped.contains("ALTER TABLE ONLY \"public\".\"cyc_x\" ALTER COLUMN \"id\" DROP DEFAULT;"),
-            "stripped: {stripped}"
-        );
-        assert_eq!(
-            deferred,
-            vec![
-                "ALTER TABLE \"public\".\"cyc_x\" ADD CONSTRAINT \"cyc_x_y_fk\" FOREIGN KEY (\"id\") REFERENCES \"public\".\"cyc_y\"(\"id\");".to_string()
-            ]
-        );
-    }
-
-    #[test]
-    fn postgres_export_deferred_foreign_keys_use_the_statement_schema() {
-        // Whole-database exports leave the request schema empty; the ALTER must
-        // still target the schema the CREATE TABLE statement itself carries.
-        let ddl = "CREATE TABLE \"inventory\".\"orders\" (\n  \"id\" integer NOT NULL,\n  \"product_id\" integer NOT NULL,\n  CONSTRAINT \"orders_product_fk\" FOREIGN KEY (\"product_id\") REFERENCES \"inventory\".\"products\"(\"id\")\n);";
-
-        let (stripped, deferred) = extract_postgres_deferred_foreign_keys(ddl, "", "orders");
-
-        assert!(!stripped.contains("FOREIGN KEY"), "stripped: {stripped}");
-        assert_eq!(
-            deferred,
-            vec![
-                "ALTER TABLE \"inventory\".\"orders\" ADD CONSTRAINT \"orders_product_fk\" FOREIGN KEY (\"product_id\") REFERENCES \"inventory\".\"products\"(\"id\");".to_string()
-            ]
-        );
-    }
-
-    #[test]
-    fn concurrent_prefetch_only_allowed_for_multi_connection_pools() {
-        use crate::connection::PoolKind;
-
-        // ChClient::new 只构造 HTTP 客户端，不发起连接
-        let clickhouse = PoolKind::ClickHouse(crate::db::clickhouse_driver::ChClient::new(
-            "http://127.0.0.1:1",
-            None,
-            None,
-            std::time::Duration::from_secs(1),
-        ));
-        assert!(concurrent_metadata_prefetch_allowed(Some(&clickhouse)));
-
-        // Agent（JDBC sidecar）请求超时覆盖排队时间，必须回退串行
-        let agent = PoolKind::agent(crate::db::agent_driver::AgentDriverClient::test_stub());
-        assert!(!concurrent_metadata_prefetch_allowed(Some(&agent)));
-
-        assert!(!concurrent_metadata_prefetch_allowed(None));
-    }
-
-    #[test]
-    fn postgres_metadata_prefetch_reserves_pool_capacity() {
-        assert_eq!(database_export_metadata_prefetch_concurrency(DatabaseType::Postgres), 4);
-        assert_eq!(database_export_metadata_prefetch_concurrency(DatabaseType::Mysql), 8);
-    }
-
-    #[tokio::test]
-    async fn metadata_prefetch_capacity_follows_the_pool_the_prefetch_uses() {
-        use crate::connection::PoolKind;
-
-        let postgres_pool = |max_size: usize| {
-            let manager = deadpool_postgres::Manager::new(tokio_postgres::Config::new(), tokio_postgres::NoTls);
-            PoolKind::Postgres(
-                deadpool_postgres::Pool::builder(manager)
-                    .runtime(deadpool_postgres::Runtime::Tokio1)
-                    .max_size(max_size)
-                    .build()
-                    .expect("build PostgreSQL test pool"),
-            )
-        };
-        // 导出会话池（issue #10018）：PostgreSQL 会话池只有一条物理连接，
-        // 并发预取只会把 checkout 排到同一个连接后面。
-        assert_eq!(metadata_prefetch_pool_capacity(Some(&postgres_pool(1))), 1);
-        // 基础池（无会话）保留多连接并发。
-        assert_eq!(metadata_prefetch_pool_capacity(Some(&postgres_pool(10))), 10);
-
-        // 会话级 MySQL 池同样单连接；非会话池按连接数放行。
-        let session_mysql = PoolKind::Mysql(
-            crate::db::mysql::MySqlPool::new("mysql://root@127.0.0.1:1/app", 1),
-            crate::connection::MysqlMode::Bare,
-        );
-        assert_eq!(metadata_prefetch_pool_capacity(Some(&session_mysql)), 1);
-        let shared_mysql = PoolKind::Mysql(
-            crate::db::mysql::MySqlPool::new("mysql://root@127.0.0.1:1/app", 10),
-            crate::connection::MysqlMode::Bare,
-        );
-        assert_eq!(metadata_prefetch_pool_capacity(Some(&shared_mysql)), 10);
-
-        let clickhouse = PoolKind::ClickHouse(crate::db::clickhouse_driver::ChClient::new(
-            "http://127.0.0.1:1",
-            None,
-            None,
-            std::time::Duration::from_secs(1),
-        ));
-        assert_eq!(metadata_prefetch_pool_capacity(Some(&clickhouse)), usize::MAX);
-
-        let agent = PoolKind::agent(crate::db::agent_driver::AgentDriverClient::test_stub());
-        assert_eq!(metadata_prefetch_pool_capacity(Some(&agent)), 1);
-        assert_eq!(metadata_prefetch_pool_capacity(None), 1);
-    }
-
-    #[test]
-    fn metadata_prefetch_concurrency_never_exceeds_one_for_single_connection_pools() {
-        // 会话级 PostgreSQL/MySQL 池只有一条连接：并发预取在这里没有任何收益，
-        // 只会把 checkout 排到同一个连接后面并最终超时（issue #10018）。
-        assert_eq!(metadata_prefetch_concurrency(DatabaseType::Postgres, 1), 1);
-        assert_eq!(metadata_prefetch_concurrency(DatabaseType::Mysql, 1), 1);
-        // 多连接池保留原有上限。
-        assert_eq!(metadata_prefetch_concurrency(DatabaseType::Postgres, 10), 4);
-        assert_eq!(metadata_prefetch_concurrency(DatabaseType::Mysql, 10), 8);
-        // 池容量小于类型上限时按池容量收敛。
-        assert_eq!(metadata_prefetch_concurrency(DatabaseType::Mysql, 3), 3);
-        assert_eq!(metadata_prefetch_concurrency(DatabaseType::Postgres, usize::MAX), 4);
-    }
-
-    #[test]
     fn filters_export_tables_by_selected_names() {
         let tables = vec![table("users", "TABLE"), table("orders", "TABLE"), table("active_users", "VIEW")];
 
@@ -5627,13 +4111,6 @@ mod tests {
     }
 
     #[test]
-    fn builds_drop_table_if_exists_without_empty_schema() {
-        let sql = drop_table_if_exists_sql("users", "", &DatabaseType::Postgres);
-
-        assert_eq!(sql, "DROP TABLE IF EXISTS \"users\" CASCADE;");
-    }
-
-    #[test]
     fn mysql_export_adds_drop_if_exists_for_views_and_escapes_names() {
         let sql = build_database_export_object_source_sql(
             DatabaseType::Mysql,
@@ -5671,27 +4148,6 @@ mod tests {
             function,
             "DROP FUNCTION IF EXISTS `active_count`;\nDELIMITER //\nCREATE FUNCTION `active_count`() RETURNS INT RETURN 1//\nDELIMITER ;"
         );
-    }
-
-    #[test]
-    fn object_drop_option_does_not_change_disabled_or_non_mysql_exports() {
-        let mysql_without_drop = build_database_export_object_source_sql(
-            DatabaseType::Mysql,
-            &ObjectSourceKind::View,
-            "active_rows",
-            "CREATE VIEW `active_rows` AS SELECT 1",
-            false,
-        );
-        let postgres_with_drop = build_database_export_object_source_sql(
-            DatabaseType::Postgres,
-            &ObjectSourceKind::View,
-            "active_rows",
-            "CREATE VIEW active_rows AS SELECT 1",
-            true,
-        );
-
-        assert_eq!(mysql_without_drop, "CREATE VIEW `active_rows` AS SELECT 1;");
-        assert_eq!(postgres_with_drop, "CREATE VIEW active_rows AS SELECT 1;");
     }
 
     #[test]
@@ -5784,224 +4240,6 @@ mod tests {
     }
 
     #[test]
-    fn xugu_spatial_export_selects_ewkt_to_preserve_srid() {
-        let sql = database_export_select_sql(
-            &["id".to_string(), "shape".to_string(), "location".to_string(), "name".to_string()],
-            &[
-                Some("INTEGER".to_string()),
-                Some("GEOMETRY".to_string()),
-                Some("GEOGRAPHY".to_string()),
-                Some("VARCHAR(32)".to_string()),
-            ],
-            "places",
-            "app",
-            &DatabaseType::Xugu,
-        );
-
-        assert_eq!(
-            sql,
-            "SELECT \"id\", ST_AsEWKT(\"shape\") AS \"shape\", ST_AsEWKT(\"location\") AS \"location\", \"name\" FROM \"app\".\"places\""
-        );
-    }
-
-    #[test]
-    fn xugu_spatial_export_replays_ewkt_and_keeps_plain_wkt_compatible() {
-        assert_eq!(
-            format_xugu_spatial_export_literal(
-                &json!("SRID=3857;POINT(1 2)"),
-                Some(DatabaseType::Xugu),
-                Some("GEOMETRY"),
-            ),
-            Some("ST_GeomFromEWKT('SRID=3857;POINT(1 2)')".to_string())
-        );
-        assert_eq!(
-            format_xugu_spatial_export_literal(&json!("POINT(1 2)"), Some(DatabaseType::Xugu), Some("GEOGRAPHY"),),
-            Some("'POINT(1 2)'".to_string())
-        );
-        assert_eq!(
-            format_xugu_spatial_export_literal(&Value::Null, Some(DatabaseType::Xugu), Some("GEOMETRY")),
-            Some("NULL".to_string())
-        );
-        assert!(format_xugu_spatial_export_literal(
-            &json!("SRID=3857;POINT(1 2)"),
-            Some(DatabaseType::Xugu),
-            Some("VARCHAR")
-        )
-        .is_none());
-        assert!(format_xugu_spatial_export_literal(
-            &json!("SRID=3857;POINT(1 2)"),
-            Some(DatabaseType::Postgres),
-            Some("GEOMETRY")
-        )
-        .is_none());
-    }
-
-    #[test]
-    fn xugu_spatial_metadata_recovers_missing_type_and_cell_srid() {
-        let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-            database_type: Some(DatabaseType::Xugu),
-            identifier_quote: None,
-            schema: Some("app".to_string()),
-            table_name: Some("places".to_string()),
-            qualified_table_name: None,
-            columns: vec!["shape".to_string()],
-            column_types: vec![None],
-            column_extras: vec![None],
-            spatial_columns: vec![SpatialColumn { column_index: 0, srid: Some(3857) }],
-            spatial_values: vec![vec![Some(3857)]],
-            rows: vec![vec![json!("POINT(1 2)")]],
-            batch_size: None,
-            preserve_original_language: false,
-        })
-        .unwrap();
-
-        assert_eq!(
-            statements,
-            vec![
-                r#"INSERT INTO "app"."places" ("shape") VALUES (ST_GeomFromEWKT('SRID=3857;POINT(1 2)'));"#.to_string()
-            ]
-        );
-    }
-
-    #[test]
-    fn database_specific_boolean_export_literals() {
-        let sqlserver_statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-            database_type: Some(DatabaseType::SqlServer),
-            identifier_quote: None,
-            schema: Some("dbo".to_string()),
-            table_name: Some("flags".to_string()),
-            qualified_table_name: None,
-            columns: vec!["typed_true".to_string(), "untyped_false".to_string(), "typed_null".to_string()],
-            column_types: vec![Some("bit".to_string()), None, Some("bit".to_string())],
-            column_extras: Vec::new(),
-            spatial_columns: Vec::new(),
-            spatial_values: Vec::new(),
-            rows: vec![vec![json!(true), json!(false), Value::Null]],
-            batch_size: Some(10),
-            preserve_original_language: false,
-        })
-        .unwrap();
-        let postgres_statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-            database_type: Some(DatabaseType::Postgres),
-            identifier_quote: None,
-            schema: Some("public".to_string()),
-            table_name: Some("flags".to_string()),
-            qualified_table_name: None,
-            columns: vec!["enabled".to_string(), "disabled".to_string(), "unknown".to_string()],
-            column_types: Vec::new(),
-            column_extras: Vec::new(),
-            spatial_columns: Vec::new(),
-            spatial_values: Vec::new(),
-            rows: vec![vec![json!(true), json!(false), Value::Null]],
-            batch_size: Some(10),
-            preserve_original_language: false,
-        })
-        .unwrap();
-
-        assert_eq!(
-            sqlserver_statements,
-            vec!["INSERT INTO [dbo].[flags] ([typed_true], [untyped_false], [typed_null]) VALUES (1, 0, NULL);"]
-        );
-        assert_eq!(
-            postgres_statements,
-            vec![
-                "INSERT INTO \"public\".\"flags\" (\"enabled\", \"disabled\", \"unknown\") VALUES (TRUE, FALSE, NULL);"
-            ]
-        );
-    }
-
-    #[test]
-    fn ansi_export_keeps_backslashes_literal_and_doubles_quotes() {
-        let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-            database_type: Some(DatabaseType::SqlServer),
-            identifier_quote: None,
-            schema: None,
-            table_name: Some("t".to_string()),
-            qualified_table_name: None,
-            columns: vec!["note".to_string()],
-            column_types: vec![Some("nvarchar(255)".to_string())],
-            column_extras: Vec::new(),
-            spatial_columns: Vec::new(),
-            spatial_values: Vec::new(),
-            rows: vec![vec![json!(r"C:\new\it's")]],
-            batch_size: Some(10),
-            preserve_original_language: false,
-        })
-        .unwrap();
-
-        assert_eq!(statements, vec!["INSERT INTO [t] ([note]) VALUES (N'C:\\new\\it''s');"]);
-    }
-
-    #[test]
-    fn clickhouse_and_snowflake_export_escape_backslashes() {
-        for database_type in [DatabaseType::ClickHouse, DatabaseType::Snowflake] {
-            let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-                database_type: Some(database_type),
-                identifier_quote: None,
-                schema: None,
-                table_name: Some("t".to_string()),
-                qualified_table_name: None,
-                columns: vec!["note".to_string()],
-                column_types: vec![Some("String".to_string())],
-                column_extras: Vec::new(),
-                spatial_columns: Vec::new(),
-                spatial_values: Vec::new(),
-                rows: vec![vec![json!(r"C:\new\it's")]],
-                batch_size: Some(10),
-                preserve_original_language: false,
-            })
-            .unwrap();
-
-            let expected = match database_type {
-                DatabaseType::ClickHouse => r"INSERT INTO `t` (`note`) VALUES ('C:\\new\\it''s');",
-                DatabaseType::Snowflake => r#"INSERT INTO "t" ("note") VALUES ('C:\\new\\it''s');"#,
-                _ => unreachable!(),
-            };
-            assert_eq!(
-                statements,
-                vec![expected],
-                "backslash-escaping dialect {database_type:?} must double backslashes"
-            );
-        }
-    }
-
-    #[test]
-    fn clickhouse_and_snowflake_export_spell_the_sub_byte_as_a_hex_escape() {
-        // `\Z` is a MySQL-family escape. ClickHouse reads it as a literal
-        // backslash followed by `Z` (verified on the ClickHouse playground,
-        // 26.10.1.448: `hex('a\Zb')` is `615C5A62`), and Snowflake drops the
-        // backslash and yields `Z`. Both accept `\xhh`, which is the byte the
-        // value holds (`hex('a\x1ab')` is `611A62`). Exporting `\Z` to them
-        // would rewrite a stored SUB byte, so the escape has to be
-        // dialect-specific.
-        for database_type in [DatabaseType::ClickHouse, DatabaseType::Snowflake] {
-            let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-                database_type: Some(database_type),
-                identifier_quote: None,
-                schema: None,
-                table_name: Some("t".to_string()),
-                qualified_table_name: None,
-                columns: vec!["note".to_string()],
-                column_types: vec![Some("String".to_string())],
-                column_extras: Vec::new(),
-                spatial_columns: Vec::new(),
-                spatial_values: Vec::new(),
-                rows: vec![vec![json!("a\x1ab")]],
-                batch_size: Some(10),
-                preserve_original_language: false,
-            })
-            .unwrap();
-
-            let expected = match database_type {
-                DatabaseType::ClickHouse => r"INSERT INTO `t` (`note`) VALUES ('a\x1ab');",
-                DatabaseType::Snowflake => r#"INSERT INTO "t" ("note") VALUES ('a\x1ab');"#,
-                _ => unreachable!(),
-            };
-            assert_eq!(statements, vec![expected], "dialect {database_type:?} must not emit the MySQL-only \\Z escape");
-        }
-    }
-
-    #[test]
     fn mysql_export_still_uses_the_backslash_z_escape() {
         // MySQL has no `\xhh` escape, so the SUB byte must keep `\Z` there.
         // Guards against "fixing" the ClickHouse/Snowflake spelling everywhere.
@@ -6023,126 +4261,6 @@ mod tests {
         .unwrap();
 
         assert_eq!(statements, vec![r"INSERT INTO `t` (`note`) VALUES ('a\Zb');"]);
-    }
-
-    #[test]
-    fn sqlserver_export_prefixes_unicode_string_literals() {
-        let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-            database_type: Some(DatabaseType::SqlServer),
-            identifier_quote: None,
-            schema: Some("dbo".to_string()),
-            table_name: Some("people".to_string()),
-            qualified_table_name: None,
-            columns: vec![
-                "name".to_string(),
-                "code".to_string(),
-                "legacy_note".to_string(),
-                "alias_name".to_string(),
-                "plain_text".to_string(),
-                "missing".to_string(),
-            ],
-            column_types: vec![
-                Some("NVARCHAR(255)".to_string()),
-                Some(" nchar (10) ".to_string()),
-                Some("ntext".to_string()),
-                Some("sysname".to_string()),
-                Some("varchar(255)".to_string()),
-                Some("nvarchar(20)".to_string()),
-            ],
-            column_extras: Vec::new(),
-            spatial_columns: Vec::new(),
-            spatial_values: Vec::new(),
-            rows: vec![vec![
-                json!("张'三"),
-                json!("中文"),
-                json!("旧文本"),
-                json!("别名"),
-                json!("plain"),
-                Value::Null,
-            ]],
-            batch_size: Some(10),
-            preserve_original_language: false,
-        })
-        .unwrap();
-
-        assert_eq!(
-            statements,
-            vec![
-                "INSERT INTO [dbo].[people] ([name], [code], [legacy_note], [alias_name], [plain_text], [missing]) VALUES (N'张''三', N'中文', N'旧文本', N'别名', 'plain', NULL);"
-            ]
-        );
-    }
-
-    #[test]
-    fn sqlserver_export_keeps_binary_values_as_hex_literals() {
-        let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-            database_type: Some(DatabaseType::SqlServer),
-            identifier_quote: None,
-            schema: Some("dbo".to_string()),
-            table_name: Some("bin_probe".to_string()),
-            qualified_table_name: None,
-            columns: vec!["id".to_string(), "payload".to_string(), "label".to_string(), "empty_payload".to_string()],
-            column_types: vec![
-                Some("int".to_string()),
-                Some("varbinary(max)".to_string()),
-                Some("nvarchar(50)".to_string()),
-                Some("binary(8)".to_string()),
-            ],
-            column_extras: Vec::new(),
-            spatial_columns: Vec::new(),
-            spatial_values: Vec::new(),
-            rows: vec![
-                vec![json!(1), json!("0x0011FFEE"), json!("中文"), json!("0x")],
-                vec![json!(2), Value::Null, json!("plain"), json!("0XABcd")],
-                vec![json!(3), json!("0xzz"), json!("text"), json!("not-hex")],
-            ],
-            batch_size: Some(10),
-            preserve_original_language: false,
-        })
-        .unwrap();
-
-        assert_eq!(
-            statements,
-            vec![
-                "INSERT INTO [dbo].[bin_probe] ([id], [payload], [label], [empty_payload]) VALUES\n(1, 0x0011FFEE, N'中文', 0x),\n(2, NULL, N'plain', 0xABcd),\n(3, '0xzz', N'text', 'not-hex');"
-            ]
-        );
-    }
-
-    #[test]
-    fn sqlserver_database_export_keeps_binary_values_as_hex_literals() {
-        let sql = build_database_sql_export(BuildDatabaseSqlExportOptions {
-            database_name: "dbx10411".to_string(),
-            exported_at: Some("2026-09-28T00:00:00.000Z".to_string()),
-            tables: vec![ExportedTableSql {
-                display_name: "test.dbo.bin_probe".to_string(),
-                database_type: Some(DatabaseType::SqlServer),
-                identifier_quote: None,
-                schema: Some("dbo".to_string()),
-                table_name: Some("bin_probe".to_string()),
-                qualified_table_name: None,
-                ddl: None,
-                columns: vec!["id".to_string(), "payload".to_string()],
-                column_types: vec![Some("int".to_string()), Some("varbinary(max)".to_string())],
-                column_extras: Vec::new(),
-                spatial_columns: Vec::new(),
-                spatial_values: Vec::new(),
-                rows: vec![vec![json!(1), json!("0x0011ffee")], vec![json!(2), Value::Null]],
-                truncated: false,
-            }],
-            row_limit_per_table: None,
-            insert_batch_size: None,
-            insert_dialect: SqlInsertDialect::Source,
-            connection_id: None,
-            database: None,
-            schema: None,
-            omit_auto_increment: false,
-            preserve_original_language: false,
-        })
-        .expect("build SQL Server database export");
-
-        assert!(sql.contains("(1, 0x0011ffee)"), "binary literal missing from export: {sql}");
-        assert!(!sql.contains("'0x0011ffee'"), "binary values must not be exported as strings: {sql}");
     }
 
     #[test]
@@ -6192,304 +4310,6 @@ mod tests {
 
         assert_eq!(statements.len(), 2);
         assert!(statements.iter().all(|statement| statement.matches("INSERT INTO").count() == 1));
-    }
-
-    #[test]
-    fn sqlserver_export_caps_multi_row_insert_at_1000_rows() {
-        let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-            database_type: Some(DatabaseType::SqlServer),
-            identifier_quote: None,
-            schema: Some("dbo".to_string()),
-            table_name: Some("items".to_string()),
-            qualified_table_name: None,
-            columns: vec!["id".to_string()],
-            column_types: vec![Some("int".to_string())],
-            column_extras: Vec::new(),
-            spatial_columns: Vec::new(),
-            spatial_values: Vec::new(),
-            rows: (0..1001).map(|id| vec![json!(id)]).collect(),
-            batch_size: Some(2000),
-            preserve_original_language: false,
-        })
-        .unwrap();
-
-        assert_eq!(statements.len(), 2);
-        assert_eq!(statements[0].matches("),\n(").count(), 999);
-        assert_eq!(statements[1].matches("),\n(").count(), 0);
-    }
-
-    #[test]
-    fn doris_export_inserts_escape_control_characters() {
-        let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-            database_type: Some(DatabaseType::Doris),
-            identifier_quote: None,
-            schema: Some("warehouse".to_string()),
-            table_name: Some("events".to_string()),
-            qualified_table_name: None,
-            columns: vec!["message".to_string()],
-            column_types: vec![Some("varchar(255)".to_string())],
-            column_extras: Vec::new(),
-            spatial_columns: Vec::new(),
-            spatial_values: Vec::new(),
-            rows: vec![vec![json!("first\nsecond\tthird")]],
-            batch_size: Some(10),
-            preserve_original_language: false,
-        })
-        .unwrap();
-
-        assert_eq!(statements, vec!["INSERT INTO `warehouse`.`events` (`message`) VALUES ('first\\nsecond\\tthird');"]);
-    }
-
-    #[test]
-    fn postgres_export_inserts_escape_control_characters() {
-        let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-            database_type: Some(DatabaseType::Postgres),
-            identifier_quote: None,
-            schema: Some("public".to_string()),
-            table_name: Some("notes".to_string()),
-            qualified_table_name: None,
-            columns: vec!["body".to_string()],
-            column_types: vec![Some("text".to_string())],
-            column_extras: Vec::new(),
-            spatial_columns: Vec::new(),
-            spatial_values: Vec::new(),
-            rows: vec![vec![json!("line1\nline2\tend")]],
-            batch_size: Some(10),
-            preserve_original_language: false,
-        })
-        .unwrap();
-
-        assert_eq!(statements, vec!["INSERT INTO \"public\".\"notes\" (\"body\") VALUES (E'line1\\nline2\\tend');"]);
-    }
-
-    #[test]
-    fn postgres_bytea_export_decodes_valid_dbx_hex_values() {
-        const ZIP_HEX: &str = "504b03041400080008007496195d00000000000000000000000009000900746573742e6a736f6e5554050001bd738d6a013100ceff7b0a2020227469746c65223a202254657374222c0a20202274657874223a202248656c6c6f2c20776f726c6421220a7d0a504b07083f90bb503600000031000000504b010214031400080008007496195d3f90bb503600000031000000090009000000000000000000b48100000000746573742e6a736f6e5554050001bd738d6a504b0506000000000100010040000000760000000000";
-        let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-            database_type: Some(DatabaseType::Postgres),
-            identifier_quote: None,
-            schema: Some("public".to_string()),
-            table_name: Some("attachments".to_string()),
-            qualified_table_name: None,
-            columns: vec![
-                "zip_content".to_string(),
-                "empty_content".to_string(),
-                "uppercase_content".to_string(),
-                "nullable_content".to_string(),
-                "plain_text".to_string(),
-            ],
-            column_types: vec![
-                Some("bytea".to_string()),
-                Some("bytea".to_string()),
-                Some("bytea".to_string()),
-                Some("bytea".to_string()),
-                Some("text".to_string()),
-            ],
-            column_extras: Vec::new(),
-            spatial_columns: Vec::new(),
-            spatial_values: Vec::new(),
-            rows: vec![vec![json!(format!("0x{ZIP_HEX}")), json!("0x"), json!("0XABcd"), Value::Null, json!("0xABcd")]],
-            batch_size: Some(10),
-            preserve_original_language: false,
-        })
-        .unwrap();
-
-        assert_eq!(
-            statements,
-            vec![format!(
-                "INSERT INTO \"public\".\"attachments\" (\"zip_content\", \"empty_content\", \"uppercase_content\", \"nullable_content\", \"plain_text\") VALUES (decode('{ZIP_HEX}','hex'), decode('','hex'), decode('ABcd','hex'), NULL, '0xABcd');"
-            )]
-        );
-    }
-
-    #[test]
-    fn postgres_bytea_export_quotes_invalid_or_non_string_values() {
-        let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-            database_type: Some(DatabaseType::Postgres),
-            identifier_quote: None,
-            schema: Some("public".to_string()),
-            table_name: Some("attachments".to_string()),
-            qualified_table_name: None,
-            columns: vec!["odd_hex".to_string(), "invalid_hex".to_string(), "unexpected_number".to_string()],
-            column_types: vec![Some("bytea".to_string()), Some("bytea".to_string()), Some("bytea".to_string())],
-            column_extras: Vec::new(),
-            spatial_columns: Vec::new(),
-            spatial_values: Vec::new(),
-            rows: vec![vec![json!("0xabc"), json!("0xgg"), json!(7)]],
-            batch_size: Some(10),
-            preserve_original_language: false,
-        })
-        .unwrap();
-
-        assert_eq!(
-            statements,
-            vec![
-                "INSERT INTO \"public\".\"attachments\" (\"odd_hex\", \"invalid_hex\", \"unexpected_number\") VALUES ('0xabc', '0xgg', '7');"
-            ]
-        );
-    }
-
-    #[test]
-    fn postgres_export_inserts_escape_quotes_and_backslashes_without_changing_plain_strings() {
-        let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-            database_type: Some(DatabaseType::Postgres),
-            identifier_quote: None,
-            schema: Some("public".to_string()),
-            table_name: Some("notes".to_string()),
-            qualified_table_name: None,
-            columns: vec!["carriage_return".to_string(), "quote".to_string(), "path".to_string(), "plain".to_string()],
-            column_types: vec![
-                Some("text".to_string()),
-                Some("text".to_string()),
-                Some("text".to_string()),
-                Some("text".to_string()),
-            ],
-            column_extras: Vec::new(),
-            spatial_columns: Vec::new(),
-            spatial_values: Vec::new(),
-            rows: vec![vec![json!("line1\rline2"), json!("O'Hara"), json!(r"C:\tmp"), json!("plain")]],
-            batch_size: Some(10),
-            preserve_original_language: false,
-        })
-        .unwrap();
-
-        assert_eq!(
-            statements,
-            vec![
-                r#"INSERT INTO "public"."notes" ("carriage_return", "quote", "path", "plain") VALUES (E'line1\rline2', 'O''Hara', E'C:\\tmp', 'plain');"#
-            ]
-        );
-    }
-
-    #[test]
-    fn postgres_jsonb_export_preserves_json_escape_sequences() {
-        let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-            database_type: Some(DatabaseType::Postgres),
-            identifier_quote: None,
-            schema: Some("public".to_string()),
-            table_name: Some("events".to_string()),
-            qualified_table_name: None,
-            columns: vec!["payload".to_string()],
-            column_types: vec![Some("jsonb".to_string())],
-            column_extras: Vec::new(),
-            spatial_columns: Vec::new(),
-            spatial_values: Vec::new(),
-            rows: vec![vec![json!(r#"{"text":"say \"hi\"","path":"C:\\tmp","quote":"O'Hara"}"#)]],
-            batch_size: Some(10),
-            preserve_original_language: false,
-        })
-        .unwrap();
-
-        assert_eq!(
-            statements,
-            vec![
-                r#"INSERT INTO "public"."events" ("payload") VALUES (E'{"text":"say \\"hi\\"","path":"C:\\\\tmp","quote":"O''Hara"}');"#
-            ]
-        );
-    }
-
-    #[test]
-    fn opengauss_export_inserts_escape_quotes_without_doubling_backslashes() {
-        let style = r#""{\"paddingTop\":\"20vh\",\"fontSize\":16}""#;
-        let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-            database_type: Some(DatabaseType::OpenGauss),
-            identifier_quote: None,
-            schema: Some("public".to_string()),
-            table_name: Some("dbx_issue_json".to_string()),
-            qualified_table_name: None,
-            columns: vec!["comment_text".to_string(), "style".to_string()],
-            column_types: vec![Some("text".to_string()), Some("json".to_string())],
-            column_extras: Vec::new(),
-            spatial_columns: Vec::new(),
-            spatial_values: Vec::new(),
-            rows: vec![vec![json!("逻辑删除标志：'0'-未删除，'1'-已删除"), json!(style)]],
-            batch_size: Some(10),
-            preserve_original_language: false,
-        })
-        .unwrap();
-
-        let expected_style = format!("'{style}'");
-        assert_eq!(
-            statements,
-            vec![format!(
-                "INSERT INTO \"public\".\"dbx_issue_json\" (\"comment_text\", \"style\") VALUES ('逻辑删除标志：''0''-未删除，''1''-已删除', {expected_style});"
-            )]
-        );
-    }
-
-    #[test]
-    fn postgres_export_keeps_json_escape_sequences_for_the_same_value() {
-        let style = r#""{\"paddingTop\":\"20vh\",\"fontSize\":16}""#;
-        let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-            database_type: Some(DatabaseType::Postgres),
-            identifier_quote: None,
-            schema: Some("public".to_string()),
-            table_name: Some("dbx_issue_json".to_string()),
-            qualified_table_name: None,
-            columns: vec!["style".to_string()],
-            column_types: vec![Some("json".to_string())],
-            column_extras: Vec::new(),
-            spatial_columns: Vec::new(),
-            spatial_values: Vec::new(),
-            rows: vec![vec![json!(style)]],
-            batch_size: Some(10),
-            preserve_original_language: false,
-        })
-        .unwrap();
-
-        let expected_style = format!("E'{}'", style.replace('\\', "\\\\"));
-        assert_eq!(
-            statements,
-            vec![format!("INSERT INTO \"public\".\"dbx_issue_json\" (\"style\") VALUES ({expected_style});")]
-        );
-    }
-
-    #[test]
-    fn postgres_vector_export_preserves_pgvector_bracket_literals() {
-        let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-            database_type: Some(DatabaseType::Postgres),
-            identifier_quote: None,
-            schema: Some("public".to_string()),
-            table_name: Some("items".to_string()),
-            qualified_table_name: None,
-            columns: vec![
-                "id".to_string(),
-                "embedding".to_string(),
-                "qualified_embedding".to_string(),
-                "compact_embedding".to_string(),
-                "labels".to_string(),
-                "embedding_history".to_string(),
-            ],
-            column_types: vec![
-                Some("integer".to_string()),
-                Some("vector(2)".to_string()),
-                Some("public.vector".to_string()),
-                Some("halfvec(2)".to_string()),
-                Some("text[]".to_string()),
-                Some("public.vector(2)[]".to_string()),
-            ],
-            column_extras: Vec::new(),
-            spatial_columns: Vec::new(),
-            spatial_values: Vec::new(),
-            rows: vec![vec![
-                json!(1),
-                json!([1.2, 3.4]),
-                json!(["5", "6"]),
-                json!([-0.25, 4]),
-                json!(["x", "y"]),
-                json!([[1.2, 3.4], [5, 6]]),
-            ]],
-            batch_size: Some(10),
-            preserve_original_language: false,
-        })
-        .unwrap();
-
-        assert_eq!(
-            statements,
-            vec![
-                r#"INSERT INTO "public"."items" ("id", "embedding", "qualified_embedding", "compact_embedding", "labels", "embedding_history") VALUES (1, '[1.2,3.4]', '[5,6]', '[-0.25,4]', '{"x","y"}', '{{1.2,3.4},{5,6}}');"#
-            ]
-        );
     }
 
     #[test]
@@ -6587,287 +4407,6 @@ mod tests {
     }
 
     #[test]
-    fn preserve_original_language_option_decodes_unicode_escapes_in_exported_literals() {
-        let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-            database_type: Some(DatabaseType::SqlServer),
-            identifier_quote: None,
-            schema: None,
-            table_name: Some("VersionValue".to_string()),
-            qualified_table_name: None,
-            columns: vec!["jsonValues".to_string()],
-            column_types: Vec::new(),
-            column_extras: Vec::new(),
-            spatial_columns: Vec::new(),
-            spatial_values: Vec::new(),
-            rows: vec![vec![json!("{\"clientBoqItemName\":\"\\u1ed0ng gi\\u00f3 th\\u1eb3ng\"}")]],
-            batch_size: Some(10),
-            preserve_original_language: true,
-        })
-        .unwrap();
-
-        assert_eq!(
-            statements,
-            vec!["INSERT INTO [VersionValue] ([jsonValues]) VALUES ('{\"clientBoqItemName\":\"Ống gió thẳng\"}');"]
-        );
-    }
-
-    #[test]
-    fn preserve_original_language_defaults_to_false_and_keeps_ascii_escapes() {
-        let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-            database_type: Some(DatabaseType::SqlServer),
-            identifier_quote: None,
-            schema: None,
-            table_name: Some("VersionValue".to_string()),
-            qualified_table_name: None,
-            columns: vec!["jsonValues".to_string()],
-            column_types: Vec::new(),
-            column_extras: Vec::new(),
-            spatial_columns: Vec::new(),
-            spatial_values: Vec::new(),
-            rows: vec![vec![json!("{\"clientBoqItemName\":\"\\u1ed0ng gi\\u00f3 th\\u1eb3ng\"}")]],
-            batch_size: Some(10),
-            preserve_original_language: false,
-        })
-        .unwrap();
-
-        assert_eq!(
-            statements,
-            vec![
-                "INSERT INTO [VersionValue] ([jsonValues]) VALUES ('{\"clientBoqItemName\":\"\\u1ed0ng gi\\u00f3 th\\u1eb3ng\"}');"
-            ]
-        );
-    }
-
-    #[test]
-    fn oracle_export_inserts_use_one_statement_per_row() {
-        let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-            database_type: Some(DatabaseType::Oracle),
-            identifier_quote: None,
-            schema: Some("APP".to_string()),
-            table_name: Some("USERS".to_string()),
-            qualified_table_name: None,
-            columns: vec!["ID".to_string(), "NAME".to_string()],
-            column_types: Vec::new(),
-            column_extras: Vec::new(),
-            spatial_columns: Vec::new(),
-            spatial_values: Vec::new(),
-            rows: vec![vec![json!(1), json!("Ada")], vec![json!(2), json!("Linus")]],
-            batch_size: Some(100),
-            preserve_original_language: false,
-        })
-        .unwrap();
-
-        assert_eq!(
-            statements,
-            vec![
-                "INSERT INTO \"APP\".\"USERS\" (\"ID\", \"NAME\") VALUES (1, 'Ada');",
-                "INSERT INTO \"APP\".\"USERS\" (\"ID\", \"NAME\") VALUES (2, 'Linus');",
-            ]
-        );
-    }
-
-    #[test]
-    fn oracle_export_omits_synthetic_rowid_from_insert_columns() {
-        let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-            database_type: Some(DatabaseType::Oracle),
-            identifier_quote: None,
-            schema: Some("APP".to_string()),
-            table_name: Some("USERS".to_string()),
-            qualified_table_name: None,
-            columns: vec!["__DBX_ROWID".to_string(), "ID".to_string(), "NAME".to_string()],
-            column_types: vec![Some("VARCHAR2".to_string()), Some("NUMBER".to_string()), Some("VARCHAR2".to_string())],
-            column_extras: Vec::new(),
-            spatial_columns: Vec::new(),
-            spatial_values: Vec::new(),
-            rows: vec![vec![json!("AAAPr9AAEAAAAGfAAA"), json!(1), json!("Ada")]],
-            batch_size: Some(100),
-            preserve_original_language: false,
-        })
-        .unwrap();
-
-        assert_eq!(statements, vec!["INSERT INTO \"APP\".\"USERS\" (\"ID\", \"NAME\") VALUES (1, 'Ada');"]);
-    }
-
-    #[test]
-    fn oceanbase_oracle_export_omits_synthetic_rowid_from_insert_columns() {
-        let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-            database_type: Some(DatabaseType::OceanbaseOracle),
-            identifier_quote: None,
-            schema: Some("APP".to_string()),
-            table_name: Some("USERS".to_string()),
-            qualified_table_name: None,
-            columns: vec!["__DBX_ROWID".to_string(), "ID".to_string(), "NAME".to_string()],
-            column_types: vec![Some("VARCHAR2".to_string()), Some("NUMBER".to_string()), Some("VARCHAR2".to_string())],
-            column_extras: Vec::new(),
-            spatial_columns: Vec::new(),
-            spatial_values: Vec::new(),
-            rows: vec![vec![json!("*AAABk1AAEAAAAAgAAA"), json!(1), json!("Ada")]],
-            batch_size: Some(100),
-            preserve_original_language: false,
-        })
-        .unwrap();
-
-        assert_eq!(statements, vec!["INSERT INTO \"APP\".\"USERS\" (\"ID\", \"NAME\") VALUES (1, 'Ada');"]);
-    }
-
-    #[test]
-    fn non_oracle_export_preserves_dbx_rowid_named_column() {
-        let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-            database_type: Some(DatabaseType::Mysql),
-            identifier_quote: None,
-            schema: None,
-            table_name: Some("users".to_string()),
-            qualified_table_name: None,
-            columns: vec!["__DBX_ROWID".to_string(), "name".to_string()],
-            column_types: Vec::new(),
-            column_extras: Vec::new(),
-            spatial_columns: Vec::new(),
-            spatial_values: Vec::new(),
-            rows: vec![vec![json!(7), json!("Ada")]],
-            batch_size: Some(100),
-            preserve_original_language: false,
-        })
-        .unwrap();
-
-        assert_eq!(statements, vec!["INSERT INTO `users` (`__DBX_ROWID`, `name`) VALUES (7, 'Ada');"]);
-    }
-
-    #[test]
-    fn oracle_date_columns_export_as_date_literals() {
-        let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-            database_type: Some(DatabaseType::Oracle),
-            identifier_quote: None,
-            schema: Some("APP".to_string()),
-            table_name: Some("EVENTS".to_string()),
-            qualified_table_name: None,
-            columns: vec!["ID".to_string(), "CREATED_ON".to_string(), "RAW_TEXT".to_string()],
-            column_types: vec![Some("NUMBER".to_string()), Some("DATE".to_string()), Some("VARCHAR2(64)".to_string())],
-            column_extras: Vec::new(),
-            spatial_columns: Vec::new(),
-            spatial_values: Vec::new(),
-            rows: vec![
-                vec![json!(1), json!("2022-08-25T09:58:43Z"), json!("2022-08-25T09:58:43Z")],
-                vec![json!(2), json!("2022-08-25T00:00:00Z"), json!("2022-08-25T00:00:00Z")],
-            ],
-            batch_size: Some(100),
-            preserve_original_language: false,
-        })
-        .unwrap();
-
-        assert_eq!(
-            statements,
-            vec![
-                "INSERT INTO \"APP\".\"EVENTS\" (\"ID\", \"CREATED_ON\", \"RAW_TEXT\") VALUES (1, TO_DATE('2022-08-25 09:58:43', 'YYYY-MM-DD HH24:MI:SS'), '2022-08-25T09:58:43Z');",
-                "INSERT INTO \"APP\".\"EVENTS\" (\"ID\", \"CREATED_ON\", \"RAW_TEXT\") VALUES (2, DATE '2022-08-25', '2022-08-25T00:00:00Z');",
-            ]
-        );
-    }
-
-    #[test]
-    fn oracle_timestamp_columns_export_as_explicit_literals() {
-        for database_type in [DatabaseType::Oracle, DatabaseType::OceanbaseOracle] {
-            let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-                database_type: Some(database_type),
-                identifier_quote: None,
-                schema: Some("APP".to_string()),
-                table_name: Some("EVENTS".to_string()),
-                qualified_table_name: None,
-                columns: vec![
-                    "CREATED_AT".to_string(),
-                    "UPDATED_AT".to_string(),
-                    "RECORDED_AT".to_string(),
-                    "LOCAL_RECORDED_AT".to_string(),
-                    "DRIVER_CREATED_AT".to_string(),
-                    "DRIVER_RECORDED_AT".to_string(),
-                    "RAW_TEXT".to_string(),
-                    "UNTYPED".to_string(),
-                    "INVALID_AT".to_string(),
-                    "SHAPED_INVALID_AT".to_string(),
-                    "NULL_AT".to_string(),
-                ],
-                column_types: vec![
-                    Some("TIMESTAMP(6)".to_string()),
-                    Some("TIMESTAMP(6)".to_string()),
-                    Some("TIMESTAMP(9) WITH TIME ZONE".to_string()),
-                    Some("TIMESTAMP(6) WITH LOCAL TIME ZONE".to_string()),
-                    Some("TimeStampDTY".to_string()),
-                    Some("TimeStampTZ_DTY".to_string()),
-                    Some("VARCHAR2(64)".to_string()),
-                    None,
-                    Some("TIMESTAMP(6)".to_string()),
-                    Some("TIMESTAMP(6)".to_string()),
-                    Some("TIMESTAMP".to_string()),
-                ],
-                column_extras: Vec::new(),
-                spatial_columns: Vec::new(),
-                spatial_values: Vec::new(),
-                rows: vec![vec![
-                    json!("2022-08-25 09:58:43.123456"),
-                    json!("2022-08-26T10:59:44Z"),
-                    json!("2022-08-27T11:00:45.123456789+08:00"),
-                    json!("2022-08-28T12:01:46Z"),
-                    json!("2022-08-29T13:02:47.123456"),
-                    json!("2022-08-30T14:03:48-05:30"),
-                    json!("2022-08-31T15:04:49Z"),
-                    json!("2022-09-01T16:05:50Z"),
-                    json!("not-a-timestamp"),
-                    json!("2022-0'-25T09:58:43Z"),
-                    Value::Null,
-                ]],
-                batch_size: Some(100),
-                preserve_original_language: false,
-            })
-            .unwrap();
-
-            assert_eq!(
-                statements,
-                vec![concat!(
-                    "INSERT INTO \"APP\".\"EVENTS\" (\"CREATED_AT\", \"UPDATED_AT\", \"RECORDED_AT\", ",
-                    "\"LOCAL_RECORDED_AT\", \"DRIVER_CREATED_AT\", \"DRIVER_RECORDED_AT\", \"RAW_TEXT\", ",
-                    "\"UNTYPED\", \"INVALID_AT\", \"SHAPED_INVALID_AT\", \"NULL_AT\") VALUES ",
-                    "(TO_TIMESTAMP('2022-08-25 09:58:43.123456', 'YYYY-MM-DD HH24:MI:SS.FF'), ",
-                    "TO_TIMESTAMP('2022-08-26 10:59:44', 'YYYY-MM-DD HH24:MI:SS'), ",
-                    "TO_TIMESTAMP_TZ('2022-08-27 11:00:45.123456789 +08:00', ",
-                    "'YYYY-MM-DD HH24:MI:SS.FF TZH:TZM'), ",
-                    "TO_TIMESTAMP_TZ('2022-08-28 12:01:46 +00:00', 'YYYY-MM-DD HH24:MI:SS TZH:TZM'), ",
-                    "TO_TIMESTAMP('2022-08-29 13:02:47.123456', 'YYYY-MM-DD HH24:MI:SS.FF'), ",
-                    "TO_TIMESTAMP_TZ('2022-08-30 14:03:48 -05:30', 'YYYY-MM-DD HH24:MI:SS TZH:TZM'), ",
-                    "'2022-08-31T15:04:49Z', '2022-09-01T16:05:50Z', 'not-a-timestamp', ",
-                    "'2022-0''-25T09:58:43Z', NULL);"
-                )]
-            );
-        }
-    }
-
-    #[test]
-    fn non_oracle_timestamp_exports_keep_existing_literals() {
-        let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-            database_type: Some(DatabaseType::Postgres),
-            identifier_quote: None,
-            schema: Some("public".to_string()),
-            table_name: Some("events".to_string()),
-            qualified_table_name: None,
-            columns: vec!["created_at".to_string(), "recorded_at".to_string()],
-            column_types: vec![Some("timestamp".to_string()), Some("timestamp with time zone".to_string())],
-            column_extras: Vec::new(),
-            spatial_columns: Vec::new(),
-            spatial_values: Vec::new(),
-            rows: vec![vec![json!("2022-08-25T09:58:43.123456Z"), json!("2022-08-26T10:59:44+08:00")]],
-            batch_size: Some(100),
-            preserve_original_language: false,
-        })
-        .unwrap();
-
-        assert_eq!(
-            statements,
-            vec![concat!(
-                "INSERT INTO \"public\".\"events\" (\"created_at\", \"recorded_at\") VALUES ",
-                "('2022-08-25 09:58:43.123456', '2022-08-26 10:59:44+08:00');"
-            )]
-        );
-    }
-
-    #[test]
     fn mysql_bit_columns_export_without_quoted_string_values() {
         let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
             database_type: Some(DatabaseType::Mysql),
@@ -6892,76 +4431,6 @@ mod tests {
                 "INSERT INTO `flags` (`enabled`, `mask`, `label`) VALUES\n(b'1', b'1010', '1010'),\n(b'0', 3, 'off');"
             ]
         );
-    }
-
-    #[test]
-    fn dameng_bit_columns_export_as_numeric_literals() {
-        let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-            database_type: Some(DatabaseType::Dameng),
-            identifier_quote: None,
-            schema: Some("DBX_TEST".to_string()),
-            table_name: Some("FLAGS".to_string()),
-            qualified_table_name: None,
-            columns: vec!["ENABLED".to_string(), "DELETED".to_string(), "OPTIONAL".to_string()],
-            column_types: vec![Some("BIT".to_string()), Some("bit".to_string()), Some("BIT".to_string())],
-            column_extras: Vec::new(),
-            spatial_columns: Vec::new(),
-            spatial_values: Vec::new(),
-            rows: vec![vec![json!(true), json!(false), Value::Null]],
-            batch_size: Some(10),
-            preserve_original_language: false,
-        })
-        .unwrap();
-
-        assert_eq!(
-            statements,
-            vec!["INSERT INTO \"DBX_TEST\".\"FLAGS\" (\"ENABLED\", \"DELETED\", \"OPTIONAL\") VALUES (1, 0, NULL);"]
-        );
-    }
-
-    #[test]
-    fn dameng_strings_export_nul_as_chr_expression() {
-        let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-            database_type: Some(DatabaseType::Dameng),
-            identifier_quote: None,
-            schema: Some("DBX_TEST".to_string()),
-            table_name: Some("NUL_VALUES".to_string()),
-            qualified_table_name: None,
-            columns: vec![
-                "PLAIN".to_string(),
-                "TRAILING".to_string(),
-                "LEADING".to_string(),
-                "MIDDLE".to_string(),
-                "CONSECUTIVE".to_string(),
-                "ONLY_NUL".to_string(),
-            ],
-            column_types: vec![Some("VARCHAR".to_string()); 6],
-            column_extras: Vec::new(),
-            spatial_columns: Vec::new(),
-            spatial_values: Vec::new(),
-            rows: vec![vec![
-                json!("plain"),
-                json!("eHall\0"),
-                json!("\0leading"),
-                json!("left\0right"),
-                json!("left\0\0right"),
-                json!("\0"),
-            ]],
-            batch_size: Some(10),
-            preserve_original_language: false,
-        })
-        .unwrap();
-
-        assert_eq!(
-            statements,
-            vec![concat!(
-                "INSERT INTO \"DBX_TEST\".\"NUL_VALUES\" ",
-                "(\"PLAIN\", \"TRAILING\", \"LEADING\", \"MIDDLE\", \"CONSECUTIVE\", \"ONLY_NUL\") ",
-                "VALUES ('plain', 'eHall' || CHR(0), CHR(0) || 'leading', 'left' || CHR(0) || 'right', ",
-                "'left' || CHR(0) || CHR(0) || 'right', CHR(0));"
-            )]
-        );
-        assert!(!statements[0].contains('\0'));
     }
 
     #[test]
@@ -7032,81 +4501,6 @@ mod tests {
     }
 
     #[test]
-    fn postgres_timestamptz_export_keeps_timezone_without_rfc3339_t_separator() {
-        let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-            database_type: Some(DatabaseType::Postgres),
-            identifier_quote: None,
-            schema: Some("public".to_string()),
-            table_name: Some("events".to_string()),
-            qualified_table_name: None,
-            columns: vec!["recorded_at".to_string(), "local_at".to_string()],
-            column_types: vec![
-                Some("timestamp with time zone".to_string()),
-                Some("timestamp without time zone".to_string()),
-            ],
-            column_extras: Vec::new(),
-            spatial_columns: Vec::new(),
-            spatial_values: Vec::new(),
-            rows: vec![vec![json!("2026-06-12T10:11:12Z"), json!("2026-06-12T18:11:12+08:00")]],
-            batch_size: Some(10),
-            preserve_original_language: false,
-        })
-        .unwrap();
-
-        assert_eq!(
-            statements,
-            vec![
-                "INSERT INTO \"public\".\"events\" (\"recorded_at\", \"local_at\") VALUES ('2026-06-12 10:11:12+00:00', '2026-06-12 18:11:12');"
-            ]
-        );
-    }
-
-    #[test]
-    fn sqlserver_insert_scripts_omit_non_insertable_timestamp_and_computed_columns() {
-        // `timestamp`/`rowversion` counters and computed columns can never take
-        // an explicit INSERT value ("Cannot insert an explicit value into a
-        // timestamp column" / "Cannot insert a value into the computed column"),
-        // so generated INSERT scripts (grid copy, SQL export) must omit them
-        // (issue #10764).
-        let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-            database_type: Some(DatabaseType::SqlServer),
-            identifier_quote: None,
-            schema: Some("dbo".to_string()),
-            table_name: Some("sync_state".to_string()),
-            qualified_table_name: None,
-            columns: vec![
-                "id".to_string(),
-                "note".to_string(),
-                "row_version".to_string(),
-                "stamp_alias".to_string(),
-                "total".to_string(),
-            ],
-            column_types: vec![
-                Some("int".to_string()),
-                Some("nvarchar(50)".to_string()),
-                Some("timestamp".to_string()),
-                Some("rowversion".to_string()),
-                Some("int".to_string()),
-            ],
-            column_extras: vec![None, None, None, None, Some("computed".to_string())],
-            spatial_columns: Vec::new(),
-            spatial_values: Vec::new(),
-            rows: vec![vec![
-                json!(7),
-                json!("ok"),
-                json!("0x00000000000007D1"),
-                json!("0x00000000000007D2"),
-                json!(42),
-            ]],
-            batch_size: Some(10),
-            preserve_original_language: false,
-        })
-        .unwrap();
-
-        assert_eq!(statements, vec!["INSERT INTO [dbo].[sync_state] ([id], [note]) VALUES (7, N'ok');"]);
-    }
-
-    #[test]
     fn mysql_insert_scripts_keep_timestamp_columns() {
         // MySQL `timestamp` is an ordinary datetime column and must stay insertable.
         let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
@@ -7131,137 +4525,9 @@ mod tests {
     }
 
     #[test]
-    fn sqlserver_rowversion_timestamp_columns_are_omitted_from_insert_export() {
-        // `timestamp`/`rowversion` is a server-generated counter on SQL Server,
-        // not a datetime: a replayed INSERT with an explicit value is rejected
-        // ("Cannot insert an explicit value into a timestamp column"), so the
-        // column is omitted while `datetime2` keeps its literal (issue #10764).
-        let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-            database_type: Some(DatabaseType::SqlServer),
-            identifier_quote: None,
-            schema: Some("dbo".to_string()),
-            table_name: Some("events".to_string()),
-            qualified_table_name: None,
-            columns: vec!["row_version".to_string(), "created_at".to_string()],
-            column_types: vec![Some("timestamp".to_string()), Some("datetime2(3)".to_string())],
-            column_extras: Vec::new(),
-            spatial_columns: Vec::new(),
-            spatial_values: Vec::new(),
-            rows: vec![vec![json!("2026-06-12T10:11:12Z"), json!("2026-06-12T10:11:12.1234567Z")]],
-            batch_size: Some(10),
-            preserve_original_language: false,
-        })
-        .unwrap();
-
-        assert_eq!(statements, vec!["INSERT INTO [dbo].[events] ([created_at]) VALUES ('2026-06-12 10:11:12.123');"]);
-    }
-
-    #[test]
-    fn postgres_tsvector_columns_are_omitted_from_sql_insert_export() {
-        let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-            database_type: Some(DatabaseType::Postgres),
-            identifier_quote: None,
-            schema: Some("public".to_string()),
-            table_name: Some("articles".to_string()),
-            qualified_table_name: None,
-            columns: vec!["id".to_string(), "title".to_string(), "search_vector".to_string()],
-            column_types: vec![Some("integer".to_string()), Some("text".to_string()), Some("tsvector".to_string())],
-            column_extras: Vec::new(),
-            spatial_columns: Vec::new(),
-            spatial_values: Vec::new(),
-            rows: vec![vec![json!(1), json!("Hello"), json!("'hello':1A")]],
-            batch_size: Some(10),
-            preserve_original_language: false,
-        })
-        .unwrap();
-
-        assert_eq!(statements, vec!["INSERT INTO \"public\".\"articles\" (\"id\", \"title\") VALUES (1, 'Hello');"]);
-    }
-
-    #[test]
-    fn sql_insert_export_omits_excluded_columns_and_keeps_values_aligned() {
-        let statements = build_export_insert_statements_excluding(
-            BuildExportInsertStatementsOptions {
-                database_type: Some(DatabaseType::Postgres),
-                identifier_quote: None,
-                schema: Some("public".to_string()),
-                table_name: Some("users".to_string()),
-                qualified_table_name: None,
-                columns: vec!["id".to_string(), "name".to_string(), "email".to_string()],
-                column_types: vec![Some("integer".to_string()), Some("text".to_string()), Some("text".to_string())],
-                column_extras: Vec::new(),
-                spatial_columns: Vec::new(),
-                spatial_values: Vec::new(),
-                rows: vec![vec![json!(1), json!("Ada"), json!("ada@example.com")]],
-                batch_size: Some(10),
-                preserve_original_language: false,
-            },
-            &["id".to_string()],
-        )
-        .unwrap();
-
-        assert_eq!(
-            statements,
-            vec!["INSERT INTO \"public\".\"users\" (\"name\", \"email\") VALUES ('Ada', 'ada@example.com');"]
-        );
-    }
-
-    #[test]
-    fn sql_insert_export_allows_explicitly_excluded_opaque_column() {
-        let statements = build_export_insert_statements_excluding(
-            BuildExportInsertStatementsOptions {
-                database_type: Some(DatabaseType::Doris),
-                identifier_quote: None,
-                schema: None,
-                table_name: Some("states".to_string()),
-                qualified_table_name: None,
-                columns: vec!["id".to_string(), "v2".to_string()],
-                column_types: vec![Some("integer".to_string()), Some("agg_state<sum(int)>".to_string())],
-                column_extras: Vec::new(),
-                spatial_columns: Vec::new(),
-                spatial_values: Vec::new(),
-                rows: vec![vec![json!(1), json!("0x00ff")]],
-                batch_size: Some(10),
-                preserve_original_language: false,
-            },
-            &["v2".to_string()],
-        )
-        .unwrap();
-
-        assert_eq!(statements, vec!["INSERT INTO `states` (`id`) VALUES (1);"]);
-    }
-
-    #[test]
-    fn sql_insert_export_reports_error_when_excluding_leaves_no_columns() {
-        let result = build_export_insert_statements_excluding(
-            BuildExportInsertStatementsOptions {
-                database_type: Some(DatabaseType::Postgres),
-                identifier_quote: None,
-                schema: Some("public".to_string()),
-                table_name: Some("user_roles".to_string()),
-                qualified_table_name: None,
-                columns: vec!["user_id".to_string()],
-                column_types: vec![Some("integer".to_string())],
-                column_extras: Vec::new(),
-                spatial_columns: Vec::new(),
-                spatial_values: Vec::new(),
-                rows: vec![vec![json!(1)]],
-                batch_size: Some(10),
-                preserve_original_language: false,
-            },
-            &["user_id".to_string()],
-        );
-
-        assert_eq!(
-            result.expect_err("excluding every column must fail instead of writing an empty export"),
-            "No insertable columns remain after excluding columns from the export."
-        );
-    }
-
-    #[test]
     fn build_export_sql_insert_honors_exclude_columns_from_payload() {
         let options: BuildExportSqlInsertOptions = serde_json::from_value(json!({
-            "databaseType": "postgres",
+            "databaseType": "mysql",
             "schema": "public",
             "tableName": "users",
             "columns": ["id", "name"],
@@ -7276,13 +4542,13 @@ mod tests {
 
         let sql = build_export_sql_insert(options).expect("build export sql insert");
 
-        assert_eq!(sql, "INSERT INTO \"public\".\"users\" (\"name\") VALUES ('Ada');");
+        assert_eq!(sql, "INSERT INTO `public`.`users` (`name`) VALUES ('Ada');");
     }
 
     #[test]
     fn standard_sql_insert_uses_ansi_identifiers_and_portable_scalar_literals() {
         let options: BuildExportSqlInsertOptions = serde_json::from_value(json!({
-            "databaseType": "sqlserver",
+            "databaseType": "mysql",
             "identifierQuote": "[",
             "insertDialect": "standard",
             "schema": "sales\"ops",
@@ -7308,24 +4574,6 @@ mod tests {
         );
         assert!(!sql.contains("IDENTITY_INSERT"));
         assert!(!sql.contains("N'"));
-    }
-
-    #[test]
-    fn standard_sql_insert_keeps_requested_batch_mode_for_oracle_sources() {
-        let options: BuildExportSqlInsertOptions = serde_json::from_value(json!({
-            "databaseType": "oracle",
-            "insertDialect": "standard",
-            "schema": "APP",
-            "tableName": "USERS",
-            "columns": ["ID"],
-            "rows": [[1], [2]],
-            "batchSize": 10
-        }))
-        .expect("deserialize Standard SQL INSERT payload");
-
-        let sql = build_export_sql_insert(options).expect("build Standard SQL INSERT");
-
-        assert_eq!(sql, "INSERT INTO \"APP\".\"USERS\" (\"ID\") VALUES\n(1),\n(2);");
     }
 
     #[test]
@@ -7426,32 +4674,6 @@ mod tests {
     }
 
     #[test]
-    fn database_row_writer_forwards_the_standard_insert_dialect() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("events.sql");
-        let mut file = std::fs::File::create(&path).unwrap();
-
-        write_database_export_rows(
-            &mut file,
-            &[vec![json!(true), json!(r"C:\exports\O'Hara")]],
-            &["enabled".to_string(), "path".to_string()],
-            &[Some("bit".to_string()), Some("nvarchar(255)".to_string())],
-            &[None, None],
-            "event]log",
-            "dbo",
-            &DatabaseType::SqlServer,
-            SqlInsertDialect::Standard,
-        )
-        .unwrap();
-        drop(file);
-
-        assert_eq!(
-            std::fs::read_to_string(path).unwrap(),
-            "INSERT INTO \"dbo\".\"event]log\" (\"enabled\", \"path\") VALUES (TRUE, 'C:\\exports\\O''Hara');\n\n"
-        );
-    }
-
-    #[test]
     fn database_row_writer_supports_one_insert_statement_per_row() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("users.sql");
@@ -7477,99 +4699,6 @@ mod tests {
             std::fs::read_to_string(path).unwrap(),
             "INSERT INTO `users` (`id`, `name`) VALUES (1, 'Ada');\n\nINSERT INTO `users` (`id`, `name`) VALUES (2, 'Linus');\n\n"
         );
-    }
-
-    #[test]
-    fn database_row_writer_omits_sqlserver_timestamp_columns_from_export_files() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("sync_state.sql");
-        let mut file = std::fs::File::create(&path).unwrap();
-
-        write_database_export_rows(
-            &mut file,
-            &[vec![json!(7), json!("0x00000000000007D1")]],
-            &["id".to_string(), "row_version".to_string()],
-            &[Some("int".to_string()), Some("timestamp".to_string())],
-            &[None, None],
-            "sync_state",
-            "dbo",
-            &DatabaseType::SqlServer,
-            SqlInsertDialect::Standard,
-        )
-        .unwrap();
-        drop(file);
-
-        assert_eq!(
-            std::fs::read_to_string(path).unwrap(),
-            "INSERT INTO \"dbo\".\"sync_state\" (\"id\") VALUES (7);\n\n"
-        );
-    }
-
-    #[test]
-    fn split_zip_export_writer_splits_across_insert_batches_into_valid_sql() {
-        let directory = tempfile::tempdir().unwrap();
-        let zip_path = directory.path().join("orders.zip");
-        let mut writer = crate::export_split_zip::SplitZipExportWriter::create(
-            &zip_path,
-            crate::export_split_zip::MIN_SPLIT_PART_MAX_MB,
-            "orders",
-            "sql",
-        )
-        .unwrap();
-
-        // Each call is one full INSERT batch statement, exactly like the real
-        // write_database_export_rows call sites -- the writer must only cut
-        // between these calls, never inside one.
-        let long_value = "x".repeat(200_000);
-        for row_index in 0..20 {
-            write_database_export_rows(
-                &mut writer,
-                &[vec![json!(row_index), json!(long_value.clone())]],
-                &["id".to_string(), "payload".to_string()],
-                &[Some("bigint".to_string()), Some("text".to_string())],
-                &[None, None],
-                "orders",
-                "shop",
-                &DatabaseType::Postgres,
-                SqlInsertDialect::Source,
-            )
-            .unwrap();
-        }
-        writer.finish("orders.sql").unwrap();
-
-        let file = std::fs::File::open(&zip_path).unwrap();
-        let mut archive = zip::ZipArchive::new(file).unwrap();
-        let mut sql_parts = Vec::new();
-        for index in 0..archive.len() {
-            let mut entry = archive.by_index(index).unwrap();
-            if !entry.name().ends_with(".sql") {
-                continue;
-            }
-            let mut contents = String::new();
-            entry.read_to_string(&mut contents).unwrap();
-            sql_parts.push((entry.name().to_string(), contents));
-        }
-        sql_parts.sort_by(|a, b| a.0.cmp(&b.0));
-
-        assert!(
-            sql_parts.len() > 1,
-            "expected the large export to be split into multiple parts, got {}",
-            sql_parts.len()
-        );
-        for (name, contents) in &sql_parts {
-            assert!(!contents.is_empty(), "{name} must not be empty");
-            // Every non-blank line must be a syntactically complete INSERT
-            // statement -- proof that no cut landed inside one.
-            for line in contents.lines().filter(|line| !line.trim().is_empty()) {
-                assert!(
-                    line.trim_start().starts_with("INSERT INTO") && line.trim_end().ends_with(';'),
-                    "{name} has a malformed line from a mid-statement cut: {line}"
-                );
-            }
-        }
-        // Reassembling every part in order must reproduce all 20 rows.
-        let combined: String = sql_parts.iter().map(|(_, contents)| contents.as_str()).collect();
-        assert_eq!(combined.matches("INSERT INTO").count(), 20);
     }
 
     #[test]
@@ -7642,177 +4771,6 @@ mod tests {
     }
 
     #[test]
-    fn all_schemas_combine_keeps_split_part_boundaries_statement_safe() {
-        // Mirror of the per-schema temporary files that
-        // `export_postgres_all_schemas_sql_core` combines: whole SQL
-        // statements, one per line, each newline-terminated.
-        let directory = tempfile::tempdir().unwrap();
-        let schema_path = directory.path().join("schema-0.sql");
-        let long_value = "x".repeat(200_000);
-        let mut schema_sql = String::new();
-        for row_index in 0..20 {
-            schema_sql.push_str(&format!("INSERT INTO orders VALUES ({row_index}, '{long_value}');\n"));
-        }
-        std::fs::write(&schema_path, &schema_sql).unwrap();
-
-        let zip_path = directory.path().join("combined.zip");
-        let mut writer = crate::export_split_zip::SplitZipExportWriter::create(
-            &zip_path,
-            crate::export_split_zip::MIN_SPLIT_PART_MAX_MB,
-            "combined",
-            "sql",
-        )
-        .unwrap();
-        let mut source = std::io::BufReader::new(std::fs::File::open(&schema_path).unwrap());
-        combine_schema_sql_export(&mut source, &mut writer).unwrap();
-        writer.finish("combined.sql").unwrap();
-
-        let file = std::fs::File::open(&zip_path).unwrap();
-        let mut archive = zip::ZipArchive::new(file).unwrap();
-        let mut sql_parts = Vec::new();
-        for index in 0..archive.len() {
-            let mut entry = archive.by_index(index).unwrap();
-            if !entry.name().ends_with(".sql") {
-                continue;
-            }
-            let mut contents = String::new();
-            entry.read_to_string(&mut contents).unwrap();
-            sql_parts.push((entry.name().to_string(), contents));
-        }
-        sql_parts.sort_by(|a, b| a.0.cmp(&b.0));
-
-        assert!(
-            sql_parts.len() > 1,
-            "expected the combined export to be split into multiple parts, got {}",
-            sql_parts.len()
-        );
-        for (name, contents) in &sql_parts {
-            assert!(!contents.is_empty(), "{name} must not be empty");
-            // Every non-blank line must be a complete statement -- proof that
-            // the copy never cut inside one.
-            for line in contents.lines().filter(|line| !line.trim().is_empty()) {
-                assert!(
-                    line.trim_start().starts_with("INSERT INTO") && line.trim_end().ends_with(';'),
-                    "{name} has a malformed line from a mid-statement cut: {line:?}"
-                );
-            }
-        }
-        // Reassembling the parts in order must reproduce the temporary file
-        // byte for byte: the line-by-line copy adds, drops, and alters
-        // nothing, including the trailing newline.
-        let combined: String = sql_parts.iter().map(|(_, contents)| contents.as_str()).collect();
-        assert_eq!(combined, schema_sql);
-        assert_eq!(combined.matches("INSERT INTO").count(), 20);
-    }
-
-    #[test]
-    fn postgres_identity_export_preserves_explicit_values_in_each_batch() {
-        for (extra, overrides) in [
-            (Some("generated always as identity (start with 1 increment by 1)"), true),
-            (Some(" GENERATED\tALWAYS  AS IDENTITY "), true),
-            (Some("generated by default as identity"), false),
-            (Some("serial"), false),
-            (None, false),
-        ] {
-            for dialect in ["source", "standard"] {
-                for (batch_size, tuples) in [
-                    (1, vec!["(1, 'Ada');", "(2, 'Grace');", "(3, 'Hopper');"]),
-                    (2, vec!["(1, 'Ada'),\n(2, 'Grace');", "(3, 'Hopper');"]),
-                    (10, vec!["(1, 'Ada'),\n(2, 'Grace'),\n(3, 'Hopper');"]),
-                ] {
-                    let options = serde_json::from_value(json!({
-                        "databaseType": "postgres", "schema": "public", "tableName": "users",
-                        "columns": ["id", "name"], "columnTypes": ["integer", "text"],
-                        "columnExtras": [extra, null], "rows": [[1, "Ada"], [2, "Grace"], [3, "Hopper"]],
-                        "batchSize": batch_size, "insertDialect": dialect
-                    }))
-                    .unwrap();
-                    let sql = build_export_sql_insert(options).unwrap();
-                    let overriding = if overrides { " OVERRIDING SYSTEM VALUE" } else { "" };
-                    let head = format!("INSERT INTO \"public\".\"users\" (\"id\", \"name\"){overriding} VALUES");
-                    let expected = tuples
-                        .iter()
-                        .map(|tuple| format!("{head}{}{tuple}", if tuple.contains('\n') { "\n" } else { " " }))
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    assert_eq!(sql, expected, "extra={extra:?}, dialect={dialect}, batch={batch_size}");
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn postgres_identity_export_does_not_override_excluded_identity_columns() {
-        let options = serde_json::from_value(json!({
-            "databaseType": "postgres", "schema": "public", "tableName": "users",
-            "columns": ["id", "name"], "columnExtras": ["generated always as identity", null],
-            "rows": [[42, "Ada"]], "excludeColumns": ["ID"]
-        }))
-        .unwrap();
-        assert_eq!(
-            build_export_sql_insert(options).unwrap(),
-            "INSERT INTO \"public\".\"users\" (\"name\") VALUES ('Ada');"
-        );
-    }
-
-    #[test]
-    fn dameng_identity_export_inserts_enable_identity_insert() {
-        let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-            database_type: Some(DatabaseType::Dameng),
-            identifier_quote: None,
-            schema: Some("SYSDBA".to_string()),
-            table_name: Some("USERS".to_string()),
-            qualified_table_name: None,
-            columns: vec!["ID".to_string(), "NAME".to_string()],
-            column_types: vec![Some("INT".to_string()), Some("VARCHAR(20)".to_string())],
-            column_extras: vec![Some("identity".to_string()), None],
-            spatial_columns: Vec::new(),
-            spatial_values: Vec::new(),
-            rows: vec![vec![json!(1), json!("Ada")]],
-            batch_size: Some(10),
-            preserve_original_language: false,
-        })
-        .unwrap();
-
-        assert_eq!(
-            statements,
-            vec![
-                "SET IDENTITY_INSERT \"SYSDBA\".\"USERS\" ON;\nINSERT INTO \"SYSDBA\".\"USERS\" (\"ID\", \"NAME\") VALUES (1, 'Ada');\nSET IDENTITY_INSERT \"SYSDBA\".\"USERS\" OFF;"
-            ]
-        );
-    }
-
-    #[test]
-    fn sqlserver_identity_export_inserts_enable_identity_insert() {
-        // The SQL Server column metadata reports `identity(seed,increment)`;
-        // explicit values for such columns are rejected with error 544 unless
-        // the INSERT is wrapped in SET IDENTITY_INSERT.
-        let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-            database_type: Some(DatabaseType::SqlServer),
-            identifier_quote: None,
-            schema: Some("dbo".to_string()),
-            table_name: Some("events".to_string()),
-            qualified_table_name: None,
-            columns: vec!["id".to_string(), "name".to_string()],
-            column_types: vec![Some("int".to_string()), Some("nvarchar(50)".to_string())],
-            column_extras: vec![Some("identity(1,1)".to_string()), None],
-            spatial_columns: Vec::new(),
-            spatial_values: Vec::new(),
-            rows: vec![vec![json!(1), json!("Ada")]],
-            batch_size: Some(10),
-            preserve_original_language: false,
-        })
-        .unwrap();
-
-        assert_eq!(
-            statements,
-            vec![
-                "SET IDENTITY_INSERT [dbo].[events] ON;\nINSERT INTO [dbo].[events] ([id], [name]) VALUES (1, N'Ada');\nSET IDENTITY_INSERT [dbo].[events] OFF;"
-            ]
-        );
-    }
-
-    #[test]
     fn builds_database_sql_export_with_ddl_before_data() {
         let sql = build_database_sql_export(BuildDatabaseSqlExportOptions {
             database_name: "app".to_string(),
@@ -7861,50 +4819,6 @@ mod tests {
                 String::new(),
             ]
             .join("\n")
-        );
-    }
-
-    #[test]
-    fn opengauss_export_escapes_single_quotes_in_comment_ddl() {
-        let ddl = concat!(
-            "CREATE TABLE \"public\".\"dbx_issue_comment\" (\"flag\" varchar(8));\n",
-            "COMMENT ON COLUMN \"public\".\"dbx_issue_comment\".\"flag\" IS '逻辑删除标志：'0'-未删除，'1'-已删除';"
-        );
-
-        assert_eq!(
-            format_export_table_ddl(ddl, Some(DatabaseType::OpenGauss), DdlNormalizeOptions::default()),
-            concat!(
-                "CREATE TABLE \"public\".\"dbx_issue_comment\" (\"flag\" varchar(8));\n",
-                "COMMENT ON COLUMN \"public\".\"dbx_issue_comment\".\"flag\" IS '逻辑删除标志：''0''-未删除，''1''-已删除';"
-            )
-        );
-    }
-
-    #[test]
-    fn opengauss_export_leaves_other_literals_and_valid_comments_unchanged() {
-        let ddl = concat!(
-            "CREATE TABLE \"public\".\"notes\" (\"body\" text DEFAULT 'O''Hara');\n",
-            "COMMENT ON COLUMN \"public\".\"notes\".\"body\" IS 'owner''s note';"
-        );
-
-        assert_eq!(format_export_table_ddl(ddl, Some(DatabaseType::OpenGauss), DdlNormalizeOptions::default()), ddl);
-    }
-
-    #[test]
-    fn table_ddl_export_has_one_statement_terminator() {
-        let ddl = "CREATE TABLE `users` (`id` int);;\n";
-
-        assert_eq!(
-            format_export_table_ddl(ddl, Some(DatabaseType::Mysql), DdlNormalizeOptions::default()),
-            "CREATE TABLE `users` (`id` int);"
-        );
-        assert_eq!(
-            format_export_table_ddl(
-                "CREATE TABLE users (id int)",
-                Some(DatabaseType::Postgres),
-                DdlNormalizeOptions::default(),
-            ),
-            "CREATE TABLE users (id int);"
         );
     }
 
@@ -7964,116 +4878,6 @@ mod tests {
         let normalized = normalize_export_table_ddl(ddl, Some(DatabaseType::Mysql), DdlNormalizeOptions::default());
 
         assert_eq!(normalized, "CREATE TABLE `wide_table` (`payload` varchar(4096)) engine=InnoDB ROW_FORMAT=DYNAMIC");
-    }
-
-    #[test]
-    fn preserves_non_legacy_or_non_mysql_row_formats() {
-        let mysql_ddl = "CREATE TABLE `ok` (`payload` text) ENGINE=InnoDB ROW_FORMAT=COMPRESSED";
-        let postgres_ddl = "CREATE TABLE users (payload text) ROW_FORMAT=COMPACT";
-
-        assert_eq!(
-            normalize_export_table_ddl(mysql_ddl, Some(DatabaseType::Mysql), DdlNormalizeOptions::default()),
-            mysql_ddl
-        );
-        assert_eq!(
-            normalize_export_table_ddl(postgres_ddl, Some(DatabaseType::Postgres), DdlNormalizeOptions::default()),
-            postgres_ddl
-        );
-    }
-
-    #[test]
-    fn postgres_export_sequence_sql_tiers_skip_pg10_only_catalogs() {
-        // PostgreSQL 10 added `pg_sequence`; PostgreSQL 9.x rejects the whole
-        // query, which used to abort the structure export (#10079).
-        assert!(POSTGRES_EXPORT_SEQUENCES_SQL.contains("pg_sequence"));
-        assert!(!POSTGRES_EXPORT_SEQUENCES_COMPAT_SQL.contains("pg_sequence"));
-        assert!(!POSTGRES_EXPORT_SEQUENCES_COMPAT_SQL.contains("pg_sequence_last_value"));
-
-        // Both tiers must describe the same eleven columns in the same order so
-        // the row decoding below stays identical.
-        for sql in [POSTGRES_EXPORT_SEQUENCES_SQL, POSTGRES_EXPORT_SEQUENCES_COMPAT_SQL] {
-            for fragment in [
-                "SELECT c.relname",
-                "'bigint'",
-                "t.relname",
-                "a.attname",
-                "WHERE c.relkind = 'S' AND n.nspname = $1",
-                "ORDER BY c.relname",
-            ] {
-                assert!(sql.contains(fragment), "missing {fragment} in {sql}");
-            }
-        }
-        // The compat tier substitutes literals for the pg_sequence columns.
-        for fallback in ["'1'", "'9223372036854775807'", "false"] {
-            assert!(POSTGRES_EXPORT_SEQUENCES_COMPAT_SQL.contains(fallback));
-        }
-    }
-
-    fn postgres_sequence(name: &str) -> PostgresExportSequence {
-        PostgresExportSequence {
-            name: name.to_string(),
-            data_type: "integer".to_string(),
-            start_value: "1".to_string(),
-            min_value: "1".to_string(),
-            max_value: "2147483647".to_string(),
-            increment: "1".to_string(),
-            cycle: false,
-            cache_value: "1".to_string(),
-            last_value: Some("42".to_string()),
-            owner_table: Some("permissions".to_string()),
-            owner_column: Some("id".to_string()),
-            created_by_table: false,
-        }
-    }
-
-    #[test]
-    fn postgres_sequence_create_ddl_is_importable_before_table_ddl() {
-        let ddl = generate_postgres_sequence_create_ddl(&postgres_sequence("permissions_id_seq"), "public");
-
-        assert_eq!(
-            ddl,
-            [
-                "CREATE SEQUENCE IF NOT EXISTS \"public\".\"permissions_id_seq\"",
-                "  AS integer",
-                "  START WITH 1",
-                "  INCREMENT BY 1",
-                "  MINVALUE 1",
-                "  MAXVALUE 2147483647",
-                "  CACHE 1",
-                "  NO CYCLE",
-            ]
-            .join("\n")
-        );
-    }
-
-    #[test]
-    fn postgres_sequence_owner_and_setval_sql_are_qualified() {
-        let sequence = postgres_sequence("permissions_id_seq");
-
-        assert_eq!(
-            generate_postgres_sequence_post_table_ddl(&sequence, "public").as_deref(),
-            Some("ALTER SEQUENCE \"public\".\"permissions_id_seq\" OWNED BY \"public\".\"permissions\".\"id\"")
-        );
-        assert_eq!(
-            generate_postgres_sequence_setval_sql(&sequence, "public").as_deref(),
-            Some(
-                "SELECT setval('\"public\".\"permissions_id_seq\"', GREATEST(COALESCE(MAX(\"id\"), 42), 42), true) FROM \"public\".\"permissions\""
-            )
-        );
-    }
-
-    #[test]
-    fn postgres_table_generated_sequence_restores_the_table_bound_sequence() {
-        let mut sequence = postgres_sequence("renamed_identity_sequence");
-        sequence.created_by_table = true;
-        let ddl = generate_postgres_sequence_post_table_ddl(&sequence, "public").unwrap();
-        assert!(ddl.starts_with("DO "));
-        assert!(ddl.contains("ALTER SEQUENCE "));
-        assert!(!ddl.contains("OWNED BY"));
-        assert_eq!(
-            generate_postgres_sequence_setval_sql(&sequence, "public").as_deref(),
-            Some("SELECT setval(pg_get_serial_sequence('\"public\".\"permissions\"', 'id'), GREATEST(COALESCE(MAX(\"id\"), 42), 42), true) FROM \"public\".\"permissions\"")
-        );
     }
 
     #[test]
@@ -8150,12 +4954,7 @@ mod tests {
 
     async fn test_app_state(scratch_dir: &std::path::Path) -> AppState {
         let storage = crate::persistence::test_storage::open(&scratch_dir.join("storage.db")).await.unwrap();
-        AppState::new_with_plugin_and_agent_dir_and_app_version(
-            storage,
-            scratch_dir.join("plugins"),
-            scratch_dir.join("agents"),
-            env!("CARGO_PKG_VERSION"),
-        )
+        AppState::new_with_plugin_dir_and_app_version(storage, scratch_dir.join("plugins"), env!("CARGO_PKG_VERSION"))
     }
 
     // Regression tests for #6327: create_dir_all on every export run is unsafe
@@ -8202,41 +5001,6 @@ mod tests {
         let result = ensure_export_destination_dir(&state, &destination).await;
 
         assert!(result.is_err(), "a destination that existed before should not be silently recreated");
-        assert!(!destination.exists(), "the backup directory must not be resurrected on the wrong filesystem");
-
-        let _ = std::fs::remove_dir_all(&scratch);
-    }
-
-    // Regression test for review feedback on #6327: `ensure_export_destination_dir`
-    // only remembered a destination *after* a successful export, so a mount
-    // that was present when a schedule was configured but vanished before its
-    // very first run looked identical to a brand-new local folder (no
-    // recorded state either way) and got silently recreated on the local
-    // disk. `record_export_destination_identity` closes that gap by letting
-    // the schedule-configuration flow record the destination eagerly.
-    #[tokio::test]
-    async fn record_export_destination_identity_protects_a_mount_that_vanishes_before_its_first_run() {
-        let scratch = std::env::temp_dir().join(format!("dbx-export-dest-eager-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&scratch).unwrap();
-        let state = test_app_state(&scratch).await;
-
-        // Simulates the user picking an already-mounted external/network
-        // drive in the schedule editor and saving the schedule -- the
-        // directory exists at configuration time, but no export has run yet.
-        let destination = scratch.join("mounted-drive").join("mydb");
-        std::fs::create_dir_all(&destination).unwrap();
-        record_export_destination_identity(&state, &destination)
-            .await
-            .expect("configuring the schedule should succeed");
-
-        // The mount disappears before the scheduler ever runs this schedule
-        // for the first time.
-        std::fs::remove_dir_all(scratch.join("mounted-drive")).unwrap();
-        assert!(!destination.exists());
-
-        let result = ensure_export_destination_dir(&state, &destination).await;
-
-        assert!(result.is_err(), "a mount that was recorded at configuration time must not be silently recreated");
         assert!(!destination.exists(), "the backup directory must not be resurrected on the wrong filesystem");
 
         let _ = std::fs::remove_dir_all(&scratch);
@@ -8325,31 +5089,6 @@ mod tests {
 
         assert!(error.contains("different filesystem"));
         let _ = std::fs::remove_dir_all(&scratch);
-    }
-
-    // Regression test for review feedback on #6327: the directory identity
-    // check and the later `File::create` are separate operations, so the
-    // mount can disappear and be replaced by something else at the same path
-    // in between. `export_destination_identity_mismatch` is the comparison
-    // `export_database_sql_core` runs against the handle it actually opened;
-    // exercised directly here since reproducing a real cross-filesystem swap
-    // mid-write is not something a portable unit test can simulate.
-    #[test]
-    fn export_destination_identity_mismatch_detects_a_changed_device() {
-        let device_one = super::ExportDestinationIdentity::Device(1);
-        let same_device = super::ExportDestinationIdentity::Device(1);
-        let device_two = super::ExportDestinationIdentity::Device(2);
-        assert!(export_destination_identity_mismatch(Some(&device_one), Some(&device_two)));
-        assert!(!export_destination_identity_mismatch(Some(&device_one), Some(&same_device)));
-        assert!(
-            !export_destination_identity_mismatch(None, Some(&device_two)),
-            "an unknown expected device has nothing to compare against"
-        );
-        assert!(
-            export_destination_identity_mismatch(Some(&device_one), None),
-            "an opened file with unknown identity must not bypass a known expected device"
-        );
-        assert!(!export_destination_identity_mismatch(None, None));
     }
 
     #[test]
@@ -8473,26 +5212,5 @@ mod tests {
         assert_eq!(dir_dev, file_dev, "a file and its parent directory must resolve to the same volume");
 
         let _ = std::fs::remove_dir_all(&scratch);
-    }
-
-    #[test]
-    fn kingbase_mysql_compat_export_insert_uses_backtick_identifiers() {
-        let statements = build_export_insert_statements(BuildExportInsertStatementsOptions {
-            database_type: Some(DatabaseType::Kingbase),
-            identifier_quote: Some("`".to_string()),
-            schema: Some("audit-schema".to_string()),
-            table_name: Some("events".to_string()),
-            qualified_table_name: None,
-            columns: vec!["id".to_string(), "event_type".to_string()],
-            column_types: vec![None, None],
-            column_extras: vec![None, None],
-            spatial_columns: Vec::new(),
-            spatial_values: Vec::new(),
-            rows: vec![vec![json!(1), json!("login")]],
-            batch_size: Some(100),
-            preserve_original_language: false,
-        })
-        .unwrap();
-        assert_eq!(statements, vec!["INSERT INTO `audit-schema`.`events` (`id`, `event_type`) VALUES (1, 'login');"]);
     }
 }

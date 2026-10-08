@@ -192,24 +192,13 @@ pub async fn export_html(Json(request): Json<DocsExportRequest>) -> Result<Json<
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use dbx_core::models::connection::{
-        default_connect_timeout_secs, default_idle_timeout_secs, default_keepalive_interval_secs,
-        default_query_timeout_secs, DatabaseType,
-    };
-    use std::ffi::OsStr;
-    use std::path::{Path, PathBuf};
-
-    /// Literal construction on purpose: `ConnectionConfig` deserializes through
-    /// snake_case `ConnectionConfigData`, so a camelCase JSON fixture would
-    /// fail with `missing field db_type` instead of exercising the notes logic.
-    fn postgres_config(id: &str, docs_notes_path: Option<&str>) -> ConnectionConfig {
+    fn mysql_config(id: &str, docs_notes_path: Option<&str>) -> ConnectionConfig {
         ConnectionConfig {
             docs_notes_path: docs_notes_path.map(str::to_string),
             id: id.to_string(),
             name: "Postgres".to_string(),
             note: String::new(),
-            db_type: DatabaseType::Postgres,
+            db_type: DatabaseType::Mysql,
             driver_profile: None,
             driver_label: None,
             url_params: None,
@@ -274,6 +263,14 @@ mod tests {
         }
     }
 
+    use super::*;
+    use dbx_core::models::connection::{
+        default_connect_timeout_secs, default_idle_timeout_secs, default_keepalive_interval_secs,
+        default_query_timeout_secs, DatabaseType,
+    };
+    use std::ffi::OsStr;
+    use std::path::{Path, PathBuf};
+
     async fn test_web_state(notes_roots: Vec<PathBuf>) -> (Arc<WebState>, tempfile::TempDir) {
         let directory = tempfile::tempdir().unwrap();
         let storage =
@@ -292,19 +289,19 @@ mod tests {
         let data_dir = state.data_dir.clone();
 
         // 未配置 docsNotesPath 时使用默认的 data_dir/docs-notes/<id>.json。
-        let config = postgres_config("conn-1", None);
+        let config = mysql_config("conn-1", None);
         let path = notes_path_for(&state, &config).unwrap();
         assert_eq!(path, data_dir.join("docs-notes").join("conn-1.json"));
 
         // 指向 docs-notes 内部的相对路径可用（仓库笔记工作流的受控形态）。
-        let config = postgres_config("conn-1", Some("repo/notes.json"));
+        let config = mysql_config("conn-1", Some("repo/notes.json"));
         let path = notes_path_for(&state, &config).unwrap();
         assert_eq!(path, data_dir.join("docs-notes").join("repo").join("notes.json"));
 
         // ../ 逃逸与 default root 之外的绝对路径都拒绝：settings 写入不得变成任意文件覆盖。
-        let escaping = postgres_config("conn-1", Some("../escape.json"));
+        let escaping = mysql_config("conn-1", Some("../escape.json"));
         assert!(notes_path_for(&state, &escaping).is_err());
-        let absolute_outside = postgres_config("conn-1", Some(data_dir.join("escape.json").to_str().unwrap()));
+        let absolute_outside = mysql_config("conn-1", Some(data_dir.join("escape.json").to_str().unwrap()));
         assert!(notes_path_for(&state, &absolute_outside).is_err());
     }
 
@@ -315,21 +312,21 @@ mod tests {
         let data_dir = state.data_dir.clone();
 
         // allowlist 之外的绝对路径仍拒绝。
-        let outside = postgres_config("conn-1", Some(data_dir.join("escape.json").to_str().unwrap()));
+        let outside = mysql_config("conn-1", Some(data_dir.join("escape.json").to_str().unwrap()));
         assert!(notes_path_for(&state, &outside).is_err());
 
         // allowlist 之内的绝对路径放行（solo 部署把笔记指到仓库）。
         let inside =
-            postgres_config("conn-1", Some(repo_root.path().join("project").join("notes.json").to_str().unwrap()));
+            mysql_config("conn-1", Some(repo_root.path().join("project").join("notes.json").to_str().unwrap()));
         let path = notes_path_for(&state, &inside).unwrap();
         assert_eq!(path, repo_root.path().join("project").join("notes.json"));
 
         // root 本身也放行。
-        let at_root = postgres_config("conn-1", Some(repo_root.path().to_str().unwrap()));
+        let at_root = mysql_config("conn-1", Some(repo_root.path().to_str().unwrap()));
         assert_eq!(notes_path_for(&state, &at_root).unwrap(), repo_root.path());
 
         // suffix 里的 `..` 爬出 root 仍拒绝。
-        let climbing = postgres_config(
+        let climbing = mysql_config(
             "conn-1",
             Some(repo_root.path().join("project").join("..").join("escape.json").to_str().unwrap()),
         );

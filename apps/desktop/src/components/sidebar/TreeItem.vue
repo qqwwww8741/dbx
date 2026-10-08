@@ -1,53 +1,14 @@
 <script setup lang="ts">
 import { ref, computed, inject, shallowRef, watch, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
-import {
-  Database,
-  Table,
-  Columns3,
-  Eye,
-  ChevronRight,
-  ChevronDown,
-  Loader2,
-  FolderOpen,
-  FolderClosed,
-  TableProperties,
-  Key,
-  Link,
-  Link2,
-  Zap,
-  Clock,
-  ListTree,
-  FileCode,
-  Network,
-  Server,
-  Pin,
-  Search,
-  Plus,
-  ScrollText,
-  Braces,
-  Package,
-  Check,
-  UsersRound,
-  CalendarClock,
-  Gauge,
-  ShieldCheck,
-  Archive,
-  Square,
-  Minus,
-  X,
-  CircleX,
-  Ban,
-  RefreshCw,
-} from "@lucide/vue";
-import OracleDatabaseLinksDialog from "@/components/objects/OracleDatabaseLinksDialog.vue";
-const showDatabaseLinks = ref(false);
+import { Database, Table, Columns3, Eye, ChevronRight, ChevronDown, Loader2, FolderOpen, FolderClosed, TableProperties, Key, Link, Link2, Zap, Clock, ListTree, FileCode, Pin, Search, Plus, ScrollText, Braces, Package, Check, UsersRound, Square, Minus, X, CircleX, Ban, RefreshCw } from "@lucide/vue";
+
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useQueryStore } from "@/stores/queryStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useToast } from "@/composables/useToast";
 import DatabaseIcon from "@/components/icons/DatabaseIcon.vue";
-import PluginIcon from "@/components/plugins/PluginIcon.vue";
+
 import ConnectionErrorIndicator from "@/components/connection/ConnectionErrorIndicator.vue";
 import ReadOnlySessionControl from "@/components/connection/ReadOnlySessionControl.vue";
 import ProductionContextBadge from "@/components/common/ProductionContextBadge.vue";
@@ -71,7 +32,7 @@ import {
 import { AI_ASSISTANT_TABLE_DROP_ROOT_SELECTOR } from "@/lib/ai/aiTableReferenceDrop";
 import { beginTableReferenceDragFeedback, isOverSqlEditorTarget, type TableReferenceDragFeedback } from "@/lib/editor/tableReferenceDragFeedback";
 import { formatSidebarObjectStorage } from "@/lib/sidebar/sidebarDatabaseStorage";
-import { effectiveRedisDatabaseIndex } from "@/lib/redis/redisDatabaseIndex";
+
 import { dataTabOpenModeFromTreeClick } from "@/lib/sidebar/dataTabOpenPolicy";
 import { effectiveDatabaseTypeForConnection } from "@/lib/database/jdbcDialect";
 import { isTableVGroupGroupableRowType, selectedTableVGroupMoveTargets, tableVGroupIdFromNodeId } from "@/lib/table/tableVGroup";
@@ -80,7 +41,7 @@ import { resolveTableVGroupDropTarget, setTableVGroupDropTargetNodeId, tableVGro
 import { connectionDisplayUrlScheme } from "@/lib/connection/connectionPresentation";
 import { redactConnectionStringSecrets } from "@/lib/connection/connectionStringRedaction";
 import { isFocusSearchShortcut } from "@/lib/editor/keyboardShortcuts";
-import { encodeSpannerResourcePath } from "@/lib/connection/spannerResourcePath";
+
 import { hexToRgba } from "@/lib/common/color";
 import { sidebarDisplayTableName } from "@/lib/sidebar/sidebarTableNameDisplay";
 import { shouldMeasureSidebarLabelOverflow } from "@/lib/sidebar/sidebarLabelTooltip";
@@ -100,9 +61,7 @@ import { focusSidebarRenameInput } from "@/lib/sidebar/sidebarRenameFocus";
 import { ensureSqlExtension, stripSqlExtension } from "@/lib/savedSql/savedSqlFileName";
 import { savedSqlErrorMessage } from "@/lib/savedSql/savedSqlErrors";
 import { useSavedSqlStore } from "@/stores/savedSqlStore";
-import { elasticsearchIndexAliasLabel } from "@/lib/sidebar/elasticsearchIndexActions";
-import { isXuguPublicSynonymTreeNode, isXuguSchedulerJobTreeNode, xuguSchemaDisplayName } from "@/lib/sidebar/xuguPublicSynonyms";
-import { xuguDatafileDetailRows, xuguTablespaceDetailRows } from "@/lib/sidebar/xuguTablespaces";
+
 // --- Drag and Drop ---
 import { useDragSort } from "@/composables/useDragSort";
 import { sidebarTreeRuntimeKey } from "@/lib/sidebar/sidebarTreeRuntime";
@@ -231,7 +190,7 @@ const isDisabledTrigger = computed(() => activeNode.value.type === "trigger" && 
 const showProductionBadge = computed(() => {
   const connectionId = activeNode.value.connectionId;
   const context = productionContextForDatabase(connectionId ? connectionStore.getConfig(connectionId) : undefined, activeNode.value.database);
-  return context.active && ["connection", "database", "redis-db", "mongo-db"].includes(activeNode.value.type);
+  return context.active && ["connection", "database"].includes(activeNode.value.type);
 });
 
 function currentDatabaseType(): DatabaseType | undefined {
@@ -252,22 +211,15 @@ function getIconInfo(node: TreeNode): { icon: any; colorClass: string } | null {
       return { icon: node.isExpanded ? FolderOpen : FolderClosed, colorClass: "text-emerald-500" };
     case "database":
       return { icon: Database, colorClass: "text-yellow-500" };
-    case "tablespace":
-      return { icon: Database, colorClass: "text-orange-500" };
+
     case "datafile":
       return { icon: FileCode, colorClass: "text-slate-500" };
-    case "linked-server-root":
-      return { icon: Network, colorClass: "text-blue-500" };
-    case "linked-server":
-      return { icon: Server, colorClass: "text-blue-400" };
-    case "linked-server-catalog":
-      return { icon: Database, colorClass: "text-yellow-500" };
-    case "linked-server-schema":
-      return { icon: FolderOpen, colorClass: "text-sky-400" };
+
     case "schema": {
-      const databaseType = node.connectionId ? effectiveDatabaseTypeForConnection(connectionStore.getConfig(node.connectionId)) : undefined;
-      if (isXuguPublicSynonymTreeNode(databaseType, node.type, node.schema)) return { icon: Link2, colorClass: "text-sky-500" };
-      if (isXuguSchedulerJobTreeNode(databaseType, node.type, node.schema)) return { icon: CalendarClock, colorClass: "text-primary" };
+      {
+      }
+      {
+      }
       return { icon: FolderOpen, colorClass: "text-amber-500" };
     }
     case "table":
@@ -309,14 +261,7 @@ function getIconInfo(node: TreeNode): { icon: any; colorClass: string } | null {
       return { icon: TableProperties, colorClass: "text-primary" };
     case "user-admin":
       return { icon: UsersRound, colorClass: "text-primary" };
-    case "xugu-user-admin":
-      return { icon: ShieldCheck, colorClass: "text-primary" };
-    case "dameng-users":
-      return { icon: UsersRound, colorClass: "text-primary" };
-    case "dameng-roles":
-      return { icon: ShieldCheck, colorClass: "text-primary" };
-    case "dameng-job-admin":
-      return { icon: CalendarClock, colorClass: "text-primary" };
+
     case "saved-sql-root":
       return { icon: node.isExpanded ? FolderOpen : FolderClosed, colorClass: "text-blue-500" };
     case "saved-sql-folder":
@@ -331,50 +276,16 @@ function getIconInfo(node: TreeNode): { icon: any; colorClass: string } | null {
       return { icon: Zap, colorClass: "text-orange-300" };
     case "event":
       return { icon: Clock, colorClass: "text-orange-400" };
-    case "redis-db":
-      return { icon: Database, colorClass: "text-red-400" };
-    case "mq-tenant":
-      return { icon: FolderOpen, colorClass: "text-sky-400" };
-    case "nacos-namespace":
-      return { icon: FolderOpen, colorClass: "text-sky-500" };
-    case "nacos-access-control":
-      return { icon: ShieldCheck, colorClass: "text-sky-500" };
-    case "etcd-root":
-      return { icon: Database, colorClass: "text-sky-500" };
-    case "etcd-dashboard":
-      return { icon: Gauge, colorClass: "text-sky-500" };
-    case "etcd-access-control":
-      return { icon: ShieldCheck, colorClass: "text-sky-500" };
-    case "zookeeper-root":
-    case "consul-root":
-      return { icon: Database, colorClass: "text-blue-500" };
-    case "consul-overview":
-      return { icon: Gauge, colorClass: "text-blue-500" };
-    case "mongo-db":
-      return { icon: Database, colorClass: "text-yellow-500" };
-    case "mongo-gridfs":
-    case "mongo-buckets":
-      return { icon: Archive, colorClass: "text-cyan-500" };
-    case "mongo-bucket":
-      return { icon: Archive, colorClass: "text-cyan-400" };
-    case "mongo-collection":
-      return { icon: Table, colorClass: "text-green-400" };
+
     case "dynamodb-table":
       return { icon: Table, colorClass: "text-amber-500" };
-    case "vector-collection":
-      return { icon: TableProperties, colorClass: "text-cyan-400" };
-    case "elasticsearch-index":
-      return { icon: Table, colorClass: "text-emerald-400" };
-    case "meilisearch-system":
-      return { icon: Gauge, colorClass: "text-emerald-500" };
+
     case "procedure":
       return { icon: ScrollText, colorClass: "text-blue-500" };
     case "function":
       return { icon: Braces, colorClass: "text-amber-500" };
     case "sequence":
       return { icon: ListTree, colorClass: "text-emerald-500" };
-    case "oracle-db-links":
-    case "oracle-db-link":
     case "synonym":
       return { icon: Link2, colorClass: "text-sky-500" };
     case "job":
@@ -417,10 +328,7 @@ function getIconInfo(node: TreeNode): { icon: any; colorClass: string } | null {
       return { icon: Package, colorClass: "text-violet-500" };
     case "group-event-triggers":
       return { icon: Package, colorClass: "text-violet-500" };
-    case "group-tablespaces":
-      return { icon: Database, colorClass: "text-orange-500" };
-    case "group-datafiles":
-      return { icon: node.isExpanded ? FolderOpen : FolderClosed, colorClass: "text-slate-500" };
+
     case "extension":
       return { icon: Package, colorClass: "text-violet-400" };
     case "event-trigger":
@@ -441,18 +349,19 @@ function displayLabel(node: TreeNode): string {
   // Resolve them at render time as well, so an already-cached tree never
   // exposes that implementation detail after the feature is introduced.
   if (node.type === "schema" && node.connectionId) {
-    const databaseType = effectiveDatabaseTypeForConnection(connectionStore.getConfig(node.connectionId));
-    if (databaseType === "xugu") return xuguSchemaDisplayName(node.schema ?? node.label);
+    effectiveDatabaseTypeForConnection(connectionStore.getConfig(node.connectionId));
+    {
+    }
   }
   if (node.type === "load-more") return t(node.label);
   if (node.type === "object-browser") return t(node.label, { count: node.objectCount ?? 0 });
   // Use the canonical key for persisted trees created before this label was
   // internationalized; those nodes may still contain the old Chinese text.
-  if (node.type === "nacos-access-control") return t("nacos.accessControlSidebarLabel");
-  if (node.type === "user-admin" || node.type === "xugu-user-admin" || node.type === "dameng-users" || node.type === "dameng-roles" || node.type === "dameng-job-admin" || node.type === "meilisearch-system") return t(node.label);
-  if (node.type === "oracle-db-links" || node.type === "linked-server-root") return t(node.label);
+  {}
+  if (node.type === "user-admin") return t(node.label);
+  {}
   if (node.type === "saved-sql-root") return t(node.label);
-  if (node.type === "mqtt-topic" && node.id.endsWith(":mqtt-topic:__console__")) return t(node.label);
+  {}
   if (node.label === "tree.defaultDatabase") return t(node.label);
   return isGroupLabel(node) ? t(node.label) : node.label;
 }
@@ -461,13 +370,13 @@ function treeNodeSecondaryValue(node: TreeNode): string | undefined {
   if (node.type === "type" && node.customTypeKind) return t(`customType.kinds.${node.customTypeKind}`);
   if (node.type === "type-member") return (node.meta as CustomTypeTreeMemberMeta | undefined)?.displayValue;
   if (node.type === "datafile") return node.xuguDatafilePath;
-  if (node.type === "elasticsearch-index") return elasticsearchIndexAliasLabel(node);
+  {}
   return undefined;
 }
 
 function visibleLabel(node: TreeNode): string {
   const withValidity = (label: string) => (node.valid === false ? `${label} · INVALID` : label);
-  if (node.type === "table" || node.type === "view" || node.type === "materialized_view" || node.type === "mongo-collection" || node.type === "dynamodb-table" || node.type === "vector-collection" || node.type === "elasticsearch-index") {
+  if (node.type === "table" || node.type === "view" || node.type === "materialized_view" || node.type === "dynamodb-table") {
     return withValidity(sidebarDisplayTableName(node.label, settingsStore.editorSettings.sidebarHiddenTablePrefixes));
   }
   return withValidity(displayLabel(node));
@@ -499,26 +408,6 @@ function cleanTooltipValue(value: string | number | null | undefined): string {
   return String(value ?? "").trim();
 }
 
-function formatXuguStorageDetailValue(key: string, value: string): string {
-  if (key === "currentSize" || key === "maxSize" || key === "stepSize") {
-    const numeric = Number(value);
-    if (Number.isFinite(numeric)) {
-      if (key === "maxSize" && numeric === -1) return t("tree.xuguStorage.unlimited");
-      return `${numeric} MB`;
-    }
-  }
-  if (key === "mediaError") {
-    const normalized = value.toUpperCase();
-    if (["F", "FALSE", "0", "N"].includes(normalized)) return t("tree.xuguStorage.no");
-    if (["T", "TRUE", "1", "Y"].includes(normalized)) return t("tree.xuguStorage.yes");
-  }
-  return value;
-}
-
-function isLocalFileConnection(config: Pick<ConnectionConfig, "db_type" | "port">): boolean {
-  return config.db_type === "sqlite" || config.db_type === "duckdb" || config.db_type === "access" || (config.db_type === "h2" && config.port === 0);
-}
-
 function hostForDisplay(host: string): string {
   if (!host.includes(":") || host.startsWith("[") || host.includes("://") || host.includes(",")) return host;
   return `[${host}]`;
@@ -528,7 +417,7 @@ function hostForDisplay(host: string): string {
 // pasted into the field) resolve to the index the backend actually connects with.
 function tooltipDatabaseValue(config: ConnectionConfig): string {
   const database = cleanTooltipValue(config.database);
-  return config.db_type === "redis" && database ? effectiveRedisDatabaseIndex(database) : database;
+  return database;
 }
 
 function connectionTooltipUrl(config: ConnectionConfig): string {
@@ -539,17 +428,14 @@ function connectionTooltipUrl(config: ConnectionConfig): string {
   if (!host) return "";
   if (host.includes("://")) return redactConnectionStringSecrets(host);
 
-  if (isLocalFileConnection(config)) {
-    if (config.db_type === "access") return `jdbc:ucanaccess://${host}`;
-    return `${config.db_type}://${host}`;
-  }
+  {}
 
   const scheme = connectionDisplayUrlScheme(config);
   const port = Number(config.port) > 0 ? `:${config.port}` : "";
   const user = cleanTooltipValue(config.username);
   const userInfo = user ? `${encodeURIComponent(user)}@` : "";
   const database = tooltipDatabaseValue(config);
-  const encodedDatabase = config.db_type === "spanner" ? encodeSpannerResourcePath(database) : encodeURIComponent(database);
+  const encodedDatabase = encodeURIComponent(database);
   const path = database ? `/${encodedDatabase}` : "";
   const params = cleanTooltipValue(config.url_params);
   const query = params ? (params.startsWith("?") ? params : `?${params}`) : "";
@@ -561,7 +447,7 @@ const detailTooltip = computed(() => {
   if (node.type === "connection" && node.connectionId) {
     const config = connectionStore.getConfig(node.connectionId);
     if (!config) return null;
-    const hostLabel = isLocalFileConnection(config) ? t("connection.filePath") : t("connection.host");
+    const hostLabel = t("connection.host");
     const hostValue = cleanTooltipValue(config.host);
     const hostValues = hostValue.includes(",")
       ? hostValue
@@ -569,7 +455,7 @@ const detailTooltip = computed(() => {
           .map((h) => h.trim())
           .filter(Boolean)
       : [];
-    const visibleFilterSummary = connectionCanConfigureSidebarVisibleDatabases(config.db_type) || config.db_type === "nacos" ? connectionStore.getSidebarVisibleFilterSummary(node.connectionId) : null;
+    const visibleFilterSummary = connectionCanConfigureSidebarVisibleDatabases(config.db_type) ? connectionStore.getSidebarVisibleFilterSummary(node.connectionId) : null;
     const visibleFilterRow: DetailTooltipRow | null =
       visibleFilterSummary?.selected != null && visibleFilterSummary.total != null
         ? {
@@ -582,7 +468,7 @@ const detailTooltip = computed(() => {
     const rows: DetailTooltipRow[] = [
       { label: t("connection.name"), value: cleanTooltipValue(config.name) },
       { label: "URL", value: connectionTooltipUrl(config), multiline: true },
-      ...(hostValues.length > 0 ? [{ label: hostLabel, value: hostValues[0], values: hostValues } as DetailTooltipRow] : [{ label: hostLabel, value: hostValue, multiline: isLocalFileConnection(config) } as DetailTooltipRow]),
+      ...(hostValues.length > 0 ? [{ label: hostLabel, value: hostValues[0], values: hostValues } as DetailTooltipRow] : [{ label: hostLabel, value: hostValue, multiline: false } as DetailTooltipRow]),
       { label: "Port", value: Number(config.port) > 0 ? String(config.port) : "" },
       { label: t("connection.database"), value: tooltipDatabaseValue(config) },
       { label: t("connection.user"), value: cleanTooltipValue(config.username) },
@@ -593,50 +479,10 @@ const detailTooltip = computed(() => {
     ].filter((row) => row.value);
     return { rows };
   }
-  if (node.type === "trigger" && node.meta && node.connectionId && effectiveDatabaseTypeForConnection(connectionStore.getConfig(node.connectionId)) === "xugu") {
-    const trigger = node.meta as TriggerInfo;
-    const hasXuguDetails = trigger.level != null || trigger.condition != null || trigger.language != null || trigger.enabled != null || trigger.valid != null || trigger.created_at != null || trigger.comment != null;
-    if (!hasXuguDetails) return null;
-    const rows: DetailTooltipRow[] = [
-      { label: t("objects.name"), value: visibleLabel(node) },
-      { label: t("objects.triggerTiming"), value: cleanTooltipValue(trigger.timing) },
-      { label: t("objects.triggerEvent"), value: cleanTooltipValue(trigger.event) },
-      { label: t("objects.triggerLevel"), value: cleanTooltipValue(trigger.level) },
-      { label: t("objects.triggerStatus"), value: trigger.enabled == null ? "" : t(trigger.enabled ? "objects.enabled" : "objects.disabled") },
-      { label: t("objects.validity"), value: trigger.valid == null ? "" : t(trigger.valid ? "objects.valid" : "objects.invalid") },
-      { label: t("objects.triggerCondition"), value: cleanTooltipValue(trigger.condition), multiline: true },
-      { label: t("objects.triggerLanguage"), value: cleanTooltipValue(trigger.language) },
-      { label: t("objects.createdAt"), value: cleanTooltipValue(trigger.created_at) },
-      { label: t("objects.comment"), value: cleanTooltipValue(trigger.comment), multiline: true },
-    ].filter((row) => row.value);
-    return rows.length ? { rows } : null;
-  }
-  if (node.type === "tablespace" && node.xuguTablespace && node.connectionId && effectiveDatabaseTypeForConnection(connectionStore.getConfig(node.connectionId)) === "xugu") {
-    const rows: DetailTooltipRow[] = xuguTablespaceDetailRows(node.xuguTablespace).map((row) => ({
-      label: t(`tree.xuguStorage.${row.key}`),
-      value: formatXuguStorageDetailValue(row.key, row.value),
-      multiline: row.multiline,
-    }));
-    return rows.length ? { rows } : null;
-  }
-  if (node.type === "datafile" && node.xuguDatafile && node.connectionId && effectiveDatabaseTypeForConnection(connectionStore.getConfig(node.connectionId)) === "xugu") {
-    const rows: DetailTooltipRow[] = xuguDatafileDetailRows(node.xuguDatafile).map((row) => ({
-      label: t(`tree.xuguStorage.${row.key}`),
-      value: formatXuguStorageDetailValue(row.key, row.value),
-      multiline: row.multiline,
-    }));
-    return rows.length ? { rows } : null;
-  }
-  if (node.type === "elasticsearch-index") {
-    const aliases = elasticsearchIndexAliasLabel(node);
-    if (!aliases) return null;
-    return {
-      rows: [
-        { label: t("objects.name"), value: visibleLabel(node) },
-        { label: t("tree.elasticsearchAlias"), value: aliases },
-      ],
-    };
-  }
+  {}
+  {}
+  {}
+  {}
   const column = node.type === "column" ? (node.meta as ColumnInfo | undefined) : undefined;
   const comment = column && "comment" in column ? column.comment : node.comment;
   if ((!comment && !column) || !isSidebarCommentSupportedType(node.type)) return null;
@@ -844,19 +690,13 @@ const canExpand = computed(() => {
   return canTreeNodeShowExpander({
     type: activeNode.value.type,
     childCount: activeNode.value.children?.length ?? 0,
-    explicitContainer: activeNode.value.type === "oracle-db-links" || (activeNode.value.type === "package" && activeNode.value.children !== undefined) || activeNode.value.xuguTypeMembersExpandable === true,
+    explicitContainer: (activeNode.value.type === "package" && activeNode.value.children !== undefined) || activeNode.value.xuguTypeMembersExpandable === true,
   });
 });
 
 const isPinned = computed(() => activeNode.value.pinned || connectionStore.isTreeNodePinned(activeNode.value));
 
-const isNodeDefaultDatabase = computed(
-  () =>
-    (activeNode.value.type === "database" || activeNode.value.type === "redis-db" || activeNode.value.type === "mongo-db") &&
-    !!activeNode.value.connectionId &&
-    typeof activeNode.value.database === "string" &&
-    connectionStore.isDefaultDatabase(activeNode.value.connectionId, activeNode.value.database),
-);
+const isNodeDefaultDatabase = computed(() => activeNode.value.type === "database" && !!activeNode.value.connectionId && typeof activeNode.value.database === "string" && connectionStore.isDefaultDatabase(activeNode.value.connectionId, activeNode.value.database));
 function isNodeDefaultSchema(): boolean {
   return activeNode.value.type === "schema" && !!activeNode.value.connectionId && !!activeNode.value.schema && connectionStore.isDefaultSchema(activeNode.value.connectionId, activeNode.value.schema);
 }
@@ -988,11 +828,12 @@ function connectionIconType(connectionId?: string) {
   return config?.driver_profile || config?.db_type || "postgres";
 }
 
-const pluginConnectionIcon = computed(() => {
+computed(() => {
   if (activeNode.value.type !== "connection" || !activeNode.value.connectionId) return undefined;
-  const config = connectionStore.getConfig(activeNode.value.connectionId);
-  if (config?.db_type !== "plugin" || !config.plugin_id) return undefined;
-  return { pluginId: config.plugin_id, contributionId: config.plugin_connection_provider };
+  connectionStore.getConfig(activeNode.value.connectionId);
+  {
+    return undefined;
+  }
 });
 
 const connectionColor = computed(() => {
@@ -1545,27 +1386,17 @@ function onClick(event: MouseEvent) {
   selectSingleTreeNode(props.node);
   rowRef.value?.focus({ preventScroll: true });
   if (!shouldActivateTreeNodeOnSingleClick(props.node.type, settingsStore.editorSettings.sidebarActivation) && props.node.type !== "load-more") return;
-  if (props.node.type === "oracle-db-link") {
-    showDatabaseLinks.value = true;
-    return;
-  }
+  {}
   treeRuntime.handleRowClick(props.node, event.detail);
 }
 
 function onDoubleClick(event: MouseEvent) {
-  if (props.node.type === "oracle-db-link" || props.node.type === "oracle-db-links") {
-    showDatabaseLinks.value = true;
-    return;
-  }
+  {}
   treeRuntime.handleRowDoubleClick(props.node, event);
 }
 
 function onTreeItemContextMenu(event: MouseEvent) {
-  if (props.node.type === "oracle-db-link" || props.node.type === "oracle-db-links") {
-    event.preventDefault();
-    showDatabaseLinks.value = true;
-    return;
-  }
+  {}
   if (!connectionStore.selectedTreeNodeIds.includes(props.node.id)) selectSingleTreeNode(props.node);
   else connectionStore.selectedTreeNodeId = props.node.id;
   rowRef.value?.focus({ preventScroll: true });
@@ -1573,11 +1404,7 @@ function onTreeItemContextMenu(event: MouseEvent) {
 }
 
 function onKeydown(event: KeyboardEvent) {
-  if ((props.node.type === "oracle-db-link" || props.node.type === "oracle-db-links") && event.key === "Enter") {
-    event.preventDefault();
-    showDatabaseLinks.value = true;
-    return;
-  }
+  {}
   treeRuntime.handleRowKeydown(props.node, event);
 }
 </script>
@@ -1657,8 +1484,7 @@ function onKeydown(event: KeyboardEvent) {
         </template>
         <span v-else class="w-3.5 h-3.5 shrink-0" />
         <span class="relative flex h-3.5 w-3.5 shrink-0" :class="{ 'overflow-visible': node.valid === false || isDisabledTrigger }">
-          <PluginIcon v-if="node.type === 'connection' && pluginConnectionIcon" :plugin-id="pluginConnectionIcon.pluginId" :contribution-id="pluginConnectionIcon.contributionId" class="h-3.5 w-3.5 shrink-0" :class="connectionIconInactiveClass" />
-          <DatabaseIcon v-else-if="node.type === 'connection'" :db-type="connectionIconType(node.connectionId)" class="h-3.5 w-3.5 shrink-0" :class="connectionIconInactiveClass" />
+          <DatabaseIcon v-if="node.type === 'connection'" :db-type="connectionIconType(node.connectionId)" class="h-3.5 w-3.5 shrink-0" :class="connectionIconInactiveClass" />
           <Loader2 v-else-if="node.type === 'load-more' && node.isLoading" class="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
           <component v-else :is="getIconInfo(node)?.icon || Database" class="h-3.5 w-3.5 shrink-0" :class="databaseOpenVisual.iconClass" />
           <CircleX v-if="node.valid === false" data-invalid-object-indicator="true" class="pointer-events-none absolute -right-1 -bottom-1 h-2.5 w-2.5 rounded-full bg-background text-destructive stroke-[3]" aria-hidden="true" />
@@ -1708,11 +1534,8 @@ function onKeydown(event: KeyboardEvent) {
             >
               {{ t((node.meta as ColumnInfo).is_nullable ? "structureEditor.nullable" : "structureEditor.notNull") }}
             </span>
-            <button v-if="node.type === 'oracle-db-links'" class="ml-auto rounded p-0.5 text-muted-foreground hover:bg-muted" :aria-label="t('databaseLinks.manage')" :title="t('databaseLinks.manage')" @click.stop="showDatabaseLinks = true" @dblclick.stop>
-              <TableProperties class="h-3.5 w-3.5" />
-            </button>
-            <span v-if="treeNodeSecondaryValue(node)" class="flex min-w-0 max-w-[55%] shrink items-center gap-1 text-xs text-muted-foreground" :title="node.type === 'elasticsearch-index' ? undefined : treeNodeSecondaryValue(node)">
-              <Link2 v-if="node.type === 'elasticsearch-index'" class="h-3 w-3 shrink-0 text-sky-400" />
+
+            <span v-if="treeNodeSecondaryValue(node)" class="flex min-w-0 max-w-[55%] shrink items-center gap-1 text-xs text-muted-foreground" :title="treeNodeSecondaryValue(node)">
               <span class="min-w-0 truncate">{{ treeNodeSecondaryValue(node) }}</span>
             </span>
             <button
@@ -1850,15 +1673,6 @@ function onKeydown(event: KeyboardEvent) {
       </template>
     </LightTooltip>
   </div>
-  <OracleDatabaseLinksDialog
-    v-if="showDatabaseLinks && node.connectionId"
-    v-model:open="showDatabaseLinks"
-    :connection-id="node.connectionId"
-    :database="node.database || ''"
-    :name="node.type === 'oracle-db-link' ? node.label : undefined"
-    :owner="node.schema"
-    @changed="connectionStore.refreshOracleDatabaseLinks(node.connectionId)"
-  />
 </template>
 
 <style>

@@ -216,8 +216,6 @@ fn direct_program_path(program: &str) -> Option<String> {
     if path.is_file() {
         #[cfg(windows)]
         return windows_launchable_program_path(path);
-        #[cfg(not(windows))]
-        return Some(path.to_string_lossy().to_string());
     }
 
     None

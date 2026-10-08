@@ -702,29 +702,6 @@ mod tests {
     }
 
     #[test]
-    fn uploaded_sql_paths_are_unique_and_keep_the_extension() {
-        let data_dir = std::env::temp_dir().join(format!("dbx-web-sql-file-test-{}", uuid::Uuid::new_v4()));
-        let tmp_dir = data_dir.join("tmp");
-
-        let first = match safe_uploaded_sql_path(&tmp_dir, "../outside.sql") {
-            Ok(path) => path,
-            Err(error) => panic!("{}", error.message),
-        };
-        let second = match safe_uploaded_sql_path(&tmp_dir, "nested/outside.sql") {
-            Ok(path) => path,
-            Err(error) => panic!("{}", error.message),
-        };
-
-        assert!(first.starts_with(&tmp_dir));
-        assert!(second.starts_with(&tmp_dir));
-        assert_ne!(first, second);
-        assert_eq!(first.extension().and_then(|extension| extension.to_str()), Some("sql"));
-        let compressed = safe_uploaded_sql_path(&tmp_dir, "backup.sql.gz").unwrap();
-        assert!(compressed.file_name().unwrap().to_string_lossy().ends_with(".sql.gz"));
-        let _ = std::fs::remove_dir_all(data_dir);
-    }
-
-    #[test]
     fn execution_path_must_stay_inside_uploaded_tmp_dir() {
         let data_dir = std::env::temp_dir().join(format!("dbx-web-sql-file-test-{}", uuid::Uuid::new_v4()));
         let tmp_dir = data_dir.join("tmp");

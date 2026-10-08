@@ -12,7 +12,7 @@ export interface DataGridEditAdapterContext {
 export function dataGridEditAdapterKind(context: DataGridEditAdapterContext): DataGridEditAdapterKind {
   if (context.custom) return "custom";
   if (!context.editable) return "unsupported";
-  if (context.databaseType === "mongodb") return "document";
+  {}
   if (context.databaseType) return "relational";
   return "unsupported";
 }

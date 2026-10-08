@@ -14,12 +14,12 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { AlertTriangle, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ClipboardList, Copy, Database, Info, KeyRound, ListChevronsUpDown, Loader2, Maximize2, Pencil, Plus, RefreshCw, RotateCcw, Rows3, Save, Search, Settings, SlidersHorizontal, Trash2, UserRound, X } from "@lucide/vue";
+import { AlertTriangle, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ClipboardList, Copy, Database, Info, KeyRound, ListChevronsUpDown, Loader2, Maximize2, Pencil, Plus, RefreshCw, RotateCcw, Rows3, Save, Search, Settings, SlidersHorizontal, Trash2, X } from "@lucide/vue";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { SearchableSelect } from "@/components/ui/searchable-select";
-import TablePhysicalOptionsEditor from "@/components/structure/TablePhysicalOptionsEditor.vue";
+
 import CustomContextMenu, { type ContextMenuItem } from "@/components/ui/CustomContextMenu.vue";
 import EditorSearchPanel from "@/components/editor/EditorSearchPanel.vue";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -66,28 +66,25 @@ import {
 import { buildMysqlAutoIncrementCounterStatement, canEditMysqlAutoIncrementCounter, refreshMysqlAutoIncrementCounterDraft } from "@/lib/table/mysqlAutoIncrementCounter";
 import { mysqlTableCollationSql, parseMysqlTableCollation } from "@/lib/table/mysqlTableCollation";
 import { MYSQL_STORAGE_ENGINES_SQL, mysqlTableEngineSql, mysqlTableEngineSqlOption, parseMysqlTableEngineMetadata, refreshMysqlTableEngineDraft, supportsMysqlTableEngine } from "@/lib/table/mysqlTableEngine";
-import { INCEPTOR_PHYSICAL_OPTIONS, buildInceptorCreateOptions, emptyTablePhysicalOptions, hasTablePhysicalOptions, pruneTablePhysicalOptions, restoreTablePhysicalOptions } from "@/lib/table/tablePhysicalOptions";
+import { emptyTablePhysicalOptions, hasTablePhysicalOptions, pruneTablePhysicalOptions, restoreTablePhysicalOptions } from "@/lib/table/tablePhysicalOptions";
 import { PRESET_FIELDS_TEMPLATE_ID, createTableColumnTemplateDrafts } from "@/lib/table/tableColumnTemplates";
 import { getMysqlDataTypeHelp } from "@/lib/table/mysqlDataTypeHelp";
-import { getPostgresDataTypeHelp, gaussdbMTypeDisplayName } from "@/lib/table/postgresDataTypeHelp";
-import { getSqliteDataTypeHelp } from "@/lib/table/sqliteDataTypeHelp";
+
 import { getTableMetadataCapabilities, firstStructureMetadataTab, isStructureMetadataTabSupported } from "@/lib/table/tableMetadataCapabilities";
 import { constraintsForConstraintsTab } from "@/lib/table/constraintPresentation";
 import { PARTITION_TREE_INDENT_PX, flattenPgPartitionNodes, pgPartitionBoundText, pgPartitionKindLabelKey, pgPartitionNodeBoundText, pgPartitionRowHint, splitPgPartitionBoundValues, visiblePgPartitionRows, type PgPartitionTreeRow } from "@/lib/table/pgPartitionPresentation";
 import { formatBytes } from "@/lib/database/serverMetrics";
 import { hasTableStructureRefreshWork, unloadedTableStructureRefreshScope, visibleTableStructureRefreshScope, type TableStructureRefreshScope } from "@/lib/table/tableStructureMetadataLoading";
 import { canAddTableStructureColumn, getTableStructureCapabilities, hasLocalTableColumnOrderChange, isPhysicalTableColumnOrderChange, sanitizeStructureIndexesForCapabilities, supportsLocalTableColumnReorder } from "@/lib/table/tableStructureCapabilities";
-import { getConcurrentIndexAvailability, concurrentIndexNamesInStatements, normalizeUnsupportedConcurrentIndexes, type ConcurrentIndexAvailability } from "@/lib/table/concurrentIndexAvailability";
+import { getConcurrentIndexAvailability, normalizeUnsupportedConcurrentIndexes, type ConcurrentIndexAvailability } from "@/lib/table/concurrentIndexAvailability";
 import { orderedColumnIndexes, uniqueDataGridColumnOrderKeys } from "@/lib/dataGrid/dataGridColumnOrder";
 import { loadTableDataGridColumnOrder, notifyTableDataGridColumnOrderChanged, removeTableDataGridColumnOrder, saveTableDataGridColumnOrder, tableDataGridColumnOrderScopeKey } from "@/lib/dataGrid/dataGridColumnLayoutStorage";
 import { codeMirrorSqlDialectForConnection, connectionObjectTreeQuerySchema, tableStructureDatabaseTypeForConnection } from "@/lib/database/jdbcDialect";
-import { postgresListRolesSql, usersFromPostgresRolesResult } from "@/lib/database/databaseUserAdmin";
+
 import type { ColumnInfo, ConstraintInfo, PgPartitionKind, PgPartitionNode, PgTablePartitioning, TableInfo, TableInfoTab, TableStructureEditorDraft, TableStructureEditorTarget, TableStructureEditorViewport } from "@/types/database";
 import {
-  applyManticoreDdlColumnExtras,
   buildStructureTargetLabel,
   canEditStructuredTriggerDraft,
-  canEditManticoreColumnProperties,
   cloneColumnDraftAsNew,
   combineDataTypeForDatabase,
   combineDataTypeForDatabaseWithLengthUnit,
@@ -117,16 +114,12 @@ import {
   getDefaultLengthForType,
   hasExistingColumnTypeChange,
   isDataTypeLengthDisabled,
-  isDamengIdentityCompatibleDataType,
   isMysqlEnumDataType,
   isMysqlCharacterDataType,
-  isProtectedManticoreIdColumn,
-  isSqlServerIdentityCompatibleDataType,
   mysqlEnumDataType,
   parseExtraToColumnExtra,
   rehydrateColumnDraftsFromMetadata,
   resolveInsertColumnIndex,
-  restoreCharacterLengthUnitsAfterSave,
   sameStructureIndexType,
   supportsTableStructureExtendedProperties,
   structureColumnSelectionRange,
@@ -647,7 +640,7 @@ const canManagePartitions = computed(() => {
   if (isCreateMode.value) return createPartitioningEnabled.value;
   return !!partitioning.value && (partitioning.value.isPartitioned || partitioning.value.isPartition);
 });
-const partitionSupportsConcurrentDetach = computed(() => databaseType.value === "postgres" && (partitioning.value?.serverVersionNum ?? 0) >= 140000 && !partitioning.value?.defaultPartition);
+
 const partitionDialogNeedsBound = computed(() => partitionDialogMode.value === "create" || partitionDialogMode.value === "attach");
 
 function resetPartitionDialog() {
@@ -742,7 +735,7 @@ function partitionDialogOperation(reportError: boolean, id: string): TablePartit
     schema: partitionDialogSchema.value.trim(),
     name,
     bound,
-    concurrently: mode === "detach" && partitionDialogConcurrently.value && partitionSupportsConcurrentDetach.value,
+    concurrently: false,
   };
 }
 
@@ -1289,7 +1282,7 @@ watch(localStructureDensity, (density, previousDensity) => {
 function onColResize(e: MouseEvent, col: number) {
   e.preventDefault();
   const widthIndex = columnWidthIndex(col);
-  const minimumWidth = widthIndex === 3 && supportsCharacterLengthUnits.value ? structureDensityMetric.value.minLengthColumnWidth : structureDensityMetric.value.minColumnWidth;
+  const minimumWidth = structureDensityMetric.value.minColumnWidth;
   colResizing.value = { col: widthIndex, startX: e.clientX, startW: Math.max(colWidths.value[widthIndex] ?? minimumWidth, minimumWidth) };
   const onMove = (ev: MouseEvent) => {
     if (!colResizing.value) return;
@@ -1330,10 +1323,10 @@ const connection = computed(() => (props.connectionId ? store.getConfig(props.co
 const databaseType = computed(() => tableStructureDatabaseTypeForConnection(connection.value));
 const usesNativeMysqlIndexNames = computed(() => {
   const profile = connection.value?.driver_profile?.trim().toLowerCase();
-  return databaseType.value === "mysql" && connection.value?.db_type === "mysql" && (!profile || profile === "mysql");
+  return databaseType.value === "mysql" && (!profile || profile === "mysql");
 });
-const supportsCharacterLengthUnits = computed(() => databaseType.value === "dameng" || databaseType.value === "oracle");
-const usesMysql8SafeDefaults = computed(() => databaseType.value === "mysql" && connection.value?.db_type === "mysql" && connection.value.driver_profile === "mysql");
+
+const usesMysql8SafeDefaults = computed(() => databaseType.value === "mysql" && connection.value?.driver_profile === "mysql");
 const structureCapabilities = computed(() => getTableStructureCapabilities(databaseType.value, connection.value?.db_type, connection.value?.database_info?.productVersion));
 const tableMetadataCapabilities = computed(() => getTableMetadataCapabilities(databaseType.value));
 const structureDialect = computed(() => structureCapabilities.value.dialect);
@@ -1343,18 +1336,11 @@ const dataTypeOptions = computed(() => mergeDataTypeOptions(dynamicDataTypeOptio
 const columnEditorControls = computed(() => getColumnEditorControls(databaseType.value));
 
 const indexTypesByDb: Record<string, string[]> = {
-  postgres: ["BTREE", "HASH", "GIST", "SPGIST", "GIN", "BRIN"],
   mysql: ["BTREE", "HASH", "FULLTEXT", "SPATIAL", "RTREE"],
-  sqlserver: ["CLUSTERED", "NONCLUSTERED", "COLUMNSTORE", "NONCLUSTERED COLUMNSTORE", "XML", "SPATIAL"],
-  oracle: ["NORMAL", "BITMAP", "FUNCTION-BASED NORMAL", "FUNCTION-BASED DOMAIN", "DOMAIN", "CLUSTER"],
-  sqlite: ["BTREE"],
-  "gaussdb-m": ["UBTREE"],
 };
 const indexTypeOptions = computed(() => {
   if (!structureCapabilities.value.indexType) return [];
-  if (connection.value?.driver_profile?.toLowerCase() === "gaussdb-m") {
-    return indexTypesByDb["gaussdb-m"];
-  }
+  {}
   return indexTypesByDb[structureDialect.value] ?? [];
 });
 
@@ -1377,44 +1363,6 @@ const defaultValuePresets = computed((): DefaultValuePreset[] => {
       { label: "CURRENT_TIMESTAMP", value: "CURRENT_TIMESTAMP", dataType: "timestamp" },
       { label: "CURRENT_DATE", value: "CURRENT_DATE", dataType: "date" },
       { label: "CURRENT_TIME", value: "CURRENT_TIME", dataType: "time" },
-    ],
-    postgres: [
-      { label: "CURRENT_TIMESTAMP", value: "CURRENT_TIMESTAMP", dataType: "timestamp" },
-      { label: "CURRENT_DATE", value: "CURRENT_DATE", dataType: "date" },
-      { label: "now()", value: "now()", dataType: "timestamp" },
-      { label: "gen_random_uuid()", value: "gen_random_uuid()", dataType: "uuid" },
-    ],
-    sqlite: [
-      { label: "CURRENT_TIMESTAMP", value: "CURRENT_TIMESTAMP", dataType: "timestamp" },
-      { label: "CURRENT_DATE", value: "CURRENT_DATE", dataType: "date" },
-      { label: "CURRENT_TIME", value: "CURRENT_TIME", dataType: "time" },
-    ],
-    duckdb: [
-      { label: "CURRENT_TIMESTAMP", value: "CURRENT_TIMESTAMP", dataType: "timestamp" },
-      { label: "CURRENT_DATE", value: "CURRENT_DATE", dataType: "date" },
-    ],
-    sqlserver: [
-      { label: "GETDATE()", value: "GETDATE()", dataType: "datetime" },
-      { label: "GETUTCDATE()", value: "GETUTCDATE()", dataType: "datetime" },
-      { label: "CURRENT_TIMESTAMP", value: "CURRENT_TIMESTAMP", dataType: "timestamp" },
-      { label: "NEWID()", value: "NEWID()", dataType: "uuid" },
-    ],
-    oracle: [
-      { label: "SYSDATE", value: "SYSDATE", dataType: "date" },
-      { label: "SYSTIMESTAMP", value: "SYSTIMESTAMP", dataType: "timestamp" },
-      { label: "CURRENT_TIMESTAMP", value: "CURRENT_TIMESTAMP", dataType: "timestamp" },
-    ],
-    h2: [
-      { label: "CURRENT_TIMESTAMP", value: "CURRENT_TIMESTAMP", dataType: "timestamp" },
-      { label: "CURRENT_DATE", value: "CURRENT_DATE", dataType: "date" },
-    ],
-    clickhouse: [
-      { label: "now()", value: "now()", dataType: "timestamp" },
-      { label: "today()", value: "today()", dataType: "date" },
-    ],
-    informix: [
-      { label: "CURRENT", value: "CURRENT", dataType: "timestamp" },
-      { label: "TODAY", value: "TODAY", dataType: "date" },
     ],
   };
 
@@ -1515,7 +1463,7 @@ const visibleColWidths = computed(() =>
   colLabels.value.map((column) => {
     if (column.key === "actions") return columnActionsWidth.value;
     const width = colWidths.value[column.widthIndex] ?? structureDensityMetric.value.minColumnWidth;
-    return column.key === "length" && supportsCharacterLengthUnits.value ? Math.max(width, structureDensityMetric.value.minLengthColumnWidth) : width;
+    return width;
   }),
 );
 
@@ -1796,7 +1744,7 @@ const filteredIndexRowIds = computed(() => {
 });
 const indexSearchMatchCount = computed(() => (indexSearchText.value.trim() ? filteredIndexRowIds.value.size : 0));
 const foreignKeyActionOptions = ["", "CASCADE", "SET NULL", "RESTRICT", "NO ACTION"];
-const triggerTimingOptions = computed(() => (databaseType.value === "sqlserver" ? ["AFTER", "INSTEAD OF"] : ["BEFORE", "AFTER"]));
+const triggerTimingOptions = computed(() => ["BEFORE", "AFTER"]);
 const triggerEventOptions = ["INSERT", "UPDATE", "DELETE"];
 const metadataSchema = computed(() => connectionObjectTreeQuerySchema(connection.value, props.database, props.schema));
 const refreshVersion = computed(() => (props.connectionId && props.tableName ? queryStore.tableStructureRefreshVersion(props.connectionId, props.database, props.schema, props.tableName) : 0));
@@ -1855,7 +1803,7 @@ const tableOwnerLoadError = ref("");
 const tableOwnerRoles = ref<string[]>([]);
 const tableOwnerRolesLoading = ref(false);
 const tableOwnerRolesLoadError = ref("");
-const supportsTableOwner = computed(() => !isCreateMode.value && databaseType.value === "postgres");
+
 const canEditMysqlAutoIncrement = computed(() => canEditMysqlAutoIncrementCounter(connection.value, isCreateMode.value, columns.value));
 const canBuildMysqlAutoIncrement = computed(() => canEditMysqlAutoIncrement.value && !mysqlAutoIncrementLoading.value && !mysqlAutoIncrementLoadError.value && originalMysqlAutoIncrementValue.value !== undefined);
 const supportsMysqlEngine = computed(() => supportsMysqlTableEngine(connection.value));
@@ -1869,18 +1817,7 @@ function setMysqlAutoIncrement(column: EditableStructureColumn, checked: boolean
     void loadMysqlAutoIncrementCounter(true);
   }
 }
-function isSqliteAutoIncrement(column: EditableStructureColumn): boolean {
-  return structureDialect.value === "sqlite" && column.isPrimaryKey && isSqliteIntegerType(column.dataType) && column.extra.autoIncrement === true;
-}
-function canEditSqliteAutoIncrement(column: EditableStructureColumn): boolean {
-  return structureDialect.value === "sqlite" && column.isPrimaryKey && isSqliteIntegerType(column.dataType) && !columns.value.some((candidate) => candidate !== column && candidate.isPrimaryKey && candidate.extra.autoIncrement);
-}
-function setSqliteAutoIncrement(column: EditableStructureColumn, checked: boolean) {
-  column.extra.autoIncrement = checked;
-}
-function isSqliteIntegerType(dataType: string): boolean {
-  return /^(integer|int|tinyint|smallint|mediumint|bigint)$/i.test(dataType.trim().split("(")[0]);
-}
+
 function onMysqlAutoIncrementInput(event: Event) {
   const input = event.target as HTMLInputElement;
   if (/^\d*$/.test(input.value)) {
@@ -1889,23 +1826,8 @@ function onMysqlAutoIncrementInput(event: Event) {
   }
   input.value = mysqlAutoIncrementValue.value ?? "";
 }
-const tableOwnerOptions = computed(() => {
-  const owner = tableOwner.value;
-  if (!owner || tableOwnerRoles.value.includes(owner)) return tableOwnerRoles.value;
-  return [owner, ...tableOwnerRoles.value];
-});
+
 const targetLabel = computed(() => buildStructureTargetLabel(connection.value?.name, props.database, props.schema, isCreateMode.value ? undefined : props.tableName));
-
-function isManticoreTextColumn(column: EditableStructureColumn): boolean {
-  if (databaseType.value !== "manticoresearch") return false;
-  const baseType = dataTypeBaseInputValue(databaseType.value, column.dataType).trim().toLowerCase();
-  return baseType === "text" || baseType === "string";
-}
-
-function isManticoreJsonColumn(column: EditableStructureColumn): boolean {
-  if (databaseType.value !== "manticoresearch") return false;
-  return dataTypeBaseInputValue(databaseType.value, column.dataType).trim().toLowerCase() === "json";
-}
 
 let sqlPreviewRequestId = 0;
 let structureLoadRequestId = 0;
@@ -2311,15 +2233,7 @@ async function hydrateRestoredDraftFromDatabase() {
   try {
     await store.ensureConnected(connectionId);
     let { value: nextColumns } = await loadObjectMetadataFacet({ connectionId, database, schema, tableName, catalog }, "columns", () => api.getColumns(connectionId, database, schema, tableName, catalog));
-    if (databaseType.value === "manticoresearch" && tableMetadataCapabilities.value.ddl) {
-      try {
-        const { ddl } = await loadObjectDdl({ connectionId, database, schema, tableName, catalog });
-        rawDdlContent.value = await formatStructureDdl(ddl);
-        ddlFetched.value = true;
-        nextColumns = applyManticoreDdlColumnExtras(nextColumns, ddl);
-      } catch {
-        /* ignore — Manticore column properties can still come from SHOW COLUMNS when available */
-      }
+    {
     }
     columns.value = rehydrateColumnDraftsFromMetadata(columns.value, nextColumns, databaseType.value);
     markDraftHydratedAndSync();
@@ -2361,8 +2275,7 @@ function hasPendingStructureChanges(): boolean {
     scope.tableComment ||
     partitionOperations.value.length > 0 ||
     mysqlTableEngine.value.toLowerCase() !== originalMysqlTableEngine.value.toLowerCase() ||
-    (canBuildMysqlAutoIncrement.value && mysqlAutoIncrementValue.value !== originalMysqlAutoIncrementValue.value) ||
-    (supportsTableOwner.value && tableOwner.value.trim() !== originalTableOwner.value.trim())
+    (canBuildMysqlAutoIncrement.value && mysqlAutoIncrementValue.value !== originalMysqlAutoIncrementValue.value)
   );
 }
 
@@ -2400,37 +2313,20 @@ function mergeDataTypeOptions(primary: readonly string[], fallback: readonly str
 
 function mysqlDataTypeTooltip(option: string): string | undefined {
   if (databaseType.value !== "mysql") return undefined;
-  const product = connection.value?.driver_profile === "mariadb" ? "mariadb" : connection.value?.driver_profile === "mysql" ? "mysql" : undefined;
+  const product = connection.value?.driver_profile === "mysql" ? "mysql" : undefined;
   const help = getMysqlDataTypeHelp(option, { product });
   return help ? [help.key, ...(help.warningKeys ?? [])].map((key) => t(`structureEditor.mysqlDataTypeHelp.${key}`)).join("\n\n") : undefined;
 }
 
-function postgresDataTypeTooltip(option: string): string | undefined {
-  if (databaseType.value !== "postgres") return undefined;
-  const help = getPostgresDataTypeHelp(option);
-  return help ? t(`structureEditor.postgresDataTypeHelp.${help.key}`) : undefined;
-}
-
-function sqliteDataTypeTooltip(option: string): string | undefined {
-  if (databaseType.value !== "sqlite") return undefined;
-  const help = getSqliteDataTypeHelp(option);
-  return help ? t(`structureEditor.sqliteDataTypeHelp.${help.key}`) : undefined;
-}
-
 function dataTypeTooltip(option: string): string | undefined {
   if (databaseType.value === "mysql") return mysqlDataTypeTooltip(option);
-  if (databaseType.value === "postgres") return postgresDataTypeTooltip(option);
-  if (databaseType.value === "sqlite") return sqliteDataTypeTooltip(option);
+  {}
+  {}
   return undefined;
 }
 
 function gaussdbMDataTypeDisplayName(option: string): string {
-  if (databaseType.value === "gaussdb") {
-    const conn = connection.value;
-    if (conn?.driver_profile?.toLowerCase() === "gaussdb-m") {
-      return gaussdbMTypeDisplayName(option);
-    }
-  }
+  {}
   return option;
 }
 
@@ -2521,10 +2417,10 @@ function structureChangeOptions(): BuildTableStructureChangeSqlOptions {
     tableComment: tableComment.value,
     originalTableComment: isCreateMode.value ? undefined : originalTableComment.value,
     mysqlEngine: mysqlTableEngineSqlOption({ value: mysqlTableEngine.value, originalValue: originalMysqlTableEngine.value }, isCreateMode.value, supportsMysqlEngine.value && !mysqlTableEngineLoading.value && !mysqlTableEngineLoadError.value),
-    transwarpCreate: isCreateMode.value && databaseType.value === "transwarp" ? buildInceptorCreateOptions(physicalOptions.value, columns.value) : undefined,
+    transwarpCreate: undefined,
     tableCollation: mysqlTableDefaultCollation.value || undefined,
     partitioned: isPartitionedParent.value,
-    isGaussdbMMode: connection.value?.driver_profile?.toLowerCase() === "gaussdb-m",
+    isGaussdbMMode: false,
   };
 }
 
@@ -2613,15 +2509,7 @@ async function refreshSqlPreview() {
         : hasSqliteTypeChange.value
           ? api.previewSqliteTableStructureChange(props.connectionId, props.database, options)
           : api.buildTableStructureChangeSql(options),
-      supportsTableOwner.value
-        ? api.buildTableOwnerChangeSql({
-            databaseType: databaseType.value,
-            schema: metadataSchema.value,
-            tableName: props.tableName || "",
-            owner: tableOwner.value,
-            originalOwner: originalTableOwner.value,
-          })
-        : Promise.resolve({ statements: [], warnings: [] }),
+      Promise.resolve({ statements: [], warnings: [] }),
       buildMysqlAutoIncrementCounterStatement({
         enabled: canBuildMysqlAutoIncrement.value,
         originalValue: originalMysqlAutoIncrementValue.value,
@@ -2792,9 +2680,9 @@ function setSecondaryMetadataLoading(scope: TableStructureRefreshScope, value: b
 }
 
 function withRequiredPostgresPrimaryKeyMetadata(scope: TableStructureRefreshScope): TableStructureRefreshScope {
-  if (isCreateMode.value || databaseType.value !== "postgres") return scope;
-  const needsPrimaryKeyMetadata = scope.columns || (activeTab.value === "columns" && !loadedMetadataFacets.has("indexes"));
-  return needsPrimaryKeyMetadata && !scope.indexes ? { ...scope, indexes: true } : scope;
+  {
+    return scope;
+  }
 }
 
 async function fetchTableCommentValue(connectionId: string, database: string, schema: string, tableName: string, catalog?: string): Promise<string | undefined> {
@@ -2913,56 +2801,15 @@ async function loadMysqlTableEngine(preserveDraft = false) {
   }
 }
 
-async function loadTableOwner(force = false, preserveDraft = false) {
-  const connectionId = props.connectionId;
-  const database = props.database;
-  const schema = metadataSchema.value;
-  const tableName = props.tableName;
-  const catalog = props.catalog;
-  if (!supportsTableOwner.value || !connectionId || !database || !schema || !tableName) return;
-  const requestId = ++tableOwnerLoadRequestId;
-  tableOwnerLoading.value = true;
-  tableOwnerLoadError.value = "";
-  try {
-    await store.ensureConnected(connectionId);
-    const result = await loadObjectMetadataFacet({ connectionId, database, schema, tableName, catalog }, "owner", () => api.getTableOwner(connectionId, database, schema, tableName), { force });
-    if (requestId !== tableOwnerLoadRequestId) return;
-    const owner = result.value || "";
-    originalTableOwner.value = owner;
-    if (!preserveDraft) tableOwner.value = owner;
-    loadedMetadataFacets.add("owner");
-  } catch (error: any) {
-    if (requestId !== tableOwnerLoadRequestId) return;
-    tableOwnerLoadError.value = error?.message || String(error);
-  } finally {
-    if (requestId === tableOwnerLoadRequestId) tableOwnerLoading.value = false;
+async function loadTableOwner(_force = false, _preserveDraft = false) {
+  {
+    return;
   }
 }
 
 async function loadTableOwnerRoles() {
-  const connectionId = props.connectionId;
-  const database = props.database;
-  if (!supportsTableOwner.value || !connectionId || !database) return;
-  const requestId = ++tableOwnerRolesLoadRequestId;
-  tableOwnerRolesLoading.value = true;
-  tableOwnerRolesLoadError.value = "";
-  try {
-    await store.ensureConnected(connectionId);
-    const result = await api.executeQuery(connectionId, database, postgresListRolesSql(), undefined, undefined, { maxRows: 5000 });
-    if (requestId !== tableOwnerRolesLoadRequestId) return;
-    tableOwnerRoles.value = [
-      ...new Set(
-        usersFromPostgresRolesResult(result)
-          .map((role) => role.user)
-          .filter(Boolean),
-      ),
-    ];
-  } catch (error: any) {
-    if (requestId !== tableOwnerRolesLoadRequestId) return;
-    tableOwnerRoles.value = [];
-    tableOwnerRolesLoadError.value = error?.message || String(error);
-  } finally {
-    if (requestId === tableOwnerRolesLoadRequestId) tableOwnerRolesLoading.value = false;
+  {
+    return;
   }
 }
 
@@ -3049,22 +2896,14 @@ async function loadStructure(
 
     let nextColumns = await columnsPromise;
     if (nextColumns) {
-      if (databaseType.value === "manticoresearch" && tableMetadataCapabilities.value.ddl) {
-        try {
-          const { ddl } = await loadObjectDdl({ connectionId, database, schema, tableName, catalog }, { force: options.forceDdl });
-          rawDdlContent.value = await formatStructureDdl(ddl);
-          ddlFetched.value = true;
-          nextColumns = applyManticoreDdlColumnExtras(nextColumns, ddl);
-        } catch {
-          /* ignore — Manticore column properties can still come from SHOW COLUMNS when available */
-        }
+      {
       }
       // Load live charset/collation metadata from the MySQL server so the column
       // editor shows the correct options for the server version.
       void loadCharsetMetadata();
       void loadMysqlTableDefaultCollation();
       const nextColumnDrafts = createColumnDrafts(nextColumns, databaseType.value);
-      const hydratedColumnDrafts = supportsCharacterLengthUnits.value && options.characterLengthUnitsAfterSave ? restoreCharacterLengthUnitsAfterSave(databaseType.value, nextColumnDrafts, options.characterLengthUnitsAfterSave) : nextColumnDrafts;
+      const hydratedColumnDrafts = nextColumnDrafts;
       columns.value = applyStoredLocalColumnOrder(hydratedColumnDrafts);
       appliedColumnsSignature = JSON.stringify(nextColumns);
       loadedMetadataFacets.add("columns");
@@ -3169,8 +3008,8 @@ async function loadStructure(
     // the table (#8816): the cache is only invalidated by in-app mutations.
     // Revalidate in the background. Manticore columns are re-derived from the
     // DDL locally, so leave those to the explicit refresh.
-    const manticoreDerivesColumnsFromDdl = databaseType.value === "manticoresearch" && tableMetadataCapabilities.value.ddl;
-    if (!forceMetadata && !manticoreDerivesColumnsFromDdl && (columnsServedFromCache || commentServedFromCache)) {
+
+    if (!forceMetadata && (columnsServedFromCache || commentServedFromCache)) {
       void revalidateCachedStructureMetadata(requestId, { columns: columnsServedFromCache, tableComment: commentServedFromCache }, appliedColumnsSignature);
     }
   } catch (e: any) {
@@ -3660,123 +3499,16 @@ function persistLocalColumnOrder(showNotice = true) {
   toast(t("structureEditor.localColumnOrderNotice"), 4000);
 }
 
-function isSqlServerIdentityChecked(column: EditableStructureColumn): boolean {
-  return !!column.extra.autoIncrement || !!column.extra.identity;
-}
-
-function canEditSqlServerIdentity(column: EditableStructureColumn): boolean {
-  return !column.original && !column.markedForDrop && isSqlServerIdentityCompatibleDataType(column.dataType);
-}
-
-function clearSqlServerIdentity(column: EditableStructureColumn) {
-  column.extra.autoIncrement = false;
-  column.extra.identity = undefined;
-}
-
-function syncSqlServerIdentityForDataType(column: EditableStructureColumn) {
-  if (databaseType.value !== "sqlserver") return;
-  if (!isSqlServerIdentityChecked(column)) return;
-  if (isSqlServerIdentityCompatibleDataType(column.dataType)) return;
-  clearSqlServerIdentity(column);
-}
-
-function ensureSqlServerIdentity(column: EditableStructureColumn) {
-  column.extra.autoIncrement = true;
-  column.extra.identity = {
-    seed: column.extra.identity?.seed ?? 1,
-    increment: column.extra.identity?.increment ?? 1,
-  };
-}
-
-function setSqlServerIdentity(column: EditableStructureColumn, checked: boolean) {
-  if (!canEditSqlServerIdentity(column)) return;
-  if (checked) {
-    ensureSqlServerIdentity(column);
-    column.isNullable = false;
-  } else {
-    clearSqlServerIdentity(column);
+function syncSqlServerIdentityForDataType(_column: EditableStructureColumn) {
+  {
+    return;
   }
 }
 
-function parseOptionalNumberInput(value: string | number): number | undefined {
-  if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
-  const trimmed = value.trim();
-  if (!trimmed) return undefined;
-  const numeric = Number(trimmed);
-  return Number.isFinite(numeric) ? numeric : undefined;
-}
-
-function updateSqlServerIdentitySeed(column: EditableStructureColumn, value: string | number) {
-  if (!canEditSqlServerIdentity(column)) return;
-  ensureSqlServerIdentity(column);
-  column.extra.identity!.seed = parseOptionalNumberInput(value);
-}
-
-function updateSqlServerIdentityIncrement(column: EditableStructureColumn, value: string | number) {
-  if (!canEditSqlServerIdentity(column)) return;
-  ensureSqlServerIdentity(column);
-  column.extra.identity!.increment = parseOptionalNumberInput(value);
-}
-
-function isDamengIdentityChecked(column: EditableStructureColumn): boolean {
-  return !!column.extra.autoIncrement || !!column.extra.identity;
-}
-
-function originalHasDamengIdentity(column: EditableStructureColumn): boolean {
-  return column.original?.extra?.toLowerCase().includes("identity") ?? false;
-}
-
-function canEditDamengIdentity(column: EditableStructureColumn): boolean {
-  if (column.markedForDrop || !isDamengIdentityCompatibleDataType(column.dataType)) return false;
-  // DM8 permits only one identity column per table, so prevent creating an invalid draft in the editor.
-  return isDamengIdentityChecked(column) || !columns.value.some((candidate) => candidate !== column && !candidate.markedForDrop && isDamengIdentityChecked(candidate));
-}
-
-function canEditDamengIdentityParameters(column: EditableStructureColumn): boolean {
-  return canEditDamengIdentity(column) && !originalHasDamengIdentity(column);
-}
-
-function clearDamengIdentity(column: EditableStructureColumn) {
-  column.extra.autoIncrement = false;
-  column.extra.identity = undefined;
-}
-
-function syncDamengIdentityForDataType(column: EditableStructureColumn) {
-  if (databaseType.value !== "dameng") return;
-  if (!isDamengIdentityChecked(column)) return;
-  if (isDamengIdentityCompatibleDataType(column.dataType)) return;
-  clearDamengIdentity(column);
-}
-
-function ensureDamengIdentity(column: EditableStructureColumn) {
-  const originalIdentity = parseExtraToColumnExtra(column.original?.extra, "dameng").identity;
-  column.extra.autoIncrement = true;
-  column.extra.identity = {
-    seed: column.extra.identity?.seed ?? originalIdentity?.seed ?? 1,
-    increment: column.extra.identity?.increment ?? originalIdentity?.increment ?? 1,
-  };
-}
-
-function setDamengIdentity(column: EditableStructureColumn, checked: boolean) {
-  if (!canEditDamengIdentity(column)) return;
-  if (checked) {
-    ensureDamengIdentity(column);
-    column.isNullable = false;
-  } else {
-    clearDamengIdentity(column);
+function syncDamengIdentityForDataType(_column: EditableStructureColumn) {
+  {
+    return;
   }
-}
-
-function updateDamengIdentitySeed(column: EditableStructureColumn, value: string | number) {
-  if (!canEditDamengIdentityParameters(column)) return;
-  ensureDamengIdentity(column);
-  column.extra.identity!.seed = parseOptionalNumberInput(value);
-}
-
-function updateDamengIdentityIncrement(column: EditableStructureColumn, value: string | number) {
-  if (!canEditDamengIdentityParameters(column)) return;
-  ensureDamengIdentity(column);
-  column.extra.identity!.increment = parseOptionalNumberInput(value);
 }
 
 function updateColumnDataType(column: EditableStructureColumn, baseType: string) {
@@ -4429,11 +4161,7 @@ function isPrimaryKeyDisabled(column: EditableStructureColumn): boolean {
 }
 
 function canDropColumn(column: EditableStructureColumn): boolean {
-  return !!column.original && !column.isPrimaryKey && !isProtectedManticoreIdColumn(databaseType.value, column.original.name) && structureCapabilities.value.dropColumn;
-}
-
-function isManticoreColumnPropertyDisabled(column: EditableStructureColumn): boolean {
-  return !canEditManticoreColumnProperties(databaseType.value, !!column.original) || column.markedForDrop;
+  return !!column.original && !column.isPrimaryKey && structureCapabilities.value.dropColumn;
 }
 
 function newIndexDraft(): EditableStructureIndex {
@@ -4482,7 +4210,7 @@ function generatedIndexNameForDraft(index: EditableStructureIndex): string {
   if (usesNativeMysqlIndexNames.value) return generateUniqueShortIndexName(firstColumn, existingNames, { ...index, maxLength: 64 });
   // Index names can be schema-wide outside MySQL. Retain the original table-qualified rule.
   const name = generateUniqueIndexName(structureIndexTableName(), firstColumn ? [firstColumn] : [], existingNames);
-  return connection.value?.driver_profile?.toLowerCase() === "gaussdb-m" ? name.toLowerCase() : name;
+  return name;
 }
 
 function refreshAutoIndexName(index: EditableStructureIndex, typeChanged = false) {
@@ -4690,9 +4418,7 @@ function canDropIndex(index: EditableStructureIndex): boolean {
 }
 
 const canEditForeignKeys = computed(() => structureCapabilities.value.foreignKey);
-const canEditTriggers = computed(() => structureDialect.value === "mysql" || structureDialect.value === "oracle" || structureDialect.value === "sqlserver");
-const isOracleTriggerEditor = computed(() => structureDialect.value === "oracle");
-const isSqlServerTriggerEditor = computed(() => structureDialect.value === "sqlserver");
+const canEditTriggers = computed(() => structureDialect.value === "mysql");
 
 function generatedForeignKeyName(column = ""): string {
   const table = structureIndexTableName() || "table";
@@ -4745,9 +4471,9 @@ function addTrigger() {
   const draft: EditableStructureTrigger = {
     id: `new:${uuid()}`,
     name: "",
-    timing: isOracleTriggerEditor.value ? "BEFORE EACH ROW" : isSqlServerTriggerEditor.value ? "AFTER" : "BEFORE",
+    timing: "BEFORE",
     event: "INSERT",
-    statement: isOracleTriggerEditor.value ? "BEGIN\n  NULL;\nEND" : isSqlServerTriggerEditor.value ? "BEGIN\n  SET NOCOUNT ON;\nEND" : "BEGIN\n  \nEND",
+    statement: "BEGIN\n  \nEND",
     markedForDrop: false,
   };
   triggers.value.push(draft);
@@ -4878,31 +4604,9 @@ async function applyChanges() {
   // auto-commit path (the core also refuses that combination).
   const partitionDdlPending = partitionOperations.value.length > 0 || (isCreateMode.value && createPartitioningEnabled.value);
   const useTransaction = !hasConcurrentIndexBuild && partitionDdlPending;
-  if (hasConcurrentIndexBuild && !isCreateMode.value && databaseType.value === "postgres" && props.tableName) {
-    const concurrentIndexNames = concurrentIndexNamesInStatements(pendingStatements.value);
-    if (concurrentIndexNames.length > 0) {
-      try {
-        const invalidIndexes = await api.listInvalidIndexes(props.connectionId, props.database, metadataSchema.value, props.tableName);
-        const blocked = concurrentIndexNames.filter((name) => invalidIndexes.includes(name));
-        if (blocked.length > 0) {
-          errorMessage.value = t("structureEditor.invalidIndexBlocksSave", { indexNames: blocked.join(", ") });
-          saving.value = false;
-          return false;
-        }
-      } catch {
-        // Metadata probe failure must not block the save; the failure-time
-        // hint below still surfaces leftovers if the build errors out.
-      }
-    }
-  }
+  {}
   const characterLengthUnitsAfterSave = new Map<string, string>();
-  if (supportsCharacterLengthUnits.value) {
-    for (const column of columns.value) {
-      if (!column.markedForDrop && dataTypeLengthUnitValue(databaseType.value, column.dataType)) {
-        characterLengthUnitsAfterSave.set(column.name.trim().toLowerCase(), column.dataType);
-      }
-    }
-  }
+  {}
   const startedAt = Date.now();
   // Concurrent batches get at least the dedicated 30-minute floor while
   // preserving an unlimited setting (0) and any larger configured timeout;
@@ -5105,7 +4809,7 @@ onMounted(() => {
     // A clean persisted editor snapshot is not a live schema cache. After an
     // MCP DDL, restoring its loaded-facet flags would otherwise bypass the
     // invalidated backend cache entirely. Legacy/dirty drafts remain intact.
-    const revalidateRestoredColumns = props.draft.dirty === false && !isCreateMode.value && loadedMetadataFacets.has("columns") && !(databaseType.value === "manticoresearch" && tableMetadataCapabilities.value.ddl);
+    const revalidateRestoredColumns = props.draft.dirty === false && !isCreateMode.value && loadedMetadataFacets.has("columns");
     void hydrateRestoredDraftFromDatabase().then(async () => {
       applyInitialStructureTarget();
       void loadMysqlAutoIncrementCounter(true);
@@ -5128,8 +4832,8 @@ onActivated(() => {
   registerStructureEditorShortcuts();
   observeStructureHorizontalScroller();
   void loadDynamicDataTypeOptions();
-  if (supportsTableOwner.value && !loadedMetadataFacets.has("owner")) void loadTableOwner(false, props.draft?.tableOwner !== undefined);
-  if (supportsTableOwner.value && !tableOwnerRolesLoading.value && tableOwnerRoles.value.length === 0 && !tableOwnerRolesLoadError.value) void loadTableOwnerRoles();
+  {}
+  {}
   if (supportsMysqlEngine.value && !mysqlTableEngineLoading.value && mysqlTableEngineOptions.value.length === 0 && !mysqlTableEngineLoadError.value) {
     void loadMysqlTableEngine(props.draft?.mysqlTableEngine !== undefined);
   }
@@ -5464,42 +5168,6 @@ watch(
           <AlertTriangle :class="[structureIconClass, 'shrink-0 text-destructive']" />
         </TooltipTrigger>
         <TooltipContent>{{ t("structureEditor.mysqlTableEngineLoadFailed", { message: mysqlTableEngineLoadError }) }}</TooltipContent>
-      </Tooltip>
-    </div>
-
-    <TablePhysicalOptionsEditor v-if="isCreateMode && databaseType === 'transwarp'" v-model="physicalOptions" :config="INCEPTOR_PHYSICAL_OPTIONS" :columns="columns.filter((column) => !column.markedForDrop && !!column.name.trim())" :disabled="saving" />
-
-    <div v-if="supportsTableOwner" class="flex shrink-0 items-center gap-2">
-      <label class="flex shrink-0 items-center gap-1 font-medium text-muted-foreground">
-        <UserRound :class="structureIconClass" />
-        {{ t("structureEditor.owner") }}
-      </label>
-      <SearchableSelect
-        v-model="tableOwner"
-        :options="tableOwnerOptions"
-        :placeholder="t('structureEditor.ownerPlaceholder')"
-        :search-placeholder="t('structureEditor.ownerSearchPlaceholder')"
-        :empty-text="t('structureEditor.ownerRolesEmpty')"
-        :loading-text="t('common.loading')"
-        :loading="tableOwnerRolesLoading"
-        :allow-custom="true"
-        :trim-custom="false"
-        :disabled="tableOwnerLoading || !!tableOwnerLoadError"
-        :trigger-class="[structureMonoControlClass, 'w-[220px] max-w-[220px]']"
-        data-owner-select
-      />
-      <Loader2 v-if="tableOwnerLoading" :class="[structureIconClass, 'animate-spin text-muted-foreground']" />
-      <Tooltip v-else-if="tableOwnerLoadError">
-        <TooltipTrigger as-child>
-          <AlertTriangle :class="[structureIconClass, 'shrink-0 text-destructive']" />
-        </TooltipTrigger>
-        <TooltipContent>{{ t("structureEditor.ownerLoadFailed", { message: tableOwnerLoadError }) }}</TooltipContent>
-      </Tooltip>
-      <Tooltip v-else-if="tableOwnerRolesLoadError">
-        <TooltipTrigger as-child>
-          <AlertTriangle :class="[structureIconClass, 'shrink-0 text-amber-500']" />
-        </TooltipTrigger>
-        <TooltipContent>{{ t("structureEditor.ownerRolesLoadFailed", { message: tableOwnerRolesLoadError }) }}</TooltipContent>
       </Tooltip>
     </div>
 
@@ -5972,42 +5640,10 @@ watch(
                         <td v-if="showExtendedProperties" :class="[structureCellClass, structureColumnSelectionClass('extendedProperties')]">
                           <div :class="structurePropertyListClass">
                             <!-- Manticore Search: character data type properties -->
-                            <template v-if="databaseType === 'manticoresearch'">
-                              <template v-if="isManticoreTextColumn(column)">
-                                <label :class="structurePropertyLabelClass" title="indexed">
-                                  <input :checked="!!column.extra.manticoreIndexed" type="checkbox" :class="[structureCheckboxClass, 'shrink-0']" :disabled="isManticoreColumnPropertyDisabled(column)" @change="column.extra.manticoreIndexed = ($event.target as HTMLInputElement).checked" />
-                                  <span class="min-w-0 truncate">indexed</span>
-                                </label>
-                                <label :class="structurePropertyLabelClass" title="stored">
-                                  <input :checked="!!column.extra.manticoreStored" type="checkbox" :class="[structureCheckboxClass, 'shrink-0']" :disabled="isManticoreColumnPropertyDisabled(column)" @change="column.extra.manticoreStored = ($event.target as HTMLInputElement).checked" />
-                                  <span class="min-w-0 truncate">stored</span>
-                                </label>
-                                <label :class="structurePropertyLabelClass" title="attribute">
-                                  <input :checked="!!column.extra.manticoreAttribute" type="checkbox" :class="[structureCheckboxClass, 'shrink-0']" :disabled="isManticoreColumnPropertyDisabled(column)" @change="column.extra.manticoreAttribute = ($event.target as HTMLInputElement).checked" />
-                                  <span class="min-w-0 truncate">attribute</span>
-                                </label>
-                              </template>
-                              <template v-else-if="isManticoreJsonColumn(column)">
-                                <label :class="structurePropertyLabelClass" title="secondary_index">
-                                  <input
-                                    :checked="!!column.extra.manticoreSecondaryIndex"
-                                    type="checkbox"
-                                    :class="[structureCheckboxClass, 'shrink-0']"
-                                    :disabled="isManticoreColumnPropertyDisabled(column)"
-                                    @change="column.extra.manticoreSecondaryIndex = ($event.target as HTMLInputElement).checked"
-                                  />
-                                  <span class="min-w-0 truncate">secondary_index</span>
-                                </label>
-                              </template>
-                            </template>
+
                             <!-- MySQL: AUTO_INCREMENT + ON UPDATE CURRENT_TIMESTAMP -->
-                            <template v-else-if="structureDialect === 'sqlite'">
-                              <label :class="[structurePropertyLabelClass, 'shrink-0 pr-1']" :title="t('structureEditor.autoIncrement')">
-                                <input :checked="isSqliteAutoIncrement(column)" type="checkbox" :class="[structureCheckboxClass, 'shrink-0']" :disabled="!canEditSqliteAutoIncrement(column)" @change="setSqliteAutoIncrement(column, ($event.target as HTMLInputElement).checked)" />
-                                <span>{{ t("structureEditor.autoIncrement") }}</span>
-                              </label>
-                            </template>
-                            <template v-else-if="structureDialect === 'mysql'">
+
+                            <template v-if="structureDialect === 'mysql'">
                               <label :class="[structurePropertyLabelClass, 'shrink-0 pr-1']" :title="t('structureEditor.autoIncrement')">
                                 <input :checked="column.extra.autoIncrement" type="checkbox" :class="[structureCheckboxClass, 'shrink-0']" @change="setMysqlAutoIncrement(column, ($event.target as HTMLInputElement).checked)" />
                                 <span>{{ t("structureEditor.autoIncrement") }}</span>
@@ -6052,111 +5688,10 @@ watch(
                               </label>
                             </template>
                             <!-- Dameng: IDENTITY -->
-                            <template v-else-if="databaseType === 'dameng'">
-                              <label :class="structurePropertyLabelClass" :title="t('structureEditor.identity')">
-                                <input :checked="isDamengIdentityChecked(column)" type="checkbox" :class="[structureCheckboxClass, 'shrink-0']" :disabled="!canEditDamengIdentity(column)" @change="setDamengIdentity(column, ($event.target as HTMLInputElement).checked)" />
-                                <span class="min-w-0 truncate">{{ t("structureEditor.autoIncrement") }}</span>
-                              </label>
-                              <template v-if="isDamengIdentityChecked(column)">
-                                <Input
-                                  :model-value="column.extra.identity?.seed?.toString() ?? '1'"
-                                  type="number"
-                                  :class="[structureControlClass, 'w-14']"
-                                  :placeholder="t('structureEditor.identitySeed')"
-                                  :disabled="!canEditDamengIdentityParameters(column)"
-                                  @update:model-value="(v) => updateDamengIdentitySeed(column, v)"
-                                />
-                                <Input
-                                  :model-value="column.extra.identity?.increment?.toString() ?? '1'"
-                                  type="number"
-                                  :class="[structureControlClass, 'w-14']"
-                                  :placeholder="t('structureEditor.identityIncrement')"
-                                  :disabled="!canEditDamengIdentityParameters(column)"
-                                  @update:model-value="(v) => updateDamengIdentityIncrement(column, v)"
-                                />
-                              </template>
-                            </template>
+
                             <!-- PostgreSQL: IDENTITY -->
-                            <template v-else-if="structureDialect === 'postgres'">
-                              <Select
-                                :model-value="column.extra.identity?.generation ?? 'none'"
-                                @update:model-value="
-                                  (value: any) => {
-                                    const generation = String(value ?? '');
-                                    if (generation && generation !== 'none') {
-                                      column.extra.identity = {
-                                        ...column.extra.identity,
-                                        generation: generation as 'BY DEFAULT' | 'ALWAYS',
-                                      };
-                                    } else {
-                                      column.extra.identity = undefined;
-                                    }
-                                  }
-                                "
-                              >
-                                <SelectTrigger class="structure-grid-control h-[var(--structure-control-height)] w-28 rounded-[6px] px-[var(--structure-control-px)] text-[length:var(--structure-font-size)] focus-visible:border-ring/50 focus-visible:ring-1 focus-visible:ring-ring/25">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="none">{{ t("structureEditor.no") }}</SelectItem>
-                                  <SelectItem value="BY DEFAULT">BY DEFAULT</SelectItem>
-                                  <SelectItem value="ALWAYS">ALWAYS</SelectItem>
-                                </SelectContent>
-                              </Select>
-                              <template v-if="column.extra.identity?.generation">
-                                <Input
-                                  :model-value="column.extra.identity.seed?.toString() ?? ''"
-                                  type="number"
-                                  :class="[structureControlClass, 'w-14']"
-                                  :placeholder="t('structureEditor.identitySeed')"
-                                  @update:model-value="
-                                    (v) => {
-                                      if (column.extra.identity) {
-                                        column.extra.identity.seed = v ? Number(v) : undefined;
-                                      }
-                                    }
-                                  "
-                                />
-                                <Input
-                                  :model-value="column.extra.identity.increment?.toString() ?? ''"
-                                  type="number"
-                                  :class="[structureControlClass, 'w-14']"
-                                  :placeholder="t('structureEditor.identityIncrement')"
-                                  @update:model-value="
-                                    (v) => {
-                                      if (column.extra.identity) {
-                                        column.extra.identity.increment = v ? Number(v) : undefined;
-                                      }
-                                    }
-                                  "
-                                />
-                              </template>
-                            </template>
+
                             <!-- SQL Server: IDENTITY -->
-                            <template v-else-if="structureDialect === 'sqlserver'">
-                              <label :class="structurePropertyLabelClass" :title="canEditSqlServerIdentity(column) || isSqlServerIdentityChecked(column) ? t('structureEditor.identity') : t('structureEditor.sqlServerIdentityTypeHint')">
-                                <input :checked="isSqlServerIdentityChecked(column)" type="checkbox" :class="[structureCheckboxClass, 'shrink-0']" :disabled="!canEditSqlServerIdentity(column)" @change="setSqlServerIdentity(column, ($event.target as HTMLInputElement).checked)" />
-                                <span class="min-w-0 truncate">{{ t("structureEditor.autoIncrement") }}</span>
-                              </label>
-                              <template v-if="isSqlServerIdentityChecked(column)">
-                                <Input
-                                  :model-value="column.extra.identity?.seed?.toString() ?? '1'"
-                                  type="number"
-                                  :class="[structureControlClass, 'w-14']"
-                                  :placeholder="t('structureEditor.identitySeed')"
-                                  :disabled="!canEditSqlServerIdentity(column)"
-                                  @update:model-value="(v) => updateSqlServerIdentitySeed(column, v)"
-                                />
-                                <Input
-                                  :model-value="column.extra.identity?.increment?.toString() ?? '1'"
-                                  type="number"
-                                  :class="[structureControlClass, 'w-14']"
-                                  :placeholder="t('structureEditor.identityIncrement')"
-                                  :disabled="!canEditSqlServerIdentity(column)"
-                                  @update:model-value="(v) => updateSqlServerIdentityIncrement(column, v)"
-                                />
-                              </template>
-                            </template>
                           </div>
                         </td>
                       </tr>
@@ -6439,8 +5974,8 @@ watch(
                   <Button v-else variant="ghost" size="sm" :class="structureToolbarButtonClass" :disabled="!canEditTriggerDraft(trigger)" :title="t('structureEditor.triggerName')" @click.stop="startRenameTrigger(trigger)">
                     <Pencil :class="structureIconClass" />
                   </Button>
-                  <Input v-if="isOracleTriggerEditor" v-model="trigger.timing" class="h-[var(--structure-control-height)] w-28 shrink-0 rounded-[6px] px-[var(--structure-control-px)]" :disabled="!canEditTriggerDraft(trigger)" @click.stop />
-                  <Select v-else v-model="trigger.timing" :disabled="!canEditTriggerDraft(trigger)">
+
+                  <Select v-model="trigger.timing" :disabled="!canEditTriggerDraft(trigger)">
                     <SelectTrigger class="w-28 shrink-0" @click.stop>
                       <SelectValue />
                     </SelectTrigger>
@@ -6448,8 +5983,8 @@ watch(
                       <SelectItem v-for="timing in triggerTimingOptions" :key="timing" :value="timing">{{ timing }}</SelectItem>
                     </SelectContent>
                   </Select>
-                  <Input v-if="isOracleTriggerEditor || isSqlServerTriggerEditor" v-model="trigger.event" class="h-[var(--structure-control-height)] w-28 shrink-0 rounded-[6px] px-[var(--structure-control-px)]" :disabled="!canEditTriggerDraft(trigger)" @click.stop />
-                  <Select v-else v-model="trigger.event" :disabled="!canEditTriggerDraft(trigger)">
+
+                  <Select v-model="trigger.event" :disabled="!canEditTriggerDraft(trigger)">
                     <SelectTrigger class="w-24 shrink-0" @click.stop>
                       <SelectValue />
                     </SelectTrigger>
@@ -6884,10 +6419,7 @@ watch(
               </div>
             </div>
           </template>
-          <label v-else-if="partitionDialogMode === 'detach' && partitionSupportsConcurrentDetach" class="flex items-center gap-2 text-sm">
-            <input v-model="partitionDialogConcurrently" type="checkbox" />
-            {{ t("structureEditor.partitionDetachConcurrently") }}
-          </label>
+
           <p v-if="partitionDialogMode === 'detach'" class="text-sm text-muted-foreground">{{ t("structureEditor.partitionDetachWarning") }}</p>
           <p v-if="partitionDialogMode === 'drop'" class="text-sm text-destructive">{{ t("structureEditor.partitionDropWarning") }}</p>
           <div v-if="partitionDialogSql || partitionDialogSqlWarnings.length" class="space-y-1">

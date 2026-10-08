@@ -173,14 +173,11 @@ export function migrateLegacyPinnedTreeNodeIds(nodes: readonly TreeNode[], pinne
   return { ids: migrated.ids, changed: migrated.changed };
 }
 
-export function reorderPinnedTreeNodeOrder(order: readonly string[], draggedKey: string, targetKey: string, position: PinnedTreeNodeDropPosition): string[] {
+export function reorderPinnedTreeNodeOrder(order: readonly string[], _draggedKey: string, _targetKey: string, _position: PinnedTreeNodeDropPosition): string[] {
   const normalized = normalizePinnedTreeNodeOrder(order);
-  if (draggedKey === targetKey || !normalized.includes(draggedKey) || !normalized.includes(targetKey)) return normalized;
-
-  const next = normalized.filter((key) => key !== draggedKey);
-  const targetIndex = next.indexOf(targetKey);
-  next.splice(position === "before" ? targetIndex : targetIndex + 1, 0, draggedKey);
-  return next;
+  {
+    return normalized;
+  }
 }
 
 export function orderPinnedFirst<T>(items: T[], isPinned: (item: T) => boolean): T[] {

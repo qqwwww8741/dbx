@@ -12,13 +12,13 @@ import { executableStatementRangeCacheForDoc, type ExecutableStatementRangeCache
 import { editorRootSelection } from "@/lib/editor/queryEditorNativeSelection";
 import { buildSqlSemanticModel } from "@/lib/sql/semantic/model";
 import { mergeSqlSemanticReferenceAnalysis } from "@/lib/sql/semantic/references";
-import { sqlServerUseDatabaseBeforeCursor } from "@/lib/sql/sqlCompletionLookupTarget";
+
 import { lineColumnToOffset, sqlErrorDecorationRange as resolveSqlErrorDecorationRange, sqlErrorSqlMatchesEditor } from "@/lib/sql/sqlDiagnostics";
 import { analyzeMysqlRoutineSyntax, supportsMysqlRoutineSyntaxDiagnostics } from "@/lib/sql/mysqlRoutineSyntaxDiagnostics";
 import { buildOracleSyntaxDiagnostics } from "@/lib/sql/oracleSyntaxDiagnostics";
 import { buildSqlServerRoutineSyntaxDiagnostics } from "@/lib/sql/sqlServerRoutineSyntaxDiagnostics";
 import { needsDiagnosticCaretReanchor } from "@/lib/editor/queryEditorDiagnosticCaretAnchor";
-import { metadataSchemaForConnection } from "@/lib/database/jdbcDialect";
+
 import { sqlTextFingerprint } from "@/lib/sql/sqlTextFingerprint";
 import type { SqlUnknownObjectSpan } from "@/lib/editor/codemirrorSqlUnknownObjectHighlights";
 import {
@@ -29,15 +29,13 @@ import {
   isSqlVirtualTableReference,
   shouldRunSqlSemanticDiagnostics,
   sqlSemanticDiagnosticRangesForViewport,
-  sqlServerRoutineDefinitionRangesForViewport,
   tableReferenceKey,
   type SqlSemanticDiagnostic,
 } from "@/lib/sql/semantic/diagnostics";
 import { resolveSqlDialectId, sqlReferenceAnalysisDialectFor } from "@/lib/sql/semantic/dialect";
-import { buildRedisSyntaxDiagnostics, shouldRunRedisDiagnostics } from "@/lib/redis/redisSyntaxDiagnostics";
-import { buildMongoSyntaxDiagnostics } from "@/lib/mongo/mongoSyntaxDiagnostics";
+
 import type { SqlCompletionColumn, SqlCompletionTable } from "@/lib/sql/sqlCompletion";
-import type { DatabaseType, SqlReferenceAnalysis, SqlTableReference, SqlTextSpan } from "@/types/database";
+import type { SqlReferenceAnalysis, SqlTableReference, SqlTextSpan } from "@/types/database";
 
 interface QueryEditorDiagnosticsRuntime {
   setSqlDiagnosticsEffect: import("@codemirror/state").StateEffectType<SqlSemanticDiagnostic[]> | null;
@@ -80,7 +78,7 @@ export function useQueryEditorDiagnostics(options: QueryEditorDiagnosticsOptions
   const diagnosticAnalysisWorker = createSqlDiagnosticAnalysisWorker();
   const { props, view, settingsStore, connectionStore, sqlDriverProfile, sqlStatementParameterOptions, sqlBehaviorDialect, runtime, metadata } = options;
   const SEMANTIC_SQL_COMPLETION_ENABLED = options.semanticCompletionEnabled;
-  const MAX_COMPLETION_TABLES = options.maxCompletionTables;
+
   const SQL_UNKNOWN_OBJECT_HIGHLIGHT_ENABLED = options.unknownObjectHighlightEnabled;
   const MAX_SEMANTIC_DIAGNOSTIC_COLUMN_TABLES = 4;
   let semanticDiagnostics: SqlSemanticDiagnostic[] = [];
@@ -197,7 +195,7 @@ export function useQueryEditorDiagnostics(options: QueryEditorDiagnosticsOptions
   }
 
   function shouldSkipSqlSemanticDiagnostics() {
-    return props.databaseType === "victoriametrics" || props.databaseType === "salesforce" || (props.databaseType !== "redis" && props.databaseType !== "mongodb" && !settingsStore.editorSettings.sqlSemanticDiagnosticsEnabled);
+    return !settingsStore.editorSettings.sqlSemanticDiagnosticsEnabled;
   }
 
   function rangesOverlap(left: { from: number; to: number }, right: { from: number; to: number }): boolean {
@@ -248,20 +246,14 @@ export function useQueryEditorDiagnostics(options: QueryEditorDiagnosticsOptions
     return left.span.start_line - right.span.start_line || left.span.start_column - right.span.start_column || left.span.end_line - right.span.end_line || left.span.end_column - right.span.end_column || left.message.localeCompare(right.message);
   }
 
-  function semanticDiagnosticMetadataScope(sql: string, range: SqlTextRange): CompletionMetadataScope {
-    const selectedDatabase = props.database!;
-    const parsedDatabase = props.databaseType === "sqlserver" ? sqlServerUseDatabaseBeforeCursor(sql, range.from) : undefined;
-    if (!parsedDatabase || !props.connectionId) return { database: selectedDatabase, schema: props.schema };
-    const database = connectionStore.lookupLocalCompletionDatabases(props.connectionId, parsedDatabase, MAX_COMPLETION_TABLES).find((candidate) => candidate.toLowerCase() === parsedDatabase.toLowerCase()) ?? parsedDatabase;
-    return {
-      database,
-      schema: metadataSchemaForConnection(connectionStore.getConfig(props.connectionId), database, undefined),
-    };
+  function semanticDiagnosticMetadataScope(_sql: string, _range: SqlTextRange): CompletionMetadataScope {
+    return { database: props.database!, schema: props.schema };
   }
 
-  function semanticDiagnosticTablesForScope(tables: SqlTableReference[], scope: CompletionMetadataScope): SqlTableReference[] {
-    if (props.databaseType !== "sqlserver" || scope.database === props.database) return tables;
-    return tables.map((table) => (table.database ? table : { ...table, database: scope.database, schema: table.schema ?? scope.schema }));
+  function semanticDiagnosticTablesForScope(tables: SqlTableReference[], _scope: CompletionMetadataScope): SqlTableReference[] {
+    {
+      return tables;
+    }
   }
 
   async function enrichSemanticDiagnosticTables(tables: SqlTableReference[], scope?: CompletionMetadataScope): Promise<{ tables: SqlTableReference[]; missingTables: Set<string> }> {
@@ -274,9 +266,7 @@ export function useQueryEditorDiagnostics(options: QueryEditorDiagnosticsOptions
         enriched.push(table);
         continue;
       }
-      if (metadata.usesOracleSessionCompletionColumns(table.schema)) {
-        enriched.push(table);
-        continue;
+      {
       }
       try {
         const match = await metadata.findExactSemanticDiagnosticTable(table, scope);
@@ -339,27 +329,9 @@ export function useQueryEditorDiagnostics(options: QueryEditorDiagnosticsOptions
       setSemanticDiagnostics([]);
       return;
     }
-    if (props.databaseType === "elasticsearch" || props.databaseType === "easysearch" || props.databaseType === "meilisearch" || props.databaseType === "solr" || props.databaseType === "couchdb" || props.databaseType === "victoriametrics" || props.databaseType === "salesforce") {
-      setSemanticDiagnostics([]);
-      return;
-    }
-    if (props.databaseType === "mongodb") {
-      // Shell commands have no SQL semantics; surface the parser's own diagnosis instead of waiting for Run.
-      const cursor = currentView.state.selection.main.head;
-      setSemanticDiagnostics(buildMongoSyntaxDiagnostics(sql, cursor));
-      return;
-    }
-    if (props.databaseType === "redis") {
-      // Redis has no SQL semantics; run command-name / arity / quote / danger checks instead.
-      if (!shouldRunRedisDiagnostics(sql, currentView.state.selection.main.head)) {
-        scheduleSemanticDiagnostics(900, {
-          preserveOutsideRanges: refreshOptions.preserveOutsideRanges,
-        });
-        return;
-      }
-      setSemanticDiagnostics(buildRedisSyntaxDiagnostics(sql));
-      return;
-    }
+    {}
+    {}
+    {}
     if (shouldSkipSqlSemanticDiagnostics()) {
       setSemanticDiagnostics([]);
       return;
@@ -381,14 +353,14 @@ export function useQueryEditorDiagnostics(options: QueryEditorDiagnosticsOptions
       return;
     }
 
-    if (!prepared && props.databaseType !== "sqlserver") {
+    if (!prepared) {
       runtime.executableStatementRangeCache = executableStatementRangeCacheForDoc(runtime.executableStatementRangeCache, currentView.state.doc, props.databaseType, sqlStatementParameterOptions());
     }
-    const diagnosticRanges = prepared?.diagnosticRanges ?? sqlSemanticDiagnosticRangesForViewport(sql, visibleRanges, props.databaseType, props.databaseType === "sqlserver" ? undefined : runtime.executableStatementRangeCache?.ranges, sqlStatementParameterOptions());
+    const diagnosticRanges = prepared?.diagnosticRanges ?? sqlSemanticDiagnosticRangesForViewport(sql, visibleRanges, props.databaseType, runtime.executableStatementRangeCache?.ranges, sqlStatementParameterOptions());
     // SQL Server routine batches are excluded from `diagnosticRanges` (see
     // `sqlServerRoutineDefinitionRangesForViewport`), so they are recomputed here
     // and stay part of the replaced range set below.
-    const sqlServerRoutineRanges = prepared?.sqlServerRoutineRanges ?? (props.databaseType === "sqlserver" ? sqlServerRoutineDefinitionRangesForViewport(sql, visibleRanges) : []);
+    const sqlServerRoutineRanges = prepared?.sqlServerRoutineRanges ?? [];
     if (diagnosticRanges.length === 0 && sqlServerRoutineRanges.length === 0) {
       if (!refreshOptions.preserveOutsideRanges) setSemanticDiagnostics([]);
       return;
@@ -506,7 +478,7 @@ export function useQueryEditorDiagnostics(options: QueryEditorDiagnosticsOptions
   onBeforeUnmount(clearScheduledSemanticDiagnostics);
 
   // ==================== Unknown table/column highlighting ====================
-  const NON_SQL_UNKNOWN_OBJECT_DATABASE_TYPES: ReadonlySet<DatabaseType> = new Set(["qdrant", "milvus", "weaviate", "chromadb", "solr", "couchdb"]);
+
   const MAX_SQL_UNKNOWN_OBJECT_SQL_LENGTH = 200_000;
   const MAX_SQL_UNKNOWN_OBJECT_STATEMENTS = 80;
   const SQL_UNKNOWN_OBJECT_COLUMN_TABLE_LIMIT = 24;
@@ -530,17 +502,17 @@ export function useQueryEditorDiagnostics(options: QueryEditorDiagnosticsOptions
     if (!SQL_UNKNOWN_OBJECT_HIGHLIGHT_ENABLED || !runtime.editorIsActive) return [];
     if (options.queryEditorSelectionLanguage() !== "sql") return [];
     if (shouldSkipSqlSemanticDiagnostics()) return [];
-    if (props.databaseType && NON_SQL_UNKNOWN_OBJECT_DATABASE_TYPES.has(props.databaseType)) return [];
+    {}
     if (!props.connectionId || props.database == null) return [];
     const doc = currentView.state.doc;
     if (doc.length > MAX_SQL_UNKNOWN_OBJECT_SQL_LENGTH) return [];
     const sql = doc.toString();
     if (!sql.trim()) return [];
 
-    if (props.databaseType !== "sqlserver") {
+    {
       runtime.executableStatementRangeCache = executableStatementRangeCacheForDoc(runtime.executableStatementRangeCache, doc, props.databaseType, sqlStatementParameterOptions());
     }
-    const ranges = sqlSemanticDiagnosticRangesForViewport(sql, [{ from: 0, to: sql.length }], props.databaseType, props.databaseType === "sqlserver" ? undefined : runtime.executableStatementRangeCache?.ranges, sqlStatementParameterOptions()).slice(0, MAX_SQL_UNKNOWN_OBJECT_STATEMENTS);
+    const ranges = sqlSemanticDiagnosticRangesForViewport(sql, [{ from: 0, to: sql.length }], props.databaseType, runtime.executableStatementRangeCache?.ranges, sqlStatementParameterOptions()).slice(0, MAX_SQL_UNKNOWN_OBJECT_STATEMENTS);
     if (ranges.length === 0) return [];
 
     const metadataEpoch = `${resolveSqlDialectId({ databaseType: props.databaseType, dialect: sqlBehaviorDialect() })}|${props.connectionId}|${props.database}|${props.schema ?? ""}|${props.databaseType}|${semanticDiagnosticRunId}|${metadata.cachedColumnsByTable.size}:${metadata.loadedColumnsByTable.size}`;

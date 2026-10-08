@@ -49,7 +49,6 @@ import {
   RefreshCcw,
   TableProperties,
   Network,
-  UserRound,
   Database,
   Eraser,
   Columns3,
@@ -115,25 +114,12 @@ import type { BuildSingleColumnAlterSqlOptions } from "@/lib/table/tableStructur
 import { buildTableSelectSql, qualifyTableReferencesInSql, quoteTableDataIdentifier } from "@/lib/table/tableSelectSql";
 import { uuid } from "@/lib/common/utils";
 import { generateCellValues, type CellValueGenerationKind } from "@/lib/dataGrid/cellValueGeneration";
-import { MONGO_DOCUMENT_GRID_NULL, mongoDocumentGridClipboardText, mongoDocumentGridDisplayText, mongoDocumentGridEditorText, mongoDocumentGridExternalValue, mongoDocumentGridInputValue, mongoDocumentGridNumericValue, mongoDocumentRelaxedExtendedJson } from "@/lib/mongo/mongoDocumentValues";
+
 import { compactHeaderColumnType, formatMetadataColumnTypeLabel, isNumericColumnType, resolveDataGridTypeVisualKind, resolveHeaderColumnType, resolveResultColumnType } from "@/lib/dataGrid/dataGridColumnType";
 import { dataGridCellTextClass, dataGridTypeVisualClass } from "@/lib/dataGrid/dataGridCellTextVisual";
 import { DATA_GRID_TYPE_COLOR_KEYS, resolveActiveDataGridTypeColors } from "@/lib/dataGrid/dataGridTypeColorScheme";
-import {
-  canDeleteExistingTdengineRows,
-  canEditExistingTableRows,
-  canInsertTableRows,
-  canUseKeylessRowPredicate,
-  hasCompleteTdengineRowIdentity,
-  hiveTablePropertiesIndicateTransactional,
-  isClickHouseExistingRowReadonlyColumn,
-  isHiddenGridColumn,
-  isSalesforceExistingRowReadonlyColumn,
-  isSalesforceNewRowReadonlyColumn,
-  isTdengineExistingRowReadonlyColumn,
-  shouldIncludeSyntheticRowId,
-} from "@/lib/table/tableEditing";
-import { buildDataGridConditionalUpdateSql, buildDataGridContextFilterCondition, buildDataGridCountSql, buildHiveTablePropertiesSql, type DataGridContextFilterMode } from "@/lib/dataGrid/dataGridSql";
+import { canDeleteExistingTdengineRows, canEditExistingTableRows, canInsertTableRows, canUseKeylessRowPredicate, hasCompleteTdengineRowIdentity, isHiddenGridColumn, isTdengineExistingRowReadonlyColumn, shouldIncludeSyntheticRowId } from "@/lib/table/tableEditing";
+import { buildDataGridConditionalUpdateSql, buildDataGridContextFilterCondition, buildDataGridCountSql, type DataGridContextFilterMode } from "@/lib/dataGrid/dataGridSql";
 import {
   buildVisibleTransposeRows,
   averageTransposeRecordWidth,
@@ -156,7 +142,7 @@ import {
   type TransposeScrollAlignment,
 } from "@/lib/dataGrid/dataGridTranspose";
 import { canApplyGridSelectionValue, canDeleteGridRowItem, canEditGridCellDetail, matchesRowStatusFilter, shouldShowQuickEntryDraftRow, type RowStatus, type RowStatusFilter } from "@/lib/dataGrid/gridRowStatus";
-import { displayCellValue, firstLineCellDisplayValue, gridCellDisplayValue, limitDataGridCellDisplay, SQLSERVER_DATA_GRID_CELL_DISPLAY_MAX_LENGTH, type CellValue } from "@/lib/dataGrid/cellValue";
+import { displayCellValue, firstLineCellDisplayValue, gridCellDisplayValue, limitDataGridCellDisplay, type CellValue } from "@/lib/dataGrid/cellValue";
 import { cellExternalUrl } from "@/lib/dataGrid/cellExternalUrl";
 import { getApplicablePreviewActions, type PreviewAction } from "@/lib/dataGrid/resultPreviewRegistry";
 import "@/lib/dataGrid/geometryMapPreview";
@@ -185,20 +171,9 @@ import {
 } from "@/lib/dataGrid/binaryCellDownload";
 import { buildBinaryHexViewRows } from "@/lib/dataGrid/binaryHexViewer";
 import { canFormatCellDetailJson, defaultCellDetailTab, isGeometryColumnType, linkedCellDetailTarget, looksLikeJsonContainerText, visibleCellDetailTabs, type CellDetailTab } from "@/lib/dataGrid/cellDetailPresentation";
-import {
-  buildDataGridCellDetail,
-  buildDataGridColumnDetail,
-  buildDataGridRowDetail,
-  buildDeleteRowConfirmDetails,
-  CELL_DETAIL_VALUE_PREVIEW_MAX_LENGTH,
-  dataGridColumnDetailJson,
-  dataGridColumnDetailTsv,
-  dataGridRowDetailJson,
-  dataGridRowDetailTsv,
-  type DataGridCellDetail,
-} from "@/lib/dataGrid/dataGridDetail";
+import { buildDataGridCellDetail, buildDataGridColumnDetail, buildDataGridRowDetail, buildDeleteRowConfirmDetails, dataGridColumnDetailJson, dataGridColumnDetailTsv, dataGridRowDetailJson, dataGridRowDetailTsv, type DataGridCellDetail } from "@/lib/dataGrid/dataGridDetail";
 import { adjacentDataGridDetailIndex, type DataGridDetailNavigationDelta } from "@/lib/dataGrid/dataGridDetailNavigation";
-import { applyColumnFormatter, DataGridDateTimePatterns, displayTimeZoneOption, formatIoTDBTimestampEditorValue, iotdbTimestampFractionDigits, iotdbTimestampPrecision, parseIoTDBTimestampEditorValue, type ColumnFormatterConfig } from "@/lib/dataGrid/columnFormatter";
+import { applyColumnFormatter, DataGridDateTimePatterns, displayTimeZoneOption, formatIoTDBTimestampEditorValue, iotdbTimestampPrecision, parseIoTDBTimestampEditorValue, type ColumnFormatterConfig } from "@/lib/dataGrid/columnFormatter";
 import { temporalCellEditorConfig, type TemporalCellEditorConfig } from "@/lib/dataGrid/dataGridTemporalEditor";
 import { BOOLEAN_CELL_EDITOR_VALUES, booleanCellEditorValue, isBooleanCellValue, isBooleanColumnType, isPointInBooleanCheckbox, nextBooleanCellValue, normalizeBooleanCellValue, parseBooleanCellEditorValue } from "@/lib/dataGrid/dataGridBooleanColumn";
 import { resolveDataGridColumnNullability, resolveDataGridColumnsByResultIndex } from "@/lib/dataGrid/dataGridColumnMetadata";
@@ -230,7 +205,6 @@ import {
   dataGridTotalRowCountLabelKey,
   dataGridUserFacingPage,
   dataGridTruncationHintKey,
-  ELASTICSEARCH_PAGE_JUMP_WARNING_REQUESTS,
   elasticsearchCursorPageJumpRequestCount,
   hasCompleteLocalDataGridResult,
   reconcileDataGridExactTotalWithObservedPage,
@@ -372,7 +346,7 @@ import { useTheme } from "@/composables/useTheme";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useQueryStore } from "@/stores/queryStore";
 import { useSettingsStore } from "@/stores/settingsStore";
-import { databaseSortSupportedForDatabase, simpleDataGridOrderByMatchesSort, simpleDataGridOrderByReferencesMissingColumn, type DataGridSortDirection, type DataGridSortMode } from "@/lib/dataGrid/dataGridSort";
+import { simpleDataGridOrderByMatchesSort, simpleDataGridOrderByReferencesMissingColumn, type DataGridSortDirection, type DataGridSortMode } from "@/lib/dataGrid/dataGridSort";
 import { resolveGridFocusRestoreTarget, shouldRestoreDataGridFocusAfterEditCommit } from "@/lib/dataGrid/dataGridFocusRestore";
 import { buildOrderedGridRows, type GridInsertRowPosition, type GridNewRowPlacement } from "@/lib/dataGrid/gridNewRowPlacement";
 import { formatQueryDuration } from "@/lib/format/duration";
@@ -392,16 +366,16 @@ import { getTableMetadataCapabilities } from "@/lib/table/tableMetadataCapabilit
 import { getTableStructureCapabilities } from "@/lib/table/tableStructureCapabilities";
 import { constraintsForConstraintsTab } from "@/lib/table/constraintPresentation";
 import { filterObjectBrowserTableColumns } from "@/lib/table/objectBrowserTableInfo";
-import { gaussdbMTypeDisplayName } from "@/lib/table/postgresDataTypeHelp";
+
 import { reserveDataGridHeaderLine } from "@/lib/dataGrid/dataGridHeaderLayout";
 import { buildColumnIndexMap, columnIndexColorClass, columnIndexNameKey, type ColumnIndexKind } from "@/lib/dataGrid/dataGridColumnIndexIcon";
 import { supportsTableStructureEditing } from "@/lib/database/databaseCapabilities";
 import { rememberDataGridConditionHistory } from "@/lib/dataGrid/dataGridConditionHistory";
 import { restoreDataGridLocalColumnFilters, type DataGridLocalFilterOption } from "@/lib/dataGrid/dataGridLocalColumnFilterState";
-import { effectiveDatabaseTypeForConnection, gaussdbCountQueryDopHint } from "@/lib/database/jdbcDialect";
-import { mongoCollectionSupportsIndexes, supportsMongoIndexMutations } from "@/lib/mongo/mongoCapabilities";
-import { isProtectedMongoIndex, mongoDropAllIndexesPreview, mongoDropIndexFailureCount, mongoDropIndexPreview } from "@/lib/sidebar/mongoCollectionMutation";
-import { runMongoMutation } from "@/lib/sidebar/runMongoSidebarMutation";
+import { effectiveDatabaseTypeForConnection } from "@/lib/database/jdbcDialect";
+
+import { isProtectedMongoIndex, mongoDropAllIndexesPreview, mongoDropIndexPreview } from "@/lib/sidebar/mongoCollectionMutation";
+
 import { dataGridConditionColumnOptions, dataGridConditionIdentifierQuote, dataGridFilterColumns } from "@/lib/dataGrid/dataGridConditionCompletion";
 import { isMacOS } from "@/lib/backend/platform";
 import { appendDebugLog, isDebugLoggingEnabled } from "@/lib/backend/debugLog";
@@ -418,7 +392,7 @@ const SqlPreviewPanel = defineAsyncComponent(() => import("@/components/editor/S
 const ImagePreviewDialog = defineAsyncComponent(() => import("@/components/grid/ImagePreviewDialog.vue"));
 const DataGridCellDetailDialog = defineAsyncComponent(() => import("@/components/grid/DataGridCellDetailDialog.vue"));
 const DataGridValueDiffDialog = defineAsyncComponent(() => import("@/components/grid/DataGridValueDiffDialog.vue"));
-const DataGridMongoJsonPreview = defineAsyncComponent(() => import("@/components/grid/DataGridMongoJsonPreview.vue"));
+
 const DataGridDetailDialogs = defineAsyncComponent(() => import("@/components/grid/DataGridDetailDialogs.vue"));
 const DataGridBulkEditDialog = defineAsyncComponent(() => import("@/components/grid/DataGridBulkEditDialog.vue"));
 const DataGridCopyColumnNamesDialog = defineAsyncComponent(() => import("@/components/grid/DataGridCopyColumnNamesDialog.vue"));
@@ -795,9 +769,9 @@ const productionContext = computed(() => productionContextForDatabase(resolvedCo
 // The collection grid and Mongo query-result grids share the document-grid value
 // encoding (BSON null sentinel + JSON-prefixed containers), so every display,
 // editor and clipboard path must decode it whenever MongoDB values are on screen.
-const usesMongoDocumentGridValues = computed(() => props.mongoCollectionGrid === true || resolvedDatabaseType.value === "mongodb");
+
 const isResultsContext = computed(() => props.context === "results");
-const canShowWhereSearch = computed(() => !!props.onExecuteSql && !isResultsContext.value && resolvedDatabaseType.value !== "victoriametrics" && resolvedDatabaseType.value !== "nebula");
+const canShowWhereSearch = computed(() => !!props.onExecuteSql && !isResultsContext.value);
 const canUseWhereSearch = computed(() => !!props.tableMeta && canShowWhereSearch.value);
 const canUseServerColumnFilter = computed(() => canUseWhereSearch.value && !!props.connectionId && !!props.tableMeta);
 const tableStructureCapabilities = computed(() => getTableStructureCapabilities(resolvedDatabaseType.value, resolvedConnectionConfig.value?.db_type));
@@ -907,22 +881,12 @@ function shortTypeName(t: string): string {
   if (s === "smallint") return "int2";
   if (s === "real") return "float4";
   // GaussDB M mode uses MySQL-style type names
-  if (resolvedDatabaseType.value === "gaussdb") {
-    const conn = resolvedConnectionConfig.value;
-    if (conn?.driver_profile?.toLowerCase() === "gaussdb-m") {
-      return gaussdbMTypeDisplayName(t);
-    }
-  }
+  {}
   return t;
 }
 
 function gaussdbMColumnType(dataType: string): string {
-  if (resolvedDatabaseType.value === "gaussdb") {
-    const conn = resolvedConnectionConfig.value;
-    if (conn?.driver_profile?.toLowerCase() === "gaussdb-m") {
-      return gaussdbMTypeDisplayName(dataType);
-    }
-  }
+  {}
   return dataType;
 }
 
@@ -949,7 +913,7 @@ function sortMenuItems(column: string, columnIndex: number) {
     column,
     columnIndex,
     state: currentColumnSortState(),
-    databaseSortEnabled: props.databaseSortEnabled !== false && databaseSortSupportedForDatabase(resolvedDatabaseType.value),
+    databaseSortEnabled: props.databaseSortEnabled !== false,
     labels: {
       databaseAscending: t("grid.sortDatabaseAscending"),
       databaseDescending: t("grid.sortDatabaseDescending"),
@@ -2350,7 +2314,7 @@ const columnAligns = computed<("left" | "right")[]>(() => {
 
 function gridCellTextColorClass(item: RowItem, actualColIdx: number, visibleColIdx: number): string {
   const value = item.data[actualColIdx];
-  const isGridNull = value === null || (usesMongoDocumentGridValues.value && value === MONGO_DOCUMENT_GRID_NULL);
+  const isGridNull = value === null;
   if (isGridNull) return "text-muted-foreground italic";
   if (!colorizeDataGridCellTypes.value) return "text-foreground";
   const checkbox = booleanCellsUseCheckbox.value && isBooleanGridCell(item, actualColIdx) && value !== null;
@@ -2373,7 +2337,7 @@ function transposeCellTextColorClass(recordIndex: number, actualColIdx: number):
   const item = displayItems.value[recordIndex];
   if (!item) return "text-foreground";
   const value = item.data[actualColIdx];
-  const isGridNull = value === null || (usesMongoDocumentGridValues.value && value === MONGO_DOCUMENT_GRID_NULL);
+  const isGridNull = value === null;
   if (isGridNull) return "text-muted-foreground italic";
   if (!colorizeDataGridCellTypes.value) return "text-foreground";
   return dataGridCellTextClass({
@@ -3662,21 +3626,9 @@ const canDeleteExistingRows = computed(() => !!props.customSaveHandler || canDel
 watch(
   () => [props.databaseType, props.connectionId, props.database, props.tableMeta?.schema, props.tableMeta?.tableName],
   async () => {
-    if ((props.databaseType !== "hive" && props.databaseType !== "transwarp") || !props.connectionId || !props.database || !props.tableMeta) {
+    {
       hiveTableTransactional.value = undefined;
       return;
-    }
-    try {
-      const sql = await buildHiveTablePropertiesSql({
-        databaseType: props.databaseType,
-        schema: props.tableMeta.schema || props.database,
-        tableName: props.tableMeta.tableName,
-        propertyName: "transactional",
-      });
-      const result = await api.executeQuery(props.connectionId, props.database, sql, props.tableMeta.schema);
-      hiveTableTransactional.value = hiveTablePropertiesIndicateTransactional(result);
-    } catch {
-      hiveTableTransactional.value = false;
     }
   },
   { immediate: true },
@@ -3704,13 +3656,8 @@ function executeServerPageJump(targetPage: number, updateCurrentPage = false) {
 }
 
 function requestServerPageJump(targetPage: number, updateCurrentPage = false) {
-  const usesElasticsearchCursor = isResultsContext.value && (resolvedDatabaseType.value === "elasticsearch" || resolvedDatabaseType.value === "easysearch");
-  const requestCount = elasticsearchCursorPageJumpRequestCount(currentPage.value, targetPage);
-  if (usesElasticsearchCursor && requestCount >= ELASTICSEARCH_PAGE_JUMP_WARNING_REQUESTS) {
-    pendingEsDeepPageJump.value = { targetPage, requestCount, updateCurrentPage };
-    esDeepPageJumpConfirmOpen.value = true;
-    return;
-  }
+  elasticsearchCursorPageJumpRequestCount(currentPage.value, targetPage);
+  {}
 
   executeServerPageJump(targetPage, updateCurrentPage);
 }
@@ -3849,7 +3796,7 @@ function loadAllRowsAndGoToLast() {
   // search_after cursor paging fetches page by page; a single giant append
   // against those cursors is untested, so ES/Easysearch grids keep the
   // reveal-only shortcut instead of loading everything.
-  if (isResultsContext.value && (resolvedDatabaseType.value === "elasticsearch" || resolvedDatabaseType.value === "easysearch")) return;
+  {}
   const effectiveTotal = paginationTotalRowCount.value ?? displayedTotalRowCount.value;
   const canFetchMore = canFetchNextInfiniteScrollSegment.value && (!totalRowCountIsExact.value || effectiveTotal === undefined || props.result.rows.length < effectiveTotal);
   const targetMaxRows = dataGridLoadAllInitialTarget(props.result.rows.length, infiniteScrollMaxRows.value, totalRowCountIsExact.value ? effectiveTotal : undefined);
@@ -4065,7 +4012,7 @@ function handleGridPaginationShortcut(event: KeyboardEvent): boolean {
 async function buildCurrentCountTarget(): Promise<{ sql: string; schema?: string } | undefined> {
   if (props.countSql) return { sql: props.countSql, schema: props.schema };
   if (props.tableMeta) {
-    const countHint = resolvedDatabaseType.value === "gaussdb" && props.connectionId ? gaussdbCountQueryDopHint(connectionStore.getConfig(props.connectionId)) : undefined;
+    const countHint = undefined;
     const sql = await buildDataGridCountSql({
       databaseType: props.databaseType,
       identifierQuote: connectionStore.connectionIdentifierQuote?.(props.connectionId),
@@ -4251,14 +4198,9 @@ const {
   request: requestDataGridSaveConfirmation,
   confirm: confirmDataGridSave,
 } = useDataGridSaveConfirmation();
-const isSalesforceGrid = computed(() => resolvedDatabaseType.value === "salesforce");
+
 const isInfluxDbV1DeleteGrid = computed(() => props.customSaveHandler?.confirmation === "influxdb-v1-delete");
-const salesforceIdentity = computed(() => (isSalesforceGrid.value && props.connectionId ? connectionStore.salesforceCurrentUser(props.connectionId) : null));
-const salesforceIdentityLabel = computed(() => {
-  const identity = salesforceIdentity.value;
-  if (!identity) return "";
-  return identity.username || identity.name || identity.email;
-});
+
 const salesforceSaveConfirmSummary = computed(() => {
   const parts: string[] = [];
   if (saveConfirmUpdates.value > 0) parts.push(t("grid.salesforceSaveUpdates", { count: saveConfirmUpdates.value }));
@@ -4268,18 +4210,10 @@ const salesforceSaveConfirmSummary = computed(() => {
 });
 // The save dialog names the profile alongside the user: writability comes from
 // the profile's FLS plus record sharing, not from the admin flag alone.
-const salesforceIdentityProfile = computed(() => {
-  const profileName = salesforceIdentity.value?.profileName;
-  return profileName ? t("grid.salesforceSaveProfile", { name: profileName }) : t("toolbar.salesforceIdentityUnknownProfile");
-});
+
 const salesforceSaveConfirmDetails = computed(() => {
   const lines = [salesforceSaveConfirmSummary.value, t("grid.salesforceSaveTarget", { object: saveConfirmTarget.value || t("grid.salesforceSaveUnknownObject") })];
-  if (salesforceIdentity.value) {
-    const identity = { user: salesforceIdentityLabel.value, profile: salesforceIdentityProfile.value };
-    if (salesforceIdentity.value.isAdmin === true) lines.push(t("grid.salesforceSaveAdminIdentity", identity));
-    else if (salesforceIdentity.value.isAdmin === false) lines.push(t("grid.salesforceSaveNonAdminIdentity", identity));
-    else lines.push(t("grid.salesforceSaveUnknownRights", identity));
-  }
+  {}
   return lines.filter((line) => !!line).join("\n");
 });
 const saveConfirmSql = computed(() => saveConfirmStatements.value.join("\n"));
@@ -4287,9 +4221,10 @@ const saveConfirmTitle = computed(() => (isInfluxDbV1DeleteGrid.value ? t("grid.
 const saveConfirmMessage = computed(() => (isInfluxDbV1DeleteGrid.value ? t("grid.influxDeleteConfirmMessage", { count: saveConfirmDeletes.value }) : t("grid.salesforceSaveConfirmMessage", { count: saveConfirmTotal.value })));
 const saveConfirmDetails = computed(() => (isInfluxDbV1DeleteGrid.value ? t("grid.influxDeleteTarget", { measurement: saveConfirmTarget.value || "—" }) : salesforceSaveConfirmDetails.value));
 const saveConfirmLabel = computed(() => (isInfluxDbV1DeleteGrid.value ? t("grid.influxDeleteConfirm") : t("grid.salesforceSaveConfirm")));
-watch(saveConfirmOpen, (isOpen) => {
-  if (!isOpen || !isSalesforceGrid.value || !props.connectionId) return;
-  void connectionStore.loadSalesforceCurrentUser(props.connectionId);
+watch(saveConfirmOpen, (_isOpen) => {
+  {
+    return;
+  }
 });
 
 const editor = useDataGridEditor({
@@ -4316,11 +4251,11 @@ const editor = useDataGridEditor({
   rowStatusFilter,
   dataGridQuickEntryEnabled: computed(() => settingsStore.editorSettings.dataGridQuickEntry),
   confirmDangerousRowDeletion: computed(() => settingsStore.editorSettings.confirmDangerousSqlExecution),
-  confirmSaveRequest: computed(() => (isSalesforceGrid.value || isInfluxDbV1DeleteGrid.value ? requestDataGridSaveConfirmation : undefined)),
+  confirmSaveRequest: computed(() => (isInfluxDbV1DeleteGrid.value ? requestDataGridSaveConfirmation : undefined)),
   includeDatabaseNameInSaveSql: computed(() => settingsStore.editorSettings.generateSqlIncludeDatabaseName),
   initialEditColumn: firstVisibleColumnIndex,
   cellEditorText: cellEditorTextForValue,
-  normalizeEditorInput: (value) => (usesMongoDocumentGridValues.value ? mongoDocumentGridInputValue(value) : value),
+  normalizeEditorInput: (value) => value,
   getRowItem,
   pageSize,
   currentPage,
@@ -4553,14 +4488,17 @@ function canEditCellItem(item: RowItem | undefined, columnIndex: number): boolea
   if (isSavingNewRow(item)) return false;
   const column = props.result.columns[columnIndex] ?? "";
   if (customReadonlyColumns.value.has(column.toLowerCase())) return false;
-  const sourceColumn = props.sourceColumns?.[columnIndex] ?? column;
+
   if (item?.isNew || item?.isDraft) {
     // A new Salesforce record cannot carry non-createable fields (Id, CreatedDate, …).
-    if (isSalesforceNewRowReadonlyColumn(props.databaseType, sourceColumn, props.tableMeta?.columns ?? [])) return false;
+    {
+    }
   } else {
-    if (isClickHouseExistingRowReadonlyColumn(props.databaseType, sourceColumn, props.tableMeta?.primaryKeys ?? [], props.tableMeta?.columns ?? [])) return false;
+    {
+    }
     if (isTdengineExistingRowReadonlyColumn(props.databaseType, column, props.tableMeta?.columns ?? [])) return false;
-    if (isSalesforceExistingRowReadonlyColumn(props.databaseType, sourceColumn, props.tableMeta?.primaryKeys ?? [], props.tableMeta?.columns ?? [])) return false;
+    {
+    }
   }
   return true;
 }
@@ -4641,10 +4579,6 @@ function cellEditContentNeedsExpandedEditor(options: { displayText: string; edit
 }
 
 function cellEditorTextForValue(value: CellValue | undefined, columnIndex: number): string {
-  if (usesMongoDocumentGridValues.value) {
-    const documentGridText = mongoDocumentGridEditorText(value);
-    if (documentGridText !== undefined) return documentGridText;
-  }
   return dataGridCellEditorText({
     value: value ?? null,
     databaseType: resolvedDatabaseType.value,
@@ -4695,14 +4629,7 @@ function resultColumnInfoForGridColumn(columnIndex: number): Pick<ColumnInfo, "d
 }
 
 function temporalEditorConfigForColumn(columnIndex: number): TemporalCellEditorConfig | undefined {
-  if (resolvedDatabaseType.value === "iotdb") {
-    const resultType = props.result.column_types?.[columnIndex];
-    const tableType = tableColumnForGridColumn(columnIndex)?.data_type;
-    if ((resultType ?? tableType)?.trim().toUpperCase().startsWith("TIMESTAMP")) {
-      const precision = iotdbTimestampPrecision(resolvedDatabaseType.value, resultType);
-      return precision ? { kind: "datetime", fractionPrecision: iotdbTimestampFractionDigits(precision) } : undefined;
-    }
-  }
+  {}
   return temporalCellEditorConfig(tableColumnForGridColumn(columnIndex), props.databaseType);
 }
 
@@ -4712,10 +4639,6 @@ function isIoTDBTimestampColumn(columnIndex: number): boolean {
 }
 
 function inlineCellEditorText(value: CellValue, columnIndex: number): string {
-  if (usesMongoDocumentGridValues.value) {
-    const documentGridText = mongoDocumentGridEditorText(value);
-    if (documentGridText !== undefined) return documentGridText;
-  }
   const columnInfo = tableColumnForGridColumn(columnIndex) ?? resultColumnInfoForGridColumn(columnIndex);
   const columnType = props.result.column_types?.[columnIndex] ?? columnInfo?.data_type;
   return (
@@ -5357,7 +5280,7 @@ function columnHighlightMatchesFor(rules: ReadonlyMap<number, ColumnHighlightRul
   return computeColumnHighlightMatchKeys({
     rows: displayItems.value,
     rules,
-    isNullValue: (value) => value === null || (usesMongoDocumentGridValues.value && value === MONGO_DOCUMENT_GRID_NULL),
+    isNullValue: (value) => value === null,
   });
 }
 
@@ -6120,7 +6043,7 @@ const multiRowCount = computed(() => {
 // The MongoDB collection grid keeps int32/int64/decimal128 scalars as typed text
 // (`NumberLong("-7")`, `{"$numberDecimal":"-12.5"}`). Resolving those here keeps
 // SUM/AVG over a whole column equal to every number in that column.
-const selectionSummaryOptions = computed<SelectionSummaryOptions>(() => (usesMongoDocumentGridValues.value ? { numericValue: mongoDocumentGridNumericValue } : {}));
+const selectionSummaryOptions = computed<SelectionSummaryOptions>(() => ({}));
 
 // 框选拖拽中不物化 selectedCells / 不做数值汇总（大选区下这是 DOM 卡顿主因）
 const selectionSummary = computed(() => {
@@ -6540,11 +6463,11 @@ const contextCellDetail = computed(() => {
 // The MongoDB collection grid stores an internal sentinel for explicit BSON
 // null; detail panes must render display text instead of leaking that marker.
 function gridDetailRawValue(value: CellValue): string {
-  return usesMongoDocumentGridValues.value ? (mongoDocumentGridDisplayText(value) ?? displayCellValue(value)) : displayCellValue(value);
+  return displayCellValue(value);
 }
 
 function gridDetailIsNullValue(value: CellValue): boolean {
-  return value === null || (usesMongoDocumentGridValues.value && value === MONGO_DOCUMENT_GRID_NULL);
+  return value === null;
 }
 
 function cellDetailFor(rowIndex: number, columnIndex: number): DataGridCellDetail | null {
@@ -6576,29 +6499,7 @@ const activeCellDetail = computed(() => {
   return cell ? cellDetailFor(cell.rowIndex, cell.col) : null;
 });
 
-const canShowMongoJsonPreview = computed(() => props.databaseType === "mongodb" && !!props.result.mongo_documents && props.result.mongo_documents.length === props.result.rows.length);
-const mongoJsonPreviewOpen = computed(() => showMongoJsonPreview.value && canShowMongoJsonPreview.value);
-const activeMongoJsonDocument = computed(() => {
-  if (!mongoJsonPreviewOpen.value) return undefined;
-  const selectedCell = currentSelectedCellPosition();
-  if (!selectedCell) return undefined;
-  const item = displayItemAt(selectedCell.rowIndex);
-  return item?.sourceIndex === undefined ? undefined : props.result.mongo_documents?.[item.sourceIndex];
-});
-const mongoJsonPreviewFullText = computed(() => {
-  const document = activeMongoJsonDocument.value;
-  if (document === undefined) return "";
-  try {
-    // Relaxed Extended JSON (`{"$date": "…"}`) like Compass's JSON view, instead
-    // of the browser form's escaped `ISODate("…")` strings.
-    return JSON.stringify(mongoDocumentRelaxedExtendedJson(document), null, 2) ?? "";
-  } catch {
-    return "";
-  }
-});
-const mongoJsonPreviewText = computed(() => mongoJsonPreviewFullText.value.slice(0, CELL_DETAIL_VALUE_PREVIEW_MAX_LENGTH));
-const mongoJsonPreviewTruncated = computed(() => mongoJsonPreviewText.value.length < mongoJsonPreviewFullText.value.length);
-const mongoJsonPreviewUsesCodeEditor = computed(() => !!mongoJsonPreviewText.value && !mongoJsonPreviewTruncated.value);
+const canShowMongoJsonPreview = computed(() => false);
 
 watch(canShowMongoJsonPreview, (available) => {
   if (!available) showMongoJsonPreview.value = false;
@@ -6708,8 +6609,8 @@ const activeBinaryHexBytes = computed(() => {
 const activeBinaryHexRows = computed(() => (activeBinaryHexBytes.value ? buildBinaryHexViewRows(activeBinaryHexBytes.value) : []));
 const activeBinaryHexByteCount = computed(() => activeBinaryHexBytes.value?.length ?? 0);
 
-watch(activeCellDetailTabs, (tabs) => {
-  if (!tabs.includes(activeCellDetailTab.value)) {
+watch(activeCellDetailTabs, (_tabs) => {
+  {
     activeCellDetailTab.value = defaultCellDetailTab();
   }
 });
@@ -6901,8 +6802,8 @@ const detailEdit = useDataGridCellDetailEdit({
   resultRows: computed(() => props.result.rows),
   getColumnInfo: (columnIndex) => tableColumnForGridColumn(columnIndex) ?? resultColumnInfoForGridColumn(columnIndex),
   cellEditorText: cellEditorTextForValue,
-  normalizeEditorInput: (value) => (usesMongoDocumentGridValues.value ? mongoDocumentGridInputValue(value) : value),
-  nullValue: () => (props.mongoCollectionGrid ? MONGO_DOCUMENT_GRID_NULL : null),
+  normalizeEditorInput: (value) => value,
+  nullValue: () => null,
   getRowItem,
   hydrateLargeValueCell,
   applyCellValue,
@@ -6962,23 +6863,8 @@ function closeCellDetails() {
   detailCell.value = null;
 }
 
-function toggleMongoJsonPreview() {
-  if (!canShowMongoJsonPreview.value) return;
-  showMongoJsonPreview.value = !showMongoJsonPreview.value;
-  if (showMongoJsonPreview.value) {
-    closeCellDetails();
-    if (!currentSelectedCellPosition() && displayItems.value.length > 0 && visibleColumnIndexes.value.length > 0) {
-      selectSingleCell(0, 0);
-    }
-  }
-}
-
 function closeMongoJsonPreview() {
   showMongoJsonPreview.value = false;
-}
-
-function copyMongoJsonPreview() {
-  if (mongoJsonPreviewFullText.value) copyText(mongoJsonPreviewFullText.value);
 }
 
 function warnFormattedJsonEditIfNeeded(detail: DataGridCellDetail, force = false) {
@@ -7245,13 +7131,10 @@ function primitiveCellFormatKey(value: CellValue, columnIndex?: number): string 
 
 function formatCell(value: CellValue, columnIndex?: number, originalBytes?: number, limitDisplay = true): string {
   const formatter = columnIndex === undefined ? undefined : resolvedColumnFormatters.value[columnIndex];
-  if (usesMongoDocumentGridValues.value) {
-    const documentGridText = mongoDocumentGridDisplayText(value, formatter);
-    if (documentGridText !== undefined) return documentGridText;
-  }
+
   if (formatter?.kind === "foreign-key-display" && columnIndex !== undefined) {
     const display = formatForeignKeyCellDisplay(value, columnIndex);
-    return limitDisplay ? limitDataGridCellDisplay(display, resolvedDatabaseType.value === "sqlserver" ? SQLSERVER_DATA_GRID_CELL_DISPLAY_MAX_LENGTH : undefined) : display;
+    return limitDisplay ? limitDataGridCellDisplay(display, undefined) : display;
   }
   const columnInfo = columnIndex === undefined ? undefined : tableColumnForGridColumn(columnIndex);
   const displayColumnInfo = columnInfo ?? (columnIndex === undefined ? undefined : resultColumnInfoForGridColumn(columnIndex));
@@ -7266,7 +7149,7 @@ function formatCell(value: CellValue, columnIndex?: number, originalBytes?: numb
   const binaryDisplay = formatter ? null : binaryCellDisplayText(value, columnIndex === undefined ? undefined : allColumnTypes.value[columnIndex], originalBytes, resolvedDatabaseType.value);
   if (binaryDisplay !== null) return binaryDisplay;
   const s = applyColumnFormatter(value, formatter);
-  return limitDisplay ? limitDataGridCellDisplay(s, resolvedDatabaseType.value === "sqlserver" ? SQLSERVER_DATA_GRID_CELL_DISPLAY_MAX_LENGTH : undefined) : s;
+  return limitDisplay ? limitDataGridCellDisplay(s, undefined) : s;
 }
 
 function formatCellCached(value: CellValue, columnIndex?: number, originalBytes?: number): string {
@@ -7341,7 +7224,7 @@ function quoteIdent(name: string): string {
 
 function queryColumnRef(name: string): string {
   const quoted = quoteIdent(name);
-  return props.databaseType === "neo4j" ? `n.${quoted}` : quoted;
+  return quoted;
 }
 
 function rowNumberStatusClass(item: RowItem): string {
@@ -8221,7 +8104,7 @@ function drawCanvasGrid() {
     duplicateHighlightKeys: duplicateHighlightKeys.value,
     nullHighlightKeys: nullHighlightKeys.value,
     formatCell: (value, columnIndex, row) => formatCellCached(visibleLargeValuePreviewValue(row, columnIndex, value), columnIndex, largeValueOriginalBytes(row, columnIndex)),
-    isNullValue: (value) => value === null || (usesMongoDocumentGridValues.value && value === MONGO_DOCUMENT_GRID_NULL),
+    isNullValue: (value) => value === null,
     newRowCellPlaceholder,
     isRowActive,
     rowCellsUseSelectionVisual,
@@ -8569,9 +8452,9 @@ const {
   columnComments: visibleColumnComments,
   allColumnComments,
   displayValue: formatCellCached,
-  cellClipboardText: (value) => (usesMongoDocumentGridValues.value ? mongoDocumentGridClipboardText(value) : undefined),
-  externalCellValue: (value) => (usesMongoDocumentGridValues.value ? mongoDocumentGridExternalValue(value) : value),
-  mongoDocuments: computed(() => props.result.mongo_copy_documents ?? props.result.mongo_documents),
+  cellClipboardText: (_value) => undefined,
+  externalCellValue: (value) => value,
+
   spatialColumns: computed(() => props.result.spatial_columns),
   spatialValues: computed(() => props.result.spatial_values),
   columnTypes: visibleColumnTypes,
@@ -9680,10 +9563,10 @@ function applyGeneratedDetailValue(kind: CellValueGenerationKind, startValue = 1
   return true;
 }
 
-function generatedGridValue(kind: CellValueGenerationKind, value: string | null): string | null {
+function generatedGridValue(_kind: CellValueGenerationKind, value: string | null): string | null {
   // MongoDB collection grids reserve an empty cell for a missing field. Their
   // private null marker becomes $set: null in the document save layer.
-  if (kind === "null" && props.mongoCollectionGrid) return MONGO_DOCUMENT_GRID_NULL;
+
   return value;
 }
 
@@ -10186,7 +10069,7 @@ function redoGridChange(): boolean {
 }
 
 function openCellDetailSearch(): boolean {
-  return getDetailEditor()?.openSearch() || cellDetailPanelRef.value?.openSearch() || false;
+  return (getDetailEditor()?.openSearch() || cellDetailPanelRef.value?.openSearch()) ?? false;
 }
 
 async function onGridKeydown(event: KeyboardEvent) {
@@ -10356,10 +10239,6 @@ async function onGridKeydown(event: KeyboardEvent) {
 }
 
 function detailClipboardText(detail: DataGridCellDetail): string {
-  if (usesMongoDocumentGridValues.value) {
-    const documentGridText = mongoDocumentGridClipboardText(detail.value);
-    if (documentGridText !== undefined) return documentGridText;
-  }
   if (detail.value === null) return "";
   const binaryText = binaryCellClipboardText(detail.value, detail.type, resolvedDatabaseType.value);
   if (binaryText !== null) return binaryText;
@@ -10371,7 +10250,7 @@ function detailClipboardText(detail: DataGridCellDetail): string {
 // grid's BSON null marker is restored to a real null instead of leaking the
 // internal sentinel into clipboard JSON/TSV.
 function gridDetailExternalValue(value: CellValue): CellValue {
-  return usesMongoDocumentGridValues.value ? mongoDocumentGridExternalValue(value) : value;
+  return value;
 }
 
 async function copyDetailValue() {
@@ -10406,7 +10285,7 @@ function copyDetailColumnName() {
 function canDownloadDetailBinaryValue(detail: DataGridCellDetail | null): boolean {
   if (!detail) return false;
   const item = getRowItem(detail.rowId);
-  return (resolvedDatabaseType.value !== "tdengine" && isLargeValuePreview(item, detail.colIndex) && isBinaryCellColumnType(detail.type)) || canDownloadBinaryCellValue(detail.value, detail.type, resolvedDatabaseType.value);
+  return (isLargeValuePreview(item, detail.colIndex) && isBinaryCellColumnType(detail.type)) || canDownloadBinaryCellValue(detail.value, detail.type, resolvedDatabaseType.value);
 }
 
 function canImportDetailBinaryValue(detail: DataGridCellDetail | null): boolean {
@@ -11484,7 +11363,7 @@ const CELL_DETAIL_TABLE_MIN_VISIBLE_ROWS = 1.5;
 const CELL_DETAIL_TABLE_HORIZONTAL_SCROLLBAR_HEIGHT = 10;
 const CELL_DETAIL_TABLE_MIN_VISIBLE_HEIGHT = Math.ceil(CELL_DETAIL_TABLE_HEADER_HEIGHT + CANVAS_DATA_GRID_ROW_HEIGHT * CELL_DETAIL_TABLE_MIN_VISIBLE_ROWS + CELL_DETAIL_TABLE_HORIZONTAL_SCROLLBAR_HEIGHT);
 const DRAWER_MAX_WIDTH = 900;
-const MONGO_JSON_PREVIEW_DEFAULT_WIDTH = 420;
+
 function clampCellDetailPanelSize(value: number, layout = cellDetailPanelLayout.value): number {
   const min = layout === "bottom" ? CELL_DETAIL_PANEL_MIN_HEIGHT : CELL_DETAIL_PANEL_MIN_WIDTH;
   const max = layout === "bottom" ? CELL_DETAIL_PANEL_MAX_HEIGHT : DRAWER_MAX_WIDTH;
@@ -11515,7 +11394,7 @@ const tableOverviewComment = ref<string | null>(null);
 const tableOverviewLoading = ref(false);
 const tableOverviewLoaded = ref(false);
 const tableOverviewRequestGeneration = ref(0);
-const canShowTableOwner = computed(() => resolvedDatabaseType.value === "postgres" && !!props.connectionId && !!props.database && !!props.tableMeta?.schema && !!props.tableMeta?.tableName);
+const canShowTableOwner = computed(() => false);
 
 function scrollDdlSearchMatchIntoView(match: HTMLElement) {
   const pre = ddlPreRef.value;
@@ -11580,15 +11459,14 @@ function onDdlKeydown(e: KeyboardEvent) {
 const ddlLoading = ref(false);
 const ddlWidth = ref(settingsStore.editorSettings.tableInfoDrawerWidth);
 const detailPanelHeight = ref(settingsStore.editorSettings.cellDetailDrawerWidth);
-const mongoJsonPreviewWidth = ref(MONGO_JSON_PREVIEW_DEFAULT_WIDTH);
+
 const isResizingDdl = ref(false);
 const isResizingMongoJsonPreview = ref(false);
 let ddlResizeStartX = 0;
 let ddlResizeStartWidth = 0;
 let detailResizeStartY = 0;
 let detailResizeStartHeight = 0;
-let mongoJsonPreviewResizeStartX = 0;
-let mongoJsonPreviewResizeStartWidth = 0;
+
 const indexesRequestGeneration = ref(0);
 const showDropMongoIndexConfirm = ref(false);
 const dropMongoIndexLoading = ref(false);
@@ -11693,14 +11571,10 @@ const detailPanelStyle = computed(() =>
     : { width: `${detailPanelHeight.value}px` },
 );
 
-const mongoJsonPreviewStyle = computed(() => ({
-  width: `${mongoJsonPreviewWidth.value}px`,
-}));
-
 const contentGridStyle = computed(() => {
   const hasRightCellDetail = !cellDetailPanelIsBottom.value && showCellDetail.value && activeCellDetail.value;
-  const rightPanelWidth = hasRightCellDetail ? detailPanelHeight.value : mongoJsonPreviewOpen.value ? mongoJsonPreviewWidth.value : 0;
-  const hasRightPanel = hasRightCellDetail || mongoJsonPreviewOpen.value;
+  const rightPanelWidth = hasRightCellDetail ? detailPanelHeight.value : 0;
+  const hasRightPanel = hasRightCellDetail;
   // Keep this track explicit. WebKit can resolve a nested min() track sizing
   // function to zero when sibling tracks are currently collapsed, which
   // leaves the panel rendered but compresses its contents to a narrow strip.
@@ -11751,9 +11625,9 @@ const goToColumnToolbarCapability = computed<DataGridToolbarActionCapability>(()
     toggleGoToColumn();
   },
 }));
-const mongoConnectionConfig = resolvedConnectionConfig;
-const canManageMongoIndexes = computed(() => resolvedDatabaseType.value === "mongodb" && !!props.connectionId && !!props.database && !!props.tableMeta?.tableName && supportsMongoIndexMutations(mongoConnectionConfig.value, props.tableMeta?.tableType));
-const canShowTableIndexes = computed(() => tableMetadataCapabilities.value.indexes && (resolvedDatabaseType.value !== "mongodb" || mongoCollectionSupportsIndexes(props.tableMeta?.tableType)));
+
+const canManageMongoIndexes = computed(() => false);
+const canShowTableIndexes = computed(() => tableMetadataCapabilities.value.indexes);
 
 async function probeTablePartitionStatus() {
   const connectionId = props.connectionId;
@@ -11826,7 +11700,7 @@ const metadataLoaders = useDataGridTableMetadataLoaders({
   toastMongoIndexRefreshError: (message) => toast(t("contextMenu.mongoIndexRefreshFailed", { message }), 5000),
 });
 
-const { fetchDdl, fetchTableInfoColumns, fetchTableOwner, currentIndexTableIdentity, fetchIndexes, refreshMongoIndexMetadataAfterMutation, currentForeignKeyTableIdentity, fetchForeignKeys: fetchForeignKeysMetadata, fetchTriggers, fetchConstraints, fetchPartitions } = metadataLoaders;
+const { fetchDdl, fetchTableInfoColumns, fetchTableOwner, currentIndexTableIdentity, fetchIndexes, currentForeignKeyTableIdentity, fetchForeignKeys: fetchForeignKeysMetadata, fetchTriggers, fetchConstraints, fetchPartitions } = metadataLoaders;
 
 async function fetchTableOverview(force = false) {
   const connectionId = props.connectionId;
@@ -11974,7 +11848,7 @@ watch(
 
 async function refreshActiveTableInfo() {
   if (!showTableInfo.value || !props.tableMeta) return;
-  if (canShowTableOwner.value) void fetchTableOwner(true);
+  {}
 
   if (activeTableInfoTab.value === "info") {
     tableOverviewLoaded.value = false;
@@ -12405,18 +12279,10 @@ function onDetailResizeEnd() {
   window.removeEventListener("mouseup", onDetailResizeEnd);
 }
 
-function onMongoJsonPreviewResizeStart(event: MouseEvent) {
-  isResizingMongoJsonPreview.value = true;
-  mongoJsonPreviewResizeStartX = event.clientX;
-  mongoJsonPreviewResizeStartWidth = mongoJsonPreviewWidth.value;
-  document.body.classList.add("select-none", "cursor-col-resize");
-  window.addEventListener("mousemove", onMongoJsonPreviewResizeMove);
-  window.addEventListener("mouseup", onMongoJsonPreviewResizeEnd);
-}
-
-function onMongoJsonPreviewResizeMove(event: MouseEvent) {
-  if (!isResizingMongoJsonPreview.value) return;
-  mongoJsonPreviewWidth.value = clampCellDetailPanelSize(mongoJsonPreviewResizeStartWidth + mongoJsonPreviewResizeStartX - event.clientX, "right");
+function onMongoJsonPreviewResizeMove(_event: MouseEvent) {
+  {
+    return;
+  }
 }
 
 function onMongoJsonPreviewResizeEnd() {
@@ -12511,8 +12377,6 @@ const filteredIndexes = computed(() => {
   return indexes.value.filter((i) => i.name.toLowerCase().includes(q) || i.columns.some((c) => c.toLowerCase().includes(q)));
 });
 
-const droppableMongoIndexes = computed(() => indexes.value.filter((index) => !isProtectedMongoIndex(index)));
-
 const dropMongoIndexConfirmMessage = computed(() =>
   pendingDropMongoIndex.value
     ? t("contextMenu.confirmDropMongoIndexMessage", {
@@ -12530,111 +12394,22 @@ const dropAllMongoIndexesConfirmMessage = computed(() =>
 const dropAllMongoIndexesConfirmDetails = computed(() => t("contextMenu.confirmDropMongoAllIndexesDetails"));
 const dropAllMongoIndexesPreview = computed(() => mongoDropAllIndexesPreview(props.database || "", props.tableMeta?.tableName || ""));
 
-function requestDropMongoIndex(index: IndexInfo) {
-  if (!canManageMongoIndexes.value || isProtectedMongoIndex(index)) return;
-  pendingDropMongoIndex.value = index;
-  showDropMongoIndexConfirm.value = true;
-}
-
-function requestDropAllMongoIndexes() {
-  if (!canManageMongoIndexes.value || droppableMongoIndexes.value.length === 0) return;
-  showDropAllMongoIndexesConfirm.value = true;
+function requestDropMongoIndex(_index: IndexInfo) {
+  {
+    return;
+  }
 }
 
 async function confirmDropMongoIndex() {
-  const index = pendingDropMongoIndex.value;
-  const connectionId = props.connectionId;
-  const database = props.database;
-  const tableName = props.tableMeta?.tableName;
-  if (!connectionId || !database || !tableName || !index || !canManageMongoIndexes.value || isProtectedMongoIndex(index) || dropMongoIndexLoading.value) return;
-  await runMongoMutation({
-    connection: connectionStore.getConfig(connectionId),
-    database,
-    reviewText: dropMongoIndexPreview.value,
-    source: t("production.sourceDataGrid"),
-    loading: dropMongoIndexLoading,
-    beforeExecute: () => connectionStore.ensureConnected(connectionId),
-    execute: async () => {
-      try {
-        return await api.mongoDropIndexes(connectionId, database, tableName, JSON.stringify(index.name), true);
-      } finally {
-        await refreshMongoIndexMetadataAfterMutation();
-      }
-    },
-    onSuccess: (result) => {
-      const failed = mongoDropIndexFailureCount(result);
-      if (failed > 0) {
-        toast(
-          t("contextMenu.dropIndexesPartialFailure", {
-            success: result.dropped_names.length,
-            failed,
-          }),
-          5000,
-        );
-      } else {
-        toast(t("contextMenu.dropTableChildObjectSuccess", { name: index.name }), 3000);
-      }
-      showDropMongoIndexConfirm.value = false;
-      pendingDropMongoIndex.value = null;
-    },
-    onError: (e: any) =>
-      toast(
-        t("contextMenu.tableOperationFailed", {
-          message: e?.message || String(e),
-        }),
-        5000,
-      ),
-  });
+  {
+    return;
+  }
 }
 
 async function confirmDropAllMongoIndexes() {
-  const connectionId = props.connectionId;
-  const database = props.database;
-  const tableName = props.tableMeta?.tableName;
-  if (!connectionId || !database || !tableName || !canManageMongoIndexes.value || dropAllMongoIndexesLoading.value) return;
-  await runMongoMutation({
-    connection: connectionStore.getConfig(connectionId),
-    database,
-    reviewText: dropAllMongoIndexesPreview.value,
-    source: t("production.sourceDataGrid"),
-    loading: dropAllMongoIndexesLoading,
-    beforeExecute: () => connectionStore.ensureConnected(connectionId),
-    execute: async () => {
-      try {
-        return await api.mongoDropIndexes(connectionId, database, tableName, undefined, false);
-      } finally {
-        await refreshMongoIndexMetadataAfterMutation();
-      }
-    },
-    onSuccess: (result) => {
-      const failed = mongoDropIndexFailureCount(result);
-      if (failed > 0) {
-        toast(
-          t("contextMenu.dropIndexesPartialFailure", {
-            success: result.dropped_names.length,
-            failed,
-          }),
-          5000,
-        );
-      } else {
-        toast(
-          t("contextMenu.dropAllIndexesSuccess", {
-            count: result.dropped_names.length,
-            name: tableName,
-          }),
-          3000,
-        );
-      }
-      showDropAllMongoIndexesConfirm.value = false;
-    },
-    onError: (e: any) =>
-      toast(
-        t("contextMenu.tableOperationFailed", {
-          message: e?.message || String(e),
-        }),
-        5000,
-      ),
-  });
+  {
+    return;
+  }
 }
 
 const filteredForeignKeys = computed(() => {
@@ -13110,7 +12885,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
       canFilter: canUseWhereSearch.value,
       hasSort: !!sortCol.value,
       sortMode: sortMode.value,
-      databaseSortEnabled: props.databaseSortEnabled !== false && databaseSortSupportedForDatabase(resolvedDatabaseType.value),
+      databaseSortEnabled: props.databaseSortEnabled !== false,
       frozenColumnCount: frozenColumnCount.value,
       contextVisibleColIdx: contextHeaderVisibleColIdx.value ?? undefined,
       hasColumnSelection: hasColumnSelection.value,
@@ -13509,27 +13284,6 @@ useUpdateBlocker(() => (hasPendingChanges.value || hasPendingDataEditorDraft.val
                 <TooltipContent side="bottom" class="max-w-sm">
                   {{ t("grid.keylessEditWarningHint") }}
                 </TooltipContent>
-              </Tooltip>
-              <Tooltip v-if="canShowMongoJsonPreview">
-                <TooltipTrigger as-child>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    :class="['data-grid-topbar-action-button h-5 shrink-0 text-xs px-1.5', compactDataGridToolbar ? 'data-grid-topbar-action-button--compact' : '', mongoJsonPreviewOpen ? 'text-primary bg-primary/10 hover:bg-primary/15' : '']"
-                    :aria-pressed="mongoJsonPreviewOpen"
-                    @click="toggleMongoJsonPreview"
-                  >
-                    <Code2 class="data-grid-topbar-action-icon w-3 h-3" />
-                    <span
-                      class="data-grid-topbar-action-label"
-                      :class="{
-                        'data-grid-topbar-action-label--compact': compactDataGridToolbar,
-                      }"
-                      >{{ t("grid.mongoJsonPreview") }}</span
-                    >
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">{{ t("grid.mongoJsonPreview") }}</TooltipContent>
               </Tooltip>
             </template>
           </DataGridToolbar>
@@ -14995,12 +14749,7 @@ useUpdateBlocker(() => (hasPendingChanges.value || hasPendingDataEditorDraft.val
                   <span class="table-info-action-label">{{ t("settings.wordWrap") }}</span>
                 </Button>
               </div>
-              <div v-else-if="activeTableInfoTab === 'indexes' && canManageMongoIndexes" class="table-info-actions flex min-w-0 shrink-0 items-center gap-1">
-                <Button variant="ghost" size="sm" class="table-info-action-button h-6 px-2 text-xs text-destructive hover:text-destructive" :disabled="indexesLoading || dropAllMongoIndexesLoading || droppableMongoIndexes.length === 0" @click="requestDropAllMongoIndexes">
-                  <Trash2 class="w-3 h-3" />
-                  <span class="table-info-action-label">{{ t("contextMenu.dropAllIndexes") }}</span>
-                </Button>
-              </div>
+
               <Button v-if="canOpenTableStructureEditor" variant="ghost" size="sm" class="table-info-action-button h-6 px-2 text-xs" :title="t('contextMenu.editStructure')" :aria-label="t('contextMenu.editStructure')" @click="openTableStructureEditor(activeTableInfoTab)">
                 <PencilRuler class="w-3 h-3" />
                 <span class="table-info-action-label">{{ t("contextMenu.editStructure") }}</span>
@@ -15022,14 +14771,7 @@ useUpdateBlocker(() => (hasPendingChanges.value || hasPendingDataEditorDraft.val
                 <X class="w-3 h-3" />
               </Button>
             </div>
-            <div v-if="canShowTableOwner" class="flex h-7 min-w-0 shrink-0 items-center gap-1.5 border-b bg-background px-3 text-[11px] text-muted-foreground">
-              <Loader2 v-if="tableOwnerLoading" class="h-3 w-3 shrink-0 animate-spin" />
-              <UserRound v-else class="h-3 w-3 shrink-0" />
-              <span class="shrink-0">{{ t("grid.tableOwner") }}</span>
-              <span v-if="tableOwner" class="min-w-0 truncate font-mono text-foreground" :title="tableOwner">{{ tableOwner }}</span>
-              <span v-else-if="tableOwnerError" class="min-w-0 truncate text-destructive" :title="tableOwnerError">{{ t("grid.tableOwnerUnavailable") }}</span>
-              <span v-else class="text-muted-foreground">-</span>
-            </div>
+
             <div class="grid border-b bg-background shrink-0" :style="tableInfoTabListStyle">
               <button
                 v-for="tab in tableInfoTabs"
@@ -15244,18 +14986,6 @@ useUpdateBlocker(() => (hasPendingChanges.value || hasPendingDataEditorDraft.val
               </TabsContent>
             </Tabs>
           </div>
-          <DataGridMongoJsonPreview
-            v-if="mongoJsonPreviewOpen"
-            :full-text="mongoJsonPreviewFullText"
-            :text="mongoJsonPreviewText"
-            :uses-code-editor="mongoJsonPreviewUsesCodeEditor"
-            :panel-style="mongoJsonPreviewStyle"
-            :resizing="isResizingMongoJsonPreview"
-            @copy="copyMongoJsonPreview"
-            @close="closeMongoJsonPreview"
-            @resize-start="onMongoJsonPreviewResizeStart"
-            @context-menu="onDrawerContextMenu"
-          />
         </div>
       </div>
     </CustomContextMenu>

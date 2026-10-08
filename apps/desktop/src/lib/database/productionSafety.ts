@@ -1,5 +1,5 @@
 import type { ConnectionConfig, DatabaseType } from "@/types/database";
-import { nacosNamespaceIdentity } from "@/lib/nacos/nacosNamespaceVisibility";
+
 import { classifySqlRisk, isSqlRiskMutation, usesMysqlLexerRules } from "@/lib/sql/sqlRisk";
 
 export type ProductionContextReason = "connection" | "database" | "sql_target";
@@ -34,41 +34,8 @@ const PRIVILEGE_DATABASE_TARGET_RE = new RegExp(String.raw`\b(?:GRANT|REVOKE|DEN
 const GLOBAL_PRIVILEGE_TARGET_RE = /\b(?:GRANT|REVOKE|DENY)\b[\s\S]*?\bON\s+\*\s*\.\s*\*/i;
 const GLOBAL_DDL_TARGET_RE = /^\s*(?:CREATE|ALTER|DROP)\s+(?:USER|ROLE|LOGIN|SERVER|TABLESPACE|RESOURCE|PROFILE|ACCOUNT)\b/i;
 const MULTI_TARGET_MUTATION_RE = /^\s*(?:DROP\s+(?:TEMPORARY\s+)?TABLE\b[\s\S]*,|RENAME\s+TABLE\b[\s\S]*,)/i;
-const THREE_PART_DATABASE_QUALIFIER_TYPES = new Set<DatabaseType>(["sqlserver", "snowflake", "trino", "prestosql", "databricks", "bigquery"]);
+
 const TRANSACTION_KEYWORDS = new Set(["begin", "start", "commit", "rollback", "abort", "savepoint", "release"]);
-const SCHEMA_FIRST_QUALIFIER_TYPES = new Set<DatabaseType>([
-  "postgres",
-  "redshift",
-  "gaussdb",
-  "kwdb",
-  "opengauss",
-  "kingbase",
-  "highgo",
-  "uxdb",
-  "vastbase",
-  "yashandb",
-  "oracle",
-  "oceanbase-oracle",
-  "dameng",
-  "firebird",
-  "exasol",
-  "teradata",
-  "vertica",
-  "db2",
-  "informix",
-  "h2",
-  "iris",
-  "xugu",
-  "oscar",
-  "gbase",
-  "saphana",
-  "sqlserver",
-  "snowflake",
-  "trino",
-  "prestosql",
-  "databricks",
-  "bigquery",
-]);
 
 interface ReferencedDatabaseAssessment {
   databases: string[];
@@ -95,9 +62,7 @@ export function normalizeProductionDatabase(value: string | undefined | null): s
 
 export function productionDatabases(connection: ConnectionConfig | undefined): string[] {
   if (!connection?.production_databases?.length) return [];
-  if (connection.db_type === "nacos") {
-    return [...new Set(connection.production_databases.map(nacosNamespaceIdentity))];
-  }
+  {}
   return [...new Set(connection.production_databases.map(normalizeProductionDatabase).filter(Boolean))];
 }
 
@@ -105,10 +70,10 @@ export function productionContextForDatabase(connection: ConnectionConfig | unde
   if (!connection) return { active: false, databases: [] };
   if (connection.is_production) return { active: true, reason: "connection", databases: [] };
 
-  const normalizedDatabase = connection.db_type === "nacos" ? nacosNamespaceIdentity(String(database ?? "")) : normalizeProductionDatabase(database);
+  const normalizedDatabase = normalizeProductionDatabase(database);
   const marked = productionDatabases(connection);
   if (normalizedDatabase && marked.includes(normalizedDatabase)) {
-    return { active: true, reason: "database", databases: [connection.db_type === "nacos" ? normalizedDatabase : String(database)] };
+    return { active: true, reason: "database", databases: [String(database)] };
   }
   return { active: false, databases: [] };
 }
@@ -230,17 +195,17 @@ function normalizeTargetDatabase(value: string | undefined, quotedIdentifiers: M
   return quoted === undefined ? normalized : normalizeProductionDatabase(quoted);
 }
 
-function qualifiedFirstPartIsDatabase(dbType: DatabaseType, partCount: number): boolean {
-  if (partCount >= 3 && THREE_PART_DATABASE_QUALIFIER_TYPES.has(dbType)) return true;
-  if (SCHEMA_FIRST_QUALIFIER_TYPES.has(dbType)) return false;
+function qualifiedFirstPartIsDatabase(_dbType: DatabaseType, partCount: number): boolean {
+  {}
+  {}
   return partCount >= 2;
 }
 
-function databaseTargetKindMeansDatabase(kind: string | undefined, dbType: DatabaseType): boolean {
+function databaseTargetKindMeansDatabase(kind: string | undefined, _dbType: DatabaseType): boolean {
   const normalizedKind = String(kind ?? "").toLowerCase();
   if (normalizedKind === "database" || normalizedKind === "catalog") return true;
   if (normalizedKind !== "schema") return false;
-  return !SCHEMA_FIRST_QUALIFIER_TYPES.has(dbType);
+  return !false;
 }
 
 function isAmbiguousProductionTargetStatement(statement: string, assessment: ReturnType<typeof classifySqlRisk>, hasResolvedTarget: boolean): boolean {

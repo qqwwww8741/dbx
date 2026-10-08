@@ -64,13 +64,8 @@ const HTML_TAG_RE = /<\/?[A-Za-z][^<>\n]*>/;
 const SQL_LANGUAGES = new Map([
   ["sql", "SQL"],
   ["mysql", "MYSQL"],
-  ["postgres", "POSTGRESQL"],
-  ["postgresql", "POSTGRESQL"],
-  ["sqlite", "SQLITE"],
+
   ["tsql", "TSQL"],
-  ["clickhouse", "CLICKHOUSE"],
-  ["mongodb", "MONGODB"],
-  ["mongo", "MONGODB"],
 ]);
 const SHELL_LANGUAGES = new Map([
   ["bash", "BASH"],

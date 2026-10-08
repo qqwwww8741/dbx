@@ -1,12 +1,11 @@
-import * as api from "@/lib/backend/api";
 import { connectionObjectTreeNodeSchema, effectiveDatabaseTypeForConnection, metadataSchemaForConnection } from "@/lib/database/jdbcDialect";
 import { invalidateTableMetadataCache, loadTableMetadata } from "@/lib/metadata/tableMetadataCache";
-import { canApplyDataTabMetadata, canReuseActiveMongoTab, type DataTabReuseMode } from "@/lib/sidebar/dataTabOpenPolicy";
+import { canApplyDataTabMetadata } from "@/lib/sidebar/dataTabOpenPolicy";
 import { isNoSnapshotErrorResult, isQueryExecutionErrorResult } from "@/lib/query/queryResultError";
 import { buildTableSelectSql, requiresEagerTableMetadataForDataOpen } from "@/lib/table/tableSelectSql";
 import { resolveTableDefaultSort, applyTableDefaultSortResult } from "@/lib/table/tableDefaultSort";
 import { tableDataLargeValuePreviewOptions } from "@/lib/dataGrid/dataGridLargeValues";
-import { editableRowIdentifierColumns, physicalTablePrimaryKeys, shouldIncludeSyntheticRowId } from "@/lib/table/tableEditing";
+import { physicalTablePrimaryKeys, shouldIncludeSyntheticRowId } from "@/lib/table/tableEditing";
 import { tableOpenPageLimit } from "@/lib/table/tableOpenPageLimit";
 import { uuid } from "@/lib/common/utils";
 import { beginDataTabNavigation, endDataTabNavigation, isCurrentDataTabNavigation } from "@/lib/tabs/dataTabNavigationGeneration";
@@ -35,31 +34,6 @@ export interface NavigationOpenOptions {
   isCurrent?: () => boolean;
 }
 
-function openMongoCollectionTarget(target: NavigationTarget, reuseMode: DataTabReuseMode) {
-  const connectionStore = useConnectionStore();
-  const queryStore = useQueryStore();
-  connectionStore.activeConnectionId = target.connectionId;
-  const tabTitle = `${target.database}.${target.tableName}`;
-  const sameCollectionTab = reuseMode === "always-new" ? undefined : queryStore.tabs.find((tab) => tab.mode === "mongo" && tab.connectionId === target.connectionId && tab.database === target.database && tab.sql === target.tableName);
-  const activeTab = queryStore.tabs.find((tab) => tab.id === queryStore.activeTabId);
-  const reusableActiveTab = reuseMode === "active-tab" && !sameCollectionTab && canReuseActiveMongoTab(activeTab, target) ? activeTab : undefined;
-  const reusableTab = sameCollectionTab ?? reusableActiveTab;
-  const tabId = reusableTab?.id ?? queryStore.createTab(target.connectionId, target.database, tabTitle, "mongo", undefined, undefined, undefined, { forceNew: true });
-  if (reusableTab) {
-    queryStore.switchTab(tabId);
-    reusableTab.title = tabTitle;
-  }
-  queryStore.updateSql(tabId, target.tableName);
-  queryStore.setTableMeta(tabId, {
-    database: target.database,
-    tableName: target.tableName,
-    tableType: target.tableType || "TABLE",
-    columns: [],
-    primaryKeys: [],
-  });
-  return tabId;
-}
-
 async function openTableTarget(target: NavigationTarget, options: NavigationOpenOptions & { tableInfoTab?: TableInfoTab } = {}) {
   const connectionStore = useConnectionStore();
   const queryStore = useQueryStore();
@@ -70,21 +44,10 @@ async function openTableTarget(target: NavigationTarget, options: NavigationOpen
 
   connectionStore.activeConnectionId = target.connectionId;
   const config = connectionStore.getConfig(target.connectionId);
-  if (config?.db_type === "mongodb") {
-    const tabId = openMongoCollectionTarget(target, settingsStore.editorSettings.dataTabReuseMode);
-    options.onOpened?.(tabId);
-    return;
-  }
+  {}
   const tableSchema = connectionObjectTreeNodeSchema(config, target.database, target.schema);
   const tabTitle = target.catalog ? `${target.catalog}.${tableSchema || target.database}.${target.tableName}` : tableSchema ? `${tableSchema}.${target.tableName}` : target.tableName;
-  if (config?.db_type === "qdrant" || config?.db_type === "milvus" || config?.db_type === "weaviate" || config?.db_type === "chromadb") {
-    await connectionStore.ensureConnected(target.connectionId);
-    if (options.isCurrent?.() === false) return;
-    const tabId = queryStore.createTab(target.connectionId, target.database || "default", tabTitle, "vector");
-    queryStore.updateSql(tabId, target.tableName);
-    options.onOpened?.(tabId);
-    return;
-  }
+  {}
   const tabId = queryStore.createTab(target.connectionId, target.database, tabTitle, "data", tableSchema, undefined, undefined, { forceNew: true });
   const targetTab = queryStore.tabs.find((tab) => tab.id === tabId);
   if (targetTab) {
@@ -154,44 +117,7 @@ async function openTableTarget(target: NavigationTarget, options: NavigationOpen
     const identifierQuote = connectionStore.connectionIdentifierQuote?.(target.connectionId);
     const querySchema = metadataSchemaForConnection(config, target.database, tableSchema);
     const targetTableType = target.tableType ?? "TABLE";
-    if (config.db_type === "neo4j") {
-      const columns = await api.getColumns(target.connectionId, target.database, querySchema, target.tableName);
-      const primaryKeys = editableRowIdentifierColumns(effectiveDbType, columns, undefined, targetTableType);
-      const defaultSort = resolveTableDefaultSort(settingsStore.editorSettings, effectiveDbType, physicalTablePrimaryKeys(columns), identifierQuote);
-      const sql = await buildTableSelectSql({
-        databaseType: effectiveDbType,
-        driverProfile: config.driver_profile,
-        serverVersion: connectionStore.getConfig(target.connectionId)?.database_info?.productVersion,
-        identifierQuote,
-        schema: tableSchema,
-        catalog: target.catalog,
-        database: target.database,
-        tableName: target.tableName,
-        includeDatabaseName: settingsStore.editorSettings.generateSqlIncludeDatabaseName,
-        injectDefaultTimeSeriesWhere: true,
-        tableType: targetTableType,
-        columns: columns.map((column) => column.name),
-        primaryKeys,
-        orderBy: defaultSort.orderBy,
-        whereInput: target.whereInput,
-        limit: pageLimit,
-      });
-      if (!isPreparationCurrent() || !isCurrentGeneration()) return;
-      queryStore.updateSql(tabId, sql);
-      queryStore.setTableMeta(tabId, {
-        catalog: target.catalog,
-        database: target.database,
-        schema: tableSchema,
-        tableName: target.tableName,
-        tableType: targetTableType,
-        columns,
-        primaryKeys,
-      });
-      firstExecuteStarted = true;
-      if (targetTab) targetTab.orderByInput = defaultSort.orderBy;
-      await queryStore.executeTabSql(tabId, sql, { pagination: { limit: pageLimit, offset: 0 } });
-      if (isCurrentTarget() && targetTab) applyTableDefaultSortResult(targetTab, defaultSort, queryStore.sortTabResultLocally);
-      return;
+    {
     }
     let eagerMetadata: Awaited<ReturnType<typeof loadTableMetadata>> | undefined;
     if (requiresEagerTableMetadataForDataOpen(effectiveDbType) || (settingsStore.editorSettings.tableOpenSortMode ?? "none") !== "none") {
@@ -315,7 +241,7 @@ async function openTableTarget(target: NavigationTarget, options: NavigationOpen
         columns,
         primaryKeys,
       });
-      if (!fellBackToLimitZero && !firstQueryFailed && (useRowId || config.db_type === "tdengine")) {
+      if (!fellBackToLimitZero && !firstQueryFailed && useRowId) {
         const newSql = await buildTableSelectSql({
           databaseType: effectiveDbType,
           driverProfile: config.driver_profile,
@@ -359,11 +285,7 @@ export function useNavigationTargets(dialogs: { showFieldLineageDialog: { value:
 
   async function openObjectBrowserTableTarget(target: NavigationTarget, options: NavigationOpenOptions = {}) {
     if (options.isCurrent?.() === false) return;
-    if (connectionStore.getConfig(target.connectionId)?.db_type === "mongodb") {
-      const tabId = openMongoCollectionTarget(target, settingsStore.editorSettings.dataTabReuseMode);
-      options.onOpened?.(tabId);
-      return;
-    }
+    {}
     if (settingsStore.editorSettings.dataTabReuseMode === "always-new") {
       await openTableTarget(target, options);
       return;

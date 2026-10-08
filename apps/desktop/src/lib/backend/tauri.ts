@@ -43,13 +43,12 @@ export const migrationCleanupBackups = (): Promise<void> => invoke("migration_cl
 import type { DetachedTabHandoff } from "@/lib/app/detachedTabHandoff";
 import { BackendErrorException, type BackendError } from "@/lib/backend/errorUtils";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { normalizeRustMongoCommand, type MongoCommand } from "@/lib/mongo/mongoShellCommand";
-import type { MongoBulkWriteResult } from "@/lib/mongo/mongoShellCommand";
+
 import { ExternalSqlFileTooLargeError } from "@/lib/sql/sqlFileOpen";
 import { appendDebugLog, isDebugLoggingEnabled } from "@/lib/backend/debugLog";
-import { decodeMeilisearchDocumentPage, decodeMeilisearchSearchResult, type MeilisearchDocumentPage, type MeilisearchDocumentPageWire, type MeilisearchSearchResult, type MeilisearchSearchWireResult } from "@/lib/backend/meilisearchTransport";
+
 import type { XuguTablespaceInfo } from "@/types/database";
-import type { CreatedKey, EnqueuedTaskSummary, KeyCreateInput, KeyListItem, KeyPage, KeyUpdateInput, MeilisearchCreateIndexInput, MeilisearchSystemOverview, MeilisearchTask, TaskListInput, TaskPage, TaskSelector } from "@/types/meilisearchManagement";
+
 import type { CsvQuoteMode } from "@/lib/export/csvQuoteMode";
 import type { SqlExportColumnSelection, SqlInsertDialect, SqlInsertMode } from "@/lib/export/sqlInsertMode";
 
@@ -117,7 +116,7 @@ import type { AnnotationFile, SchemaSnapshot } from "@/docs/types";
 import type { CollectionInfo } from "@/types/database";
 import type { SidebarObjectKind } from "@/lib/database/databaseObjectCapabilities";
 import type { AiChatSelectionState, AiConfig, AiConfigItem, AiEffortCapability, AiEffortLevel, AiTestConnectionResult } from "@/types/ai";
-import type { SalesforceCurrentUser, SalesforceOAuthAuthorizeParams, SalesforceOAuthDevicePollResult, SalesforceOAuthDeviceStartResult, SalesforceOAuthRefreshResult, SalesforceOAuthToken } from "@/types/salesforce";
+
 import type { QueryEditability } from "@/lib/sql/sqlAnalysis";
 import { isTerminalTransferProgress } from "@/lib/backend/transferProgress";
 import type {
@@ -1484,30 +1483,7 @@ export async function testConnectionWithInfo(config: ConnectionConfig): Promise<
 // Salesforce OAuth (browser redirect + device-code flows)
 // ---------------------------------------------------------------------------
 
-export async function salesforceOauthBrowserAuthorize(params: SalesforceOAuthAuthorizeParams): Promise<SalesforceOAuthToken> {
-  return invokeBackend("salesforce_oauth_browser_authorize", { params });
-}
-
-export async function salesforceOauthDeviceStart(params: SalesforceOAuthAuthorizeParams): Promise<SalesforceOAuthDeviceStartResult> {
-  return invokeBackend("salesforce_oauth_device_start", { params });
-}
-
-export async function salesforceOauthDevicePoll(params: SalesforceOAuthAuthorizeParams, deviceCode: string, intervalSecs: number): Promise<SalesforceOAuthDevicePollResult> {
-  return invokeBackend("salesforce_oauth_device_poll", { params, deviceCode, intervalSecs });
-}
-
-export async function salesforceOauthRefresh(params: SalesforceOAuthAuthorizeParams, refreshToken: string): Promise<SalesforceOAuthRefreshResult> {
-  return invokeBackend("salesforce_oauth_refresh", { params, refreshToken });
-}
-
-export async function salesforceOauthPasswordLogin(params: SalesforceOAuthAuthorizeParams, username: string, password: string): Promise<SalesforceOAuthToken> {
-  return invokeBackend("salesforce_oauth_password_login", { params, username, password });
-}
-
 /** Identity of the user an established Salesforce connection is authenticated as (cached backend-side). */
-export async function salesforceCurrentUser(connectionId: string): Promise<SalesforceCurrentUser> {
-  return invokeBackend("salesforce_current_user", { connectionId });
-}
 
 export async function connectDb(config: ConnectionConfig, clientAttempt?: number): Promise<string> {
   return invokeBackend("connect_db", { config, clientAttempt });
@@ -1811,7 +1787,7 @@ export async function executeQuery(
     resultSessionId?: string;
     clientSessionId?: string;
     timeoutSecs?: number;
-    executionMode?: "simple" | "postgres_read_only_transaction";
+    executionMode?: "simple";
   },
 ): Promise<QueryResult> {
   try {
@@ -1843,7 +1819,7 @@ export async function executeConditionalUpdate(
     resultSessionId?: string;
     clientSessionId?: string;
     timeoutSecs?: number;
-    executionMode?: "simple" | "postgres_read_only_transaction";
+    executionMode?: "simple";
   },
 ): Promise<QueryResult> {
   try {
@@ -3210,22 +3186,6 @@ export async function checkMcpServerStatus(): Promise<McpServerStatus> {
   return invoke("check_mcp_server_status");
 }
 
-export async function installMcpServer(): Promise<string> {
-  return invoke("install_mcp_server");
-}
-
-export async function installNativeMcpServer(): Promise<string> {
-  return invoke("install_native_mcp_server");
-}
-
-export async function uninstallMcpServer(): Promise<string> {
-  return invoke("uninstall_mcp_server");
-}
-
-export async function uninstallNpmMcpServer(): Promise<string> {
-  return invoke("uninstall_npm_mcp_server");
-}
-
 export async function checkForUpdates(locale?: string, source?: UpdateDownloadSource): Promise<UpdateInfo> {
   return invoke("check_for_updates", { locale, source });
 }
@@ -3427,253 +3387,6 @@ export interface RedisSlowlogEntry {
 export interface RedisNodeEndpoint {
   host: string;
   port: number;
-}
-
-export async function redisListDatabases(connectionId: string): Promise<RedisDatabaseInfo[]> {
-  return invoke("redis_list_databases", { connectionId });
-}
-
-export async function redisScanKeys(connectionId: string, db: number, cursor: number, pattern: string, count: number): Promise<RedisScanResult> {
-  return invoke("redis_scan_keys", {
-    connectionId,
-    db,
-    cursor,
-    pattern,
-    count,
-  });
-}
-
-export async function redisScanKeysBatch(connectionId: string, db: number, cursor: number, pattern: string, count: number, maxIterations: number, includeTypes = true): Promise<RedisScanResult> {
-  return invoke("redis_scan_keys_batch", {
-    connectionId,
-    db,
-    cursor,
-    pattern,
-    count,
-    maxIterations,
-    includeTypes,
-  });
-}
-
-export async function redisScanValues(connectionId: string, db: number, cursor: number, pattern: string, query: string, count: number, includeKeyMatches = false): Promise<RedisScanResult> {
-  return invoke("redis_scan_values", {
-    connectionId,
-    db,
-    cursor,
-    pattern,
-    query,
-    includeKeyMatches,
-    count,
-  });
-}
-
-export async function redisGetValue(connectionId: string, db: number, keyRaw: string): Promise<RedisValue> {
-  return invoke("redis_get_value", { connectionId, db, keyRaw });
-}
-
-export async function redisGetRawValue(connectionId: string, db: number, keyRaw: string): Promise<RedisBlob> {
-  return invoke("redis_get_raw_value", { connectionId, db, keyRaw });
-}
-
-export async function redisGetTtl(connectionId: string, db: number, keyRaw: string): Promise<number> {
-  return invoke("redis_get_ttl", { connectionId, db, keyRaw });
-}
-
-export async function redisGetStreamEntries(connectionId: string, db: number, keyRaw: string, cursor?: string): Promise<RedisStreamPage> {
-  return invoke("redis_get_stream_entries", { connectionId, db, keyRaw, cursor });
-}
-
-export async function redisGetStreamGroups(connectionId: string, db: number, keyRaw: string): Promise<RedisStreamGroup[]> {
-  return invoke("redis_get_stream_groups", { connectionId, db, keyRaw });
-}
-
-export async function redisGetStreamConsumers(connectionId: string, db: number, keyRaw: string, groupRaw: string): Promise<RedisStreamConsumer[]> {
-  return invoke("redis_get_stream_consumers", {
-    connectionId,
-    db,
-    keyRaw,
-    groupRaw,
-  });
-}
-
-export async function redisGetStreamPending(connectionId: string, db: number, keyRaw: string, groupRaw: string, cursor?: string, consumerRaw?: string): Promise<RedisStreamPendingPage> {
-  return invoke("redis_get_stream_pending", {
-    connectionId,
-    db,
-    keyRaw,
-    groupRaw,
-    cursor,
-    ...(consumerRaw === undefined ? {} : { consumerRaw }),
-  });
-}
-
-export async function redisSetString(connectionId: string, db: number, keyRaw: string, value: string, ttl?: number): Promise<void> {
-  return invoke("redis_set_string", { connectionId, db, keyRaw, value, ttl });
-}
-
-export async function redisDeleteKey(connectionId: string, db: number, keyRaw: string): Promise<void> {
-  return invoke("redis_delete_key", { connectionId, db, keyRaw });
-}
-
-export async function redisRenameKey(connectionId: string, db: number, keyRaw: string, newKeyRaw: string): Promise<void> {
-  return invoke("redis_rename_key", { connectionId, db, keyRaw, newKeyRaw });
-}
-
-export async function redisHashSet(connectionId: string, db: number, keyRaw: string, field: string, value: string, ttl?: number): Promise<void> {
-  return invoke("redis_hash_set", {
-    connectionId,
-    db,
-    keyRaw,
-    field,
-    value,
-    ttl,
-  });
-}
-
-export async function redisHashDel(connectionId: string, db: number, keyRaw: string, field: string): Promise<void> {
-  return invoke("redis_hash_del", { connectionId, db, keyRaw, field });
-}
-
-export async function redisHashFieldUpdate(connectionId: string, db: number, keyRaw: string, oldField: string, newField: string, value: string): Promise<void> {
-  return invoke("redis_hash_field_update", {
-    connectionId,
-    db,
-    keyRaw,
-    oldField,
-    newField,
-    value,
-  });
-}
-
-export async function redisHashFieldSetTtl(connectionId: string, db: number, keyRaw: string, field: string, ttl: number): Promise<void> {
-  return invoke("redis_hash_field_set_ttl", { connectionId, db, keyRaw, field, ttl });
-}
-
-export async function redisHashFieldSetExpireAt(connectionId: string, db: number, keyRaw: string, field: string, expireAt: number): Promise<void> {
-  return invoke("redis_hash_field_set_expire_at", { connectionId, db, keyRaw, field, expireAt });
-}
-
-export async function redisListPush(connectionId: string, db: number, keyRaw: string, value: string, ttl?: number): Promise<void> {
-  return invoke("redis_list_push", { connectionId, db, keyRaw, value, ttl });
-}
-
-export async function redisListSet(connectionId: string, db: number, keyRaw: string, index: number, value: string): Promise<void> {
-  return invoke("redis_list_set", { connectionId, db, keyRaw, index, value });
-}
-
-export async function redisListRemove(connectionId: string, db: number, keyRaw: string, index: number): Promise<void> {
-  return invoke("redis_list_remove", { connectionId, db, keyRaw, index });
-}
-
-export async function redisSetAdd(connectionId: string, db: number, keyRaw: string, member: string, ttl?: number): Promise<void> {
-  return invoke("redis_set_add", { connectionId, db, keyRaw, member, ttl });
-}
-
-export async function redisSetRemove(connectionId: string, db: number, keyRaw: string, member: string): Promise<void> {
-  return invoke("redis_set_remove", { connectionId, db, keyRaw, member });
-}
-
-export async function redisZadd(connectionId: string, db: number, keyRaw: string, member: string, score: number, ttl?: number): Promise<void> {
-  return invoke("redis_zadd", { connectionId, db, keyRaw, member, score, ttl });
-}
-
-export async function redisZrem(connectionId: string, db: number, keyRaw: string, member: string): Promise<void> {
-  return invoke("redis_zrem", { connectionId, db, keyRaw, member });
-}
-
-export async function redisZsetUpdate(connectionId: string, db: number, keyRaw: string, originalMember: string, expectedScore: string, member: string, score: string): Promise<boolean> {
-  return invoke("redis_zset_update", { connectionId, db, keyRaw, originalMember, expectedScore, member, score });
-}
-
-export async function redisStreamAdd(connectionId: string, db: number, keyRaw: string, entryId: string, fields: [string, string][], ttl?: number): Promise<void> {
-  return invoke("redis_stream_add", {
-    connectionId,
-    db,
-    keyRaw,
-    entryId,
-    fields,
-    ttl,
-  });
-}
-
-export async function redisJsonSet(connectionId: string, db: number, keyRaw: string, value: string, ttl?: number): Promise<void> {
-  return invoke("redis_json_set", { connectionId, db, keyRaw, value, ttl });
-}
-
-export async function redisCheckJsonModule(connectionId: string, db: number): Promise<boolean> {
-  return invoke("redis_check_json_module", { connectionId, db });
-}
-
-export async function redisSetTtl(connectionId: string, db: number, keyRaw: string, ttl: number): Promise<void> {
-  return invoke("redis_set_ttl", { connectionId, db, keyRaw, ttl });
-}
-
-export async function redisSetExpireAt(connectionId: string, db: number, keyRaw: string, expireAt: number): Promise<void> {
-  return invoke("redis_set_expire_at", { connectionId, db, keyRaw, expireAt });
-}
-
-export async function redisSetKeysTtl(connectionId: string, db: number, keyRaws: string[], ttl: number): Promise<RedisKeysExpiryResult> {
-  return invoke("redis_set_keys_ttl", { connectionId, db, keyRaws, ttl });
-}
-
-export async function redisSetKeysExpireAt(connectionId: string, db: number, keyRaws: string[], expireAt: number): Promise<RedisKeysExpiryResult> {
-  return invoke("redis_set_keys_expire_at", { connectionId, db, keyRaws, expireAt });
-}
-
-export async function redisDeleteKeys(connectionId: string, db: number, keyRaws: string[]): Promise<number> {
-  return invoke("redis_delete_keys", { connectionId, db, keyRaws });
-}
-
-export async function redisDeleteKeysByPattern(connectionId: string, db: number, pattern: string): Promise<number> {
-  return invoke("redis_delete_keys_by_pattern", { connectionId, db, pattern });
-}
-
-export async function redisFlushDb(connectionId: string, db: number): Promise<void> {
-  return invoke("redis_flush_db", { connectionId, db });
-}
-
-export async function redisExecuteCommand(connectionId: string, db: number, command: string, skipSafetyCheck?: boolean): Promise<RedisCommandResult> {
-  return invoke("redis_execute_command", {
-    connectionId,
-    db,
-    command,
-    skipSafetyCheck: skipSafetyCheck ?? false,
-  });
-}
-
-export async function redisLoadMore(connectionId: string, db: number, keyRaw: string, keyType: string, cursor: number, count: number, filter?: string, sortDirection?: "asc" | "desc"): Promise<RedisCollectionPage> {
-  return invoke("redis_load_more", {
-    connectionId,
-    db,
-    keyRaw,
-    keyType,
-    cursor,
-    count,
-    filter,
-    sortDirection,
-  });
-}
-
-export async function redisPubSubPublish(connectionId: string, db: number, channel: string, message: string): Promise<{ subscribers: number }> {
-  return invoke("redis_pubsub_publish", { connectionId, db, channel, message });
-}
-
-export async function redisPubSubConnect(connectionId: string, monitor = false): Promise<WebSocket> {
-  const port = await invoke<number>("redis_pubsub_server_port");
-  return new WebSocket(`ws://127.0.0.1:${port}/api/redis/pubsub/ws?connectionId=${encodeURIComponent(connectionId)}&monitor=${monitor}`);
-}
-
-export async function redisSlowlogGet(connectionId: string, count: number, nodeHost?: string, nodePort?: number): Promise<RedisSlowlogEntry[]> {
-  return invoke("redis_slowlog_get", {
-    connectionId,
-    count,
-    nodeHost,
-    nodePort,
-  });
-}
-
-export async function redisClusterMasterNodes(connectionId: string): Promise<RedisNodeEndpoint[]> {
-  return invoke("redis_cluster_master_nodes", { connectionId });
 }
 
 // --- etcd ---
@@ -3976,534 +3689,11 @@ export interface EtcdDangerousApproval {
   confirmationText: string;
 }
 
-export async function etcdListPrefix(connectionId: string, prefix: string, limit: number, continuation?: string | null, options?: KvListPrefixOptions | null): Promise<KvListPrefixResponse> {
-  return invoke("etcd_list_prefix", {
-    connectionId,
-    prefix,
-    limit,
-    continuation,
-    revision: options?.revision ?? null,
-    includeValues: options?.includeValues ?? null,
-  });
-}
-
-export async function etcdSupportsTtl(connectionId: string): Promise<boolean> {
-  return invoke("etcd_supports_ttl", { connectionId });
-}
-
-export async function etcdGet(connectionId: string, key: string, options?: KvGetOptions | null): Promise<KvGetResponse> {
-  return invoke("etcd_get", {
-    connectionId,
-    key,
-    keyBytes: options?.keyBytes ?? null,
-    revision: options?.revision ?? null,
-    metadataOnly: options?.metadataOnly ?? null,
-  });
-}
-
-export async function etcdPut(connectionId: string, key: string, value: KvValue, options?: KvPutOptions | number | null): Promise<KvPutResponse> {
-  const legacyLease = typeof options === "number" ? options : null;
-  const putOptions = typeof options === "object" ? options : null;
-  return invoke("etcd_put", {
-    connectionId,
-    key,
-    value,
-    lease: legacyLease ?? putOptions?.lease ?? null,
-    ttl: putOptions?.ttl ?? null,
-    preserveLease: putOptions?.preserveLease ?? null,
-    keyBytes: putOptions?.keyBytes ?? null,
-    expectedModRevision: putOptions?.expectedModRevision ?? null,
-    expectedCreateRevision: putOptions?.expectedCreateRevision ?? null,
-  });
-}
-
-export async function etcdDelete(connectionId: string, key: string, options?: KvDeleteOptions | null): Promise<KvDeleteResponse> {
-  return invoke("etcd_delete", {
-    connectionId,
-    key,
-    keyBytes: options?.keyBytes ?? null,
-    expectedModRevision: options?.expectedModRevision ?? null,
-  });
-}
-
-export async function etcdRename(
-  connectionId: string,
-  request: {
-    key: string;
-    keyBytes?: KvValue | null;
-    newKey: string;
-    expectedModRevision?: KvInt64 | null;
-  },
-): Promise<{ renamed: boolean; revision?: KvInt64 | null }> {
-  return invoke("etcd_rename", { connectionId, request });
-}
-export async function etcdHistory(
-  connectionId: string,
-  request: {
-    key: string;
-    keyBytes?: KvValue | null;
-    startRevision?: KvInt64 | null;
-    endRevision?: KvInt64 | null;
-    limit: number;
-  },
-): Promise<KvHistoryResponse> {
-  return invoke("etcd_history", { connectionId, request });
-}
-export async function etcdStatus(connectionId: string): Promise<KvStatusResponse> {
-  return invoke("etcd_status", { connectionId });
-}
-export async function etcdPreflight(connectionId: string, action: string, params: Record<string, unknown>): Promise<EtcdPreflightResponse> {
-  return invoke("etcd_preflight", { connectionId, request: { action, params } });
-}
-export async function etcdCompact(connectionId: string, revision: KvInt64, approval: EtcdDangerousApproval): Promise<{ revision: KvInt64 }> {
-  return invoke("etcd_compact", { connectionId, revision, ...approval });
-}
-export async function etcdDefrag(connectionId: string, endpoints: string[], approval: EtcdDangerousApproval): Promise<EtcdDefragResponse> {
-  return invoke("etcd_defrag", { connectionId, endpoints, ...approval });
-}
-export async function etcdWatchStart(connectionId: string, request: EtcdWatchStartRequest): Promise<EtcdWatchStartResponse> {
-  return invoke("etcd_watch_start", { connectionId, request });
-}
-export async function etcdWatchPoll(connectionId: string, watchId: string): Promise<EtcdWatchPollResponse> {
-  return invoke("etcd_watch_poll", { connectionId, watchId });
-}
-export async function etcdWatchStop(connectionId: string, watchId: string): Promise<{ stopped: boolean }> {
-  return invoke("etcd_watch_stop", { connectionId, watchId });
-}
-export async function etcdLeaseList(connectionId: string, limit = 100, continuation?: string | null): Promise<EtcdLeaseListResponse> {
-  return invoke("etcd_lease_list", { connectionId, limit, continuation: continuation ?? null });
-}
-export async function etcdLeaseCall<T = unknown>(connectionId: string, operation: "get" | "grant" | "keepalive" | "revoke", params: Record<string, unknown>, approval?: EtcdDangerousApproval): Promise<T> {
-  return invoke("etcd_lease_call", { connectionId, operation, params, ...approval });
-}
-export async function etcdAuthCall<T = unknown>(connectionId: string, operation: string, params: Record<string, unknown>, approval?: EtcdDangerousApproval): Promise<T> {
-  return invoke("etcd_auth_call", { connectionId, operation, params, ...approval });
-}
-
 // --- ZooKeeper ---
-export async function zookeeperListPrefix(connectionId: string, prefix: string, limit: number, continuation?: string | null, options?: KvListPrefixOptions | null): Promise<KvListPrefixResponse> {
-  return invoke("zookeeper_list_prefix", {
-    connectionId,
-    prefix,
-    limit,
-    continuation,
-    recursive: options?.recursive ?? null,
-  });
-}
-
-export async function zookeeperGet(connectionId: string, key: string): Promise<KvGetResponse> {
-  return invoke("zookeeper_get", { connectionId, key });
-}
-
-export async function zookeeperPut(connectionId: string, key: string, value: KvValue, options?: KvPutOptions | null): Promise<KvPutResponse> {
-  return invoke("zookeeper_put", {
-    connectionId,
-    key,
-    value,
-    options: options ?? null,
-  });
-}
-
-export async function zookeeperDelete(connectionId: string, key: string): Promise<KvDeleteResponse> {
-  return invoke("zookeeper_delete", { connectionId, key });
-}
 
 // --- Consul KV ---
-export async function consulCapabilities(connectionId: string): Promise<import("@/types/consul").ConsulCapabilities> {
-  return invoke("consul_capabilities", { connectionId });
-}
-
-export async function consulTxn(connectionId: string, request: import("@/types/consul").ConsulTxnRequest): Promise<import("@/types/consul").ConsulTxnResult> {
-  return invoke("consul_txn", { connectionId, request });
-}
-
-export async function consulRenameKey(connectionId: string, source: string, target: string, expectedModifyIndex: KvInt64, copy = false): Promise<import("@/types/consul").ConsulTxnResult> {
-  return invoke("consul_rename_key", { connectionId, source, target, expectedModifyIndex, copy });
-}
-
-export async function consulBlockingQuery(connectionId: string, request: import("@/types/consul").ConsulBlockingRequest): Promise<import("@/types/consul").ConsulBlockingResponse> {
-  return invoke("consul_blocking_query", { connectionId, request });
-}
-
-export function consulDomainWatch(connectionId: string, request: import("@/types/consul").ConsulDomainWatchRequest & { target: { kind: "catalogServices" } }): Promise<import("@/types/consul").ConsulDomainWatchResponse<Record<string, string[]>>>;
-export function consulDomainWatch(connectionId: string, request: import("@/types/consul").ConsulDomainWatchRequest & { target: { kind: "catalogNodes" } }): Promise<import("@/types/consul").ConsulDomainWatchResponse<import("@/types/consul").ConsulCatalogNode[]>>;
-export function consulDomainWatch(connectionId: string, request: import("@/types/consul").ConsulDomainWatchRequest & { target: { kind: "catalogServiceNodes"; service: string } }): Promise<import("@/types/consul").ConsulDomainWatchResponse<import("@/types/consul").ConsulCatalogServiceNode[]>>;
-export function consulDomainWatch(connectionId: string, request: import("@/types/consul").ConsulDomainWatchRequest & { target: { kind: "catalogNodeServices"; node: string } }): Promise<import("@/types/consul").ConsulDomainWatchResponse<import("@/types/consul").ConsulNodeServices>>;
-export function consulDomainWatch(connectionId: string, request: import("@/types/consul").ConsulDomainWatchRequest & { target: { kind: "healthNode"; node: string } }): Promise<import("@/types/consul").ConsulDomainWatchResponse<import("@/types/consul").ConsulHealthCheck[]>>;
-export function consulDomainWatch(connectionId: string, request: import("@/types/consul").ConsulDomainWatchRequest & { target: { kind: "healthServiceChecks"; service: string } }): Promise<import("@/types/consul").ConsulDomainWatchResponse<import("@/types/consul").ConsulHealthCheck[]>>;
-export function consulDomainWatch(
-  connectionId: string,
-  request: import("@/types/consul").ConsulDomainWatchRequest & { target: { kind: "healthServiceInstances"; service: string; passing: boolean | null } },
-): Promise<import("@/types/consul").ConsulDomainWatchResponse<import("@/types/consul").ConsulServiceInstance[]>>;
-export function consulDomainWatch(connectionId: string, request: import("@/types/consul").ConsulDomainWatchRequest & { target: { kind: "healthState"; state: string } }): Promise<import("@/types/consul").ConsulDomainWatchResponse<import("@/types/consul").ConsulHealthCheck[]>>;
-export function consulDomainWatch(connectionId: string, request: import("@/types/consul").ConsulDomainWatchRequest): Promise<import("@/types/consul").ConsulDomainWatchResponse<import("@/types/consul").ConsulDomainWatchItems>>;
-export async function consulDomainWatch(connectionId: string, request: import("@/types/consul").ConsulDomainWatchRequest): Promise<import("@/types/consul").ConsulDomainWatchResponse<import("@/types/consul").ConsulDomainWatchItems>> {
-  return invoke("consul_domain_watch", { connectionId, request });
-}
-
-export async function consulCancelBlocking(connectionId: string, scope: import("@/types/consul").ConsulScope, generation: number, operationId: string): Promise<boolean> {
-  return invoke("consul_cancel_blocking", { connectionId, scope, generation, operationId });
-}
-
-export async function consulWatchStart(connectionId: string, request: import("@/types/consul").ConsulBlockingRequest): Promise<string> {
-  return invoke("consul_watch_start", { connectionId, request });
-}
-
-export async function consulListRecursive(connectionId: string, prefix: string, maxEntries = 10_000, maxValueBytes = 32 * 1024 * 1024): Promise<import("@/types/consul").ConsulRecursiveListResponse> {
-  return invoke("consul_list_recursive", { connectionId, prefix, maxEntries, maxValueBytes });
-}
-
-export async function consulSearch(connectionId: string, request: import("@/types/consul").ConsulSearchRequest): Promise<import("@/types/consul").ConsulSearchResponse> {
-  return invoke("consul_search", { connectionId, request });
-}
-
-export async function consulSearchProgress(connectionId: string, requestId: string, scope: import("@/types/consul").ConsulScope, generation: number): Promise<import("@/types/consul").ConsulSearchProgress> {
-  return invoke("consul_search_progress", { connectionId, requestId, scope, generation });
-}
-
-export async function consulCancelSearch(connectionId: string, requestId: string, scope: import("@/types/consul").ConsulScope, generation: number): Promise<boolean> {
-  return invoke("consul_cancel_search", { connectionId, requestId, scope, generation });
-}
-
-export async function consulExportBundle(connectionId: string, request: import("@/types/consul").ConsulExportRequest): Promise<import("@/types/consul").ConsulKvBundle> {
-  return invoke("consul_export_bundle", { connectionId, request });
-}
-
-export async function consulImportPreview(connectionId: string, request: import("@/types/consul").ConsulImportRequest): Promise<import("@/types/consul").ConsulImportPreview> {
-  return invoke("consul_import_preview", { connectionId, request });
-}
-
-export async function consulImportExecute(connectionId: string, request: import("@/types/consul").ConsulImportRequest): Promise<import("@/types/consul").ConsulImportReport> {
-  return invoke("consul_import_execute", { connectionId, request });
-}
-
-export async function consulDeletePrefixPreview(connectionId: string, prefix: string): Promise<import("@/types/consul").ConsulDeletePrefixPreview> {
-  return invoke("consul_delete_prefix_preview", { connectionId, prefix });
-}
-
-export async function consulDeletePrefixExecute(connectionId: string, request: import("@/types/consul").ConsulDeletePrefixRequest): Promise<import("@/types/consul").ConsulDeletePrefixReport> {
-  return invoke("consul_delete_prefix_execute", { connectionId, request });
-}
-
-export async function consulListPrefix(connectionId: string, prefix: string, limit: number, continuation?: string | null): Promise<KvListPrefixResponse> {
-  return invoke("consul_list_prefix", { connectionId, prefix, limit, continuation: continuation ?? null });
-}
-
-export async function consulGet(connectionId: string, key: string): Promise<KvGetResponse> {
-  return invoke("consul_get", { connectionId, key });
-}
-
-export async function consulPut(connectionId: string, key: string, value: KvValue, options?: KvPutOptions | null): Promise<KvPutResponse> {
-  return invoke("consul_put", { connectionId, key, value, options: options ?? null });
-}
-
-export async function consulDelete(connectionId: string, key: string, options?: KvDeleteOptions | null): Promise<KvDeleteResponse> {
-  return invoke("consul_delete", { connectionId, key, options: options ?? null });
-}
-
-export async function consulPreparedQueryList(connectionId: string): Promise<import("@/types/consul").ConsulPreparedQuery[]> {
-  return invoke("consul_prepared_query_list", { connectionId });
-}
-export async function consulPreparedQueryRead(connectionId: string, id: string): Promise<import("@/types/consul").ConsulPreparedQuery> {
-  return invoke("consul_prepared_query_read", { connectionId, id });
-}
-export async function consulPreparedQueryCreate(connectionId: string, input: import("@/types/consul").ConsulPreparedQueryInput): Promise<string> {
-  return invoke("consul_prepared_query_create", { connectionId, input });
-}
-export async function consulPreparedQueryUpdate(connectionId: string, id: string, input: import("@/types/consul").ConsulPreparedQueryInput): Promise<void> {
-  return invoke("consul_prepared_query_update", { connectionId, id, input });
-}
-export async function consulPreparedQueryDelete(connectionId: string, id: string): Promise<void> {
-  return invoke("consul_prepared_query_delete", { connectionId, id });
-}
-export async function consulPreparedQueryExecute(connectionId: string, request: import("@/types/consul").ConsulPreparedQueryExecuteRequest): Promise<import("@/types/consul").ConsulPreparedQueryExecuteResponse> {
-  return invoke("consul_prepared_query_execute", { connectionId, request });
-}
-export async function consulPreparedQueryExplain(connectionId: string, query: string): Promise<unknown> {
-  return invoke("consul_prepared_query_explain", { connectionId, query });
-}
-export async function consulEventList(connectionId: string, name?: string | null): Promise<import("@/types/consul").ConsulEvent[]> {
-  return invoke("consul_event_list", { connectionId, name: name ?? null });
-}
-export async function consulEventFire(connectionId: string, request: import("@/types/consul").ConsulEventFireRequest): Promise<import("@/types/consul").ConsulEvent> {
-  return invoke("consul_event_fire", { connectionId, request });
-}
-export async function consulCoordinateNodes(connectionId: string): Promise<import("@/types/consul").ConsulCoordinate[]> {
-  return invoke("consul_coordinate_nodes", { connectionId });
-}
-export async function consulOperatorRead(connectionId: string, kind: import("@/types/consul").ConsulOperatorReadKind): Promise<import("@/types/consul").ConsulOperatorDocument> {
-  return invoke("consul_operator_read", { connectionId, kind });
-}
-export async function consulSnapshotGenerate(connectionId: string): Promise<import("@/types/consul").ConsulSnapshot> {
-  return invoke("consul_snapshot_generate", { connectionId });
-}
-export async function consulSnapshotRestore(connectionId: string, request: import("@/types/consul").ConsulSnapshotRestoreRequest): Promise<void> {
-  return invoke("consul_snapshot_restore", { connectionId, request });
-}
-export async function consulAutopilotUpdate(connectionId: string, update: import("@/types/consul").ConsulAutopilotUpdate, confirmation: string): Promise<void> {
-  return invoke("consul_autopilot_update", { connectionId, update, confirmation });
-}
-export async function consulRaftTransfer(connectionId: string, request: import("@/types/consul").ConsulRaftWriteRequest): Promise<void> {
-  return invoke("consul_raft_transfer", { connectionId, request });
-}
-export async function consulRaftRemove(connectionId: string, request: import("@/types/consul").ConsulRaftWriteRequest): Promise<void> {
-  return invoke("consul_raft_remove", { connectionId, request });
-}
-export async function consulKeyringWrite(connectionId: string, request: import("@/types/consul").ConsulKeyringWriteRequest): Promise<void> {
-  return invoke("consul_keyring_write", { connectionId, request });
-}
-export async function consulLicenseWrite(connectionId: string, request: import("@/types/consul").ConsulLicenseWriteRequest): Promise<void> {
-  return invoke("consul_license_write", { connectionId, request });
-}
-
-export async function consulStatusLeader(connectionId: string): Promise<string> {
-  return invoke("consul_status_leader", { connectionId });
-}
-export async function consulStatusPeers(connectionId: string): Promise<string[]> {
-  return invoke("consul_status_peers", { connectionId });
-}
-export async function consulAgentSelf(connectionId: string): Promise<import("@/types/consul").ConsulAgentIdentity> {
-  return invoke("consul_agent_self", { connectionId });
-}
-export async function consulAgentMembers(connectionId: string, wan = false, segment?: string | null): Promise<import("@/types/consul").ConsulAgentMember[]> {
-  return invoke("consul_agent_members", { connectionId, wan, segment: segment ?? null });
-}
-export async function consulAgentMetrics(connectionId: string): Promise<unknown> {
-  return invoke("consul_agent_metrics", { connectionId });
-}
-export async function consulCatalogDatacenters(connectionId: string): Promise<string[]> {
-  return invoke("consul_catalog_datacenters", { connectionId });
-}
-export async function consulCatalogNodes(connectionId: string, options: import("@/types/consul").ConsulReadOptions = {}): Promise<import("@/types/consul").ConsulListResponse<import("@/types/consul").ConsulCatalogNode[]>> {
-  return invoke("consul_catalog_nodes", { connectionId, options });
-}
-export async function consulCatalogServices(connectionId: string, options: import("@/types/consul").ConsulReadOptions = {}): Promise<import("@/types/consul").ConsulListResponse<Record<string, string[]>>> {
-  return invoke("consul_catalog_services", { connectionId, options });
-}
-export async function consulCatalogServiceNodes(connectionId: string, service: string, options: import("@/types/consul").ConsulReadOptions = {}): Promise<import("@/types/consul").ConsulListResponse<import("@/types/consul").ConsulCatalogServiceNode[]>> {
-  return invoke("consul_catalog_service_nodes", { connectionId, service, options });
-}
-export async function consulCatalogNodeServices(connectionId: string, node: string, options: import("@/types/consul").ConsulReadOptions = {}): Promise<import("@/types/consul").ConsulListResponse<import("@/types/consul").ConsulNodeServices>> {
-  return invoke("consul_catalog_node_services", { connectionId, node, options });
-}
-export async function consulHealthNode(connectionId: string, node: string, options: import("@/types/consul").ConsulReadOptions = {}): Promise<import("@/types/consul").ConsulListResponse<import("@/types/consul").ConsulHealthCheck[]>> {
-  return invoke("consul_health_node", { connectionId, node, options });
-}
-export async function consulHealthChecks(connectionId: string, service: string, options: import("@/types/consul").ConsulReadOptions = {}): Promise<import("@/types/consul").ConsulListResponse<import("@/types/consul").ConsulHealthCheck[]>> {
-  return invoke("consul_health_checks", { connectionId, service, options });
-}
-export async function consulHealthService(connectionId: string, service: string, passing: boolean | null = null, options: import("@/types/consul").ConsulReadOptions = {}): Promise<import("@/types/consul").ConsulListResponse<import("@/types/consul").ConsulServiceInstance[]>> {
-  return invoke("consul_health_service", { connectionId, service, passing, options });
-}
-export async function consulHealthState(connectionId: string, healthState: string, options: import("@/types/consul").ConsulReadOptions = {}): Promise<import("@/types/consul").ConsulListResponse<import("@/types/consul").ConsulHealthCheck[]>> {
-  return invoke("consul_health_state", { connectionId, healthState, options });
-}
-export async function consulAgentServices(connectionId: string): Promise<Record<string, import("@/types/consul").ConsulAgentService>> {
-  return invoke("consul_agent_services", { connectionId });
-}
-export async function consulAgentService(connectionId: string, id: string): Promise<import("@/types/consul").ConsulAgentService> {
-  return invoke("consul_agent_service", { connectionId, id });
-}
-export async function consulAgentChecks(connectionId: string): Promise<Record<string, import("@/types/consul").ConsulHealthCheck>> {
-  return invoke("consul_agent_checks", { connectionId });
-}
-export async function consulAgentRegisterService(connectionId: string, registration: import("@/types/consul").ConsulAgentServiceRegistration): Promise<import("@/types/consul").ConsulAgentWriteResult> {
-  return invoke("consul_agent_register_service", { connectionId, registration });
-}
-export async function consulAgentDeregisterService(connectionId: string, id: string): Promise<import("@/types/consul").ConsulAgentWriteResult> {
-  return invoke("consul_agent_deregister_service", { connectionId, id });
-}
-export async function consulAgentServiceMaintenance(connectionId: string, id: string, enable: boolean, reason?: string | null): Promise<import("@/types/consul").ConsulAgentWriteResult> {
-  return invoke("consul_agent_service_maintenance", { connectionId, id, enable, reason: reason ?? null });
-}
-export async function consulAgentRegisterCheck(connectionId: string, registration: import("@/types/consul").ConsulAgentCheckRegistration): Promise<import("@/types/consul").ConsulAgentWriteResult> {
-  return invoke("consul_agent_register_check", { connectionId, registration });
-}
-export async function consulAgentDeregisterCheck(connectionId: string, id: string): Promise<import("@/types/consul").ConsulAgentWriteResult> {
-  return invoke("consul_agent_deregister_check", { connectionId, id });
-}
-export async function consulAgentUpdateTtl(connectionId: string, id: string, status: import("@/types/consul").ConsulCheckStatus, output?: string | null): Promise<import("@/types/consul").ConsulAgentWriteResult> {
-  return invoke("consul_agent_update_ttl", { connectionId, id, status, output: output ?? null });
-}
-export async function consulSessions(connectionId: string, options: import("@/types/consul").ConsulReadOptions = {}): Promise<import("@/types/consul").ConsulListResponse<import("@/types/consul").ConsulSession[]>> {
-  return invoke("consul_sessions", { connectionId, options });
-}
-export async function consulNodeSessions(connectionId: string, node: string, options: import("@/types/consul").ConsulReadOptions = {}): Promise<import("@/types/consul").ConsulListResponse<import("@/types/consul").ConsulSession[]>> {
-  return invoke("consul_node_sessions", { connectionId, node, options });
-}
-export async function consulSession(connectionId: string, id: string): Promise<import("@/types/consul").ConsulSession | null> {
-  return invoke("consul_session", { connectionId, id });
-}
-export async function consulSessionKeys(connectionId: string, id: string): Promise<import("@/types/consul").ConsulSessionKeysResponse> {
-  return invoke("consul_session_keys", { connectionId, id });
-}
-export async function consulSessionDestroyImpact(connectionId: string, id: string): Promise<import("@/types/consul").ConsulSessionDestroyImpact> {
-  return invoke("consul_session_destroy_impact", { connectionId, id });
-}
-export async function consulCreateSession(connectionId: string, request: import("@/types/consul").ConsulSessionCreateRequest): Promise<import("@/types/consul").ConsulSession> {
-  return invoke("consul_create_session", { connectionId, request });
-}
-export async function consulRenewSession(connectionId: string, id: string): Promise<import("@/types/consul").ConsulSession> {
-  return invoke("consul_renew_session", { connectionId, id });
-}
-export async function consulDestroySession(connectionId: string, request: import("@/types/consul").ConsulSessionDestroyRequest): Promise<boolean> {
-  return invoke("consul_destroy_session", { connectionId, request });
-}
-export async function consulAcquireLock(connectionId: string, request: import("@/types/consul").ConsulLockRequest): Promise<import("@/types/consul").ConsulLockResponse> {
-  return invoke("consul_acquire_lock", { connectionId, request });
-}
-export async function consulReleaseLock(connectionId: string, key: string, session: string): Promise<import("@/types/consul").ConsulLockResponse> {
-  return invoke("consul_release_lock", { connectionId, key, session });
-}
-
-export async function consulAclList(connectionId: string, kind: import("@/types/consul").ConsulAclKind): Promise<import("@/types/consul").ConsulAclList> {
-  return invoke("consul_acl_list", { connectionId, kind });
-}
-export async function consulAclTokenSelf(connectionId: string): Promise<import("@/types/consul").ConsulAclToken> {
-  return invoke("consul_acl_token_self", { connectionId });
-}
-export async function consulAclTokenClone(connectionId: string, accessorId: string, description: string): Promise<import("@/types/consul").ConsulAclToken> {
-  return invoke("consul_acl_token_clone", { connectionId, accessorId, request: { Description: description } });
-}
-export async function consulAclGet(connectionId: string, kind: import("@/types/consul").ConsulAclKind, id: string): Promise<import("@/types/consul").ConsulAclItem> {
-  return invoke("consul_acl_get", { connectionId, kind, id });
-}
-export async function consulAclApply(connectionId: string, id: string | null, value: import("@/types/consul").ConsulAclWrite): Promise<import("@/types/consul").ConsulAclItem> {
-  return invoke("consul_acl_apply", { connectionId, id, value });
-}
-export async function consulAclReferences(connectionId: string, kind: import("@/types/consul").ConsulAclKind, id: string): Promise<import("@/types/consul").ConsulAclReferences> {
-  return invoke("consul_acl_references", { connectionId, kind, id });
-}
-export async function consulAclDelete(connectionId: string, kind: import("@/types/consul").ConsulAclKind, id: string): Promise<import("@/types/consul").ConsulAclReferences> {
-  return invoke("consul_acl_delete", { connectionId, kind, id });
-}
-export async function consulEnterpriseList(connectionId: string, kind: import("@/types/consul").ConsulEnterpriseKind): Promise<import("@/types/consul").ConsulEnterpriseList> {
-  return invoke("consul_enterprise_list", { connectionId, kind });
-}
-export async function consulEnterpriseGet(connectionId: string, kind: import("@/types/consul").ConsulEnterpriseKind, name: string): Promise<import("@/types/consul").ConsulEnterpriseItem> {
-  return invoke("consul_enterprise_get", { connectionId, kind, name });
-}
-export async function consulEnterpriseApply(connectionId: string, existingName: string | null, item: import("@/types/consul").ConsulEnterpriseWrite): Promise<import("@/types/consul").ConsulEnterpriseItem> {
-  return invoke("consul_enterprise_apply", { connectionId, existingName, item });
-}
-export async function consulEnterpriseImpact(connectionId: string, kind: import("@/types/consul").ConsulEnterpriseKind, name: string): Promise<import("@/types/consul").ConsulScopeImpact> {
-  return invoke("consul_enterprise_impact", { connectionId, kind, name });
-}
-export async function consulEnterpriseDelete(connectionId: string, kind: import("@/types/consul").ConsulEnterpriseKind, name: string): Promise<import("@/types/consul").ConsulScopeImpact> {
-  return invoke("consul_enterprise_delete", { connectionId, kind, name });
-}
-export async function consulMeshConfigList(connectionId: string, kind: string): Promise<import("@/types/consul").ConsulConfigEntry[]> {
-  return invoke("consul_mesh_config_list", { connectionId, kind });
-}
-export async function consulMeshConfigGet(connectionId: string, kind: string, name: string): Promise<import("@/types/consul").ConsulConfigEntry> {
-  return invoke("consul_mesh_config_get", { connectionId, kind, name });
-}
-export async function consulMeshConfigApply(connectionId: string, request: import("@/types/consul").ConsulConfigEntryApply): Promise<import("@/types/consul").ConsulConfigEntry> {
-  return invoke("consul_mesh_config_apply", { connectionId, request });
-}
-export async function consulMeshConfigDelete(connectionId: string, kind: string, name: string, expectedModifyIndex: number): Promise<boolean> {
-  return invoke("consul_mesh_config_delete", { connectionId, kind, name, expectedModifyIndex });
-}
-export async function consulMeshIntentionsList(connectionId: string): Promise<import("@/types/consul").ConsulIntention[]> {
-  return invoke("consul_mesh_intentions_list", { connectionId });
-}
-export async function consulMeshIntentionGet(connectionId: string, id: string): Promise<import("@/types/consul").ConsulIntention> {
-  return invoke("consul_mesh_intention_get", { connectionId, id });
-}
-export async function consulMeshIntentionGetExact(connectionId: string, request: import("@/types/consul").ConsulIntentionExactRequest): Promise<import("@/types/consul").ConsulIntention> {
-  return invoke("consul_mesh_intention_get_exact", { connectionId, request });
-}
-export async function consulMeshIntentionUpsert(connectionId: string, item: import("@/types/consul").ConsulIntention): Promise<import("@/types/consul").ConsulIntention> {
-  return invoke("consul_mesh_intention_upsert", { connectionId, item });
-}
-export async function consulMeshIntentionDelete(connectionId: string, id: string): Promise<boolean> {
-  return invoke("consul_mesh_intention_delete", { connectionId, id });
-}
-export async function consulMeshIntentionDeleteExact(connectionId: string, request: import("@/types/consul").ConsulIntentionExactRequest): Promise<boolean> {
-  return invoke("consul_mesh_intention_delete_exact", { connectionId, request });
-}
-export async function consulMeshIntentionMatch(connectionId: string, request: import("@/types/consul").ConsulIntentionMatchRequest): Promise<import("@/types/consul").ConsulIntention[]> {
-  return invoke("consul_mesh_intention_match", { connectionId, request });
-}
-export async function consulMeshIntentionCheck(connectionId: string, request: import("@/types/consul").ConsulIntentionCheckRequest): Promise<import("@/types/consul").ConsulIntentionCheckResponse> {
-  return invoke("consul_mesh_intention_check", { connectionId, request });
-}
-export async function consulMeshDiscoveryChain(connectionId: string, service: string): Promise<import("@/types/consul").ConsulDiscoveryChain> {
-  return invoke("consul_mesh_discovery_chain", { connectionId, service });
-}
-export async function consulMeshPeeringList(connectionId: string): Promise<import("@/types/consul").ConsulPeering[]> {
-  return invoke("consul_mesh_peering_list", { connectionId });
-}
-export async function consulMeshPeeringGet(connectionId: string, name: string): Promise<import("@/types/consul").ConsulPeering> {
-  return invoke("consul_mesh_peering_get", { connectionId, name });
-}
-export async function consulMeshPeeringGenerateToken(connectionId: string, request: import("@/types/consul").ConsulPeeringGenerateRequest): Promise<import("@/types/consul").ConsulPeeringToken> {
-  return invoke("consul_mesh_peering_generate_token", { connectionId, request });
-}
-export async function consulMeshPeeringEstablish(connectionId: string, request: import("@/types/consul").ConsulPeeringEstablishRequest): Promise<import("@/types/consul").ConsulPeering> {
-  return invoke("consul_mesh_peering_establish", { connectionId, request });
-}
-export async function consulMeshPeeringDelete(connectionId: string, name: string): Promise<boolean> {
-  return invoke("consul_mesh_peering_delete", { connectionId, name });
-}
-export async function consulMeshExportedServicesList(connectionId: string): Promise<import("@/types/consul").ConsulExportedService[]> {
-  return invoke("consul_mesh_exported_services_list", { connectionId });
-}
-export async function consulMeshExportedServicesApply(connectionId: string, name: string, expectedModifyIndex: number, raw: Record<string, unknown>): Promise<import("@/types/consul").ConsulConfigEntry> {
-  return invoke("consul_mesh_exported_services_apply", { connectionId, name, expectedModifyIndex, raw });
-}
 
 // --- HBase ---
-export async function hbaseGetTableSchema(connectionId: string, namespace: string, table: string): Promise<import("@/types/hbase").HBaseTableSchema> {
-  return invoke("hbase_get_table_schema", { connectionId, namespace, table });
-}
-
-export async function hbaseScanRows(connectionId: string, namespace: string, table: string, rowKeyPrefix: string | undefined, limit: number): Promise<import("@/types/hbase").HBaseScanResult> {
-  return invoke("hbase_scan_rows", {
-    connectionId,
-    namespace,
-    table,
-    rowKeyPrefix,
-    limit,
-  });
-}
-
-export async function hbaseGetRow(connectionId: string, namespace: string, table: string, rowKey: string, rowKeyEncoding?: import("@/types/hbase").HBaseValueEncoding): Promise<import("@/types/hbase").HBaseRow | null> {
-  return invoke("hbase_get_row", {
-    connectionId,
-    namespace,
-    table,
-    rowKey,
-    rowKeyEncoding,
-  });
-}
-
-export async function hbasePutRow(connectionId: string, namespace: string, table: string, input: import("@/types/hbase").HBasePutRowInput): Promise<void> {
-  return invoke("hbase_put_row", { connectionId, namespace, table, input });
-}
-
-export async function hbaseDeleteRow(connectionId: string, namespace: string, table: string, rowKey: string, rowKeyEncoding?: import("@/types/hbase").HBaseValueEncoding): Promise<void> {
-  return invoke("hbase_delete_row", {
-    connectionId,
-    namespace,
-    table,
-    rowKey,
-    rowKeyEncoding,
-  });
-}
-
-export async function hbaseCreateTable(connectionId: string, namespace: string, table: string, columnFamilies: string[]): Promise<void> {
-  return invoke("hbase_create_table", {
-    connectionId,
-    namespace,
-    table,
-    columnFamilies,
-  });
-}
-
-export async function hbaseDeleteTable(connectionId: string, namespace: string, table: string): Promise<void> {
-  return invoke("hbase_delete_table", { connectionId, namespace, table });
-}
 
 // --- Document stores ---
 export interface DocumentQueryResult {
@@ -4615,16 +3805,8 @@ export async function documentListDatabases(connectionId: string): Promise<strin
   return invoke("document_list_databases", { connectionId });
 }
 
-export async function mongoListDatabases(connectionId: string): Promise<string[]> {
-  return documentListDatabases(connectionId);
-}
-
 export async function documentListCollections(connectionId: string, database: string): Promise<CollectionInfo[]> {
   return invoke("document_list_collections", { connectionId, database });
-}
-
-export async function mongoListCollections(connectionId: string, database: string): Promise<CollectionInfo[]> {
-  return documentListCollections(connectionId, database);
 }
 
 export async function vectorGetCollectionDetail(connectionId: string, database: string, collection: string): Promise<CollectionInfo> {
@@ -4632,40 +3814,6 @@ export async function vectorGetCollectionDetail(connectionId: string, database: 
     connectionId,
     database,
     collection,
-  });
-}
-
-export async function mongoCreateDatabase(connectionId: string, database: string): Promise<void> {
-  return invoke("mongo_create_database", { connectionId, database });
-}
-
-export async function mongoDropDatabase(connectionId: string, database: string): Promise<void> {
-  return invoke("mongo_drop_database", { connectionId, database });
-}
-
-export async function mongoDropCollection(connectionId: string, database: string, collection: string): Promise<void> {
-  return invoke("mongo_drop_collection", {
-    connectionId,
-    database,
-    collection,
-  });
-}
-
-export async function mongoRenameCollection(connectionId: string, database: string, collection: string, newName: string): Promise<void> {
-  return invoke("mongo_rename_collection", {
-    connectionId,
-    database,
-    collection,
-    newName,
-  });
-}
-
-export async function mongoCloneCollection(connectionId: string, database: string, sourceCollection: string, targetCollection: string): Promise<MongoCloneCollectionResult> {
-  return invoke("mongo_clone_collection", {
-    connectionId,
-    database,
-    sourceCollection,
-    targetCollection,
   });
 }
 
@@ -4681,40 +3829,10 @@ export async function vectorRenameCollection(connectionId: string, database: str
   return invoke("vector_rename_collection", { connectionId, database, collection, newName });
 }
 
-export async function elasticsearchListIndices(connectionId: string): Promise<string[]> {
-  const collections = await documentListCollections(connectionId, "default");
-  return [...new Set(collections.flatMap((collection) => [collection.name, ...(collection.aliases ?? [])].filter((name) => name.trim())))];
-}
-
 /** Lists every Meilisearch index visible to the current connection credentials. */
-export async function meilisearchListIndexes(connectionId: string): Promise<string[]> {
-  const collections = await documentListCollections(connectionId, "default");
-  return collections.map((collection) => collection.name);
-}
 
 export async function vectorListCollections(connectionId: string, database?: string): Promise<CollectionInfo[]> {
   return documentListCollections(connectionId, database || "default");
-}
-
-export async function mongoFindDocuments(connectionId: string, database: string, collection: string, skip: number, limit: number, filter?: string, projection?: string, sort?: string, collation?: string, executionId?: string): Promise<MongoDocumentResult> {
-  return documentFindDocuments(connectionId, database, collection, skip, limit, filter, projection, sort, collation, executionId);
-}
-
-export async function mongoFindOne(connectionId: string, database: string, collection: string, filter?: string, projection?: string, options?: string, executionId?: string): Promise<MongoDocumentResult> {
-  return invoke("mongo_find_one", {
-    connectionId,
-    database,
-    collection,
-    filter,
-    projection,
-    options,
-    executionId,
-  });
-}
-
-export async function mongoParseShellCommand(source: string): Promise<MongoCommand> {
-  const raw = await invoke<Record<string, unknown>>("mongo_parse_shell_command", { source });
-  return normalizeRustMongoCommand(raw);
 }
 
 export async function documentFindDocuments(
@@ -4760,15 +3878,6 @@ export async function dynamodbDescribeTable(connectionId: string, table: string)
   return invoke("dynamodb_describe_table", { connectionId, table });
 }
 
-export async function elasticsearchCountDocuments(connectionId: string, index: string, filter?: string, executionId?: string): Promise<number> {
-  return invoke("elasticsearch_count_documents", {
-    connectionId,
-    index,
-    filter,
-    executionId,
-  });
-}
-
 /** Read-only index metadata endpoints exposed on the Elasticsearch index context menu. */
 export type ElasticsearchIndexMetadataKind = "mapping" | "settings" | "stats";
 
@@ -4779,32 +3888,6 @@ export interface ElasticsearchDeleteByQueryResult {
   versionConflicts: number;
   timedOut: boolean;
   failures: string[];
-}
-
-export async function elasticsearchGetIndexMetadata(connectionId: string, index: string, kind: ElasticsearchIndexMetadataKind): Promise<Record<string, unknown>> {
-  return invoke("elasticsearch_get_index_metadata", {
-    connectionId,
-    index,
-    kind,
-  });
-}
-
-export async function elasticsearchDeleteAllDocuments(connectionId: string, index: string): Promise<ElasticsearchDeleteByQueryResult> {
-  return invoke("elasticsearch_delete_all_documents", {
-    connectionId,
-    index,
-  });
-}
-
-export async function mongoCountDocuments(connectionId: string, database: string, collection: string, filter?: string, mode?: "accurate" | "legacy", executionId?: string): Promise<number> {
-  return invoke("mongo_count_documents", {
-    connectionId,
-    database,
-    collection,
-    filter,
-    mode,
-    executionId,
-  });
 }
 
 export async function documentListGridFsFiles(connectionId: string, database: string, bucket: string, filter?: string, sort?: string): Promise<MongoGridFsFileInfo[]> {
@@ -4872,97 +3955,6 @@ export async function documentDeleteGridFsFile(connectionId: string, database: s
   });
 }
 
-export async function mongoServerVersion(connectionId: string, database: string, executionId?: string): Promise<string> {
-  return invoke("mongo_server_version", {
-    connectionId,
-    database,
-    executionId,
-  });
-}
-
-export async function mongoAggregateDocuments(connectionId: string, database: string, collection: string, pipelineJson: string, maxRows?: number, optionsJson?: string, executionId?: string): Promise<MongoDocumentResult> {
-  return invoke("mongo_aggregate_documents", {
-    connectionId,
-    database,
-    collection,
-    pipelineJson,
-    maxRows,
-    optionsJson,
-    executionId,
-  });
-}
-
-export async function mongoDistinct(connectionId: string, database: string, collection: string, field: string, filter?: string, executionId?: string): Promise<MongoDocumentResult> {
-  return invoke("mongo_distinct", {
-    connectionId,
-    database,
-    collection,
-    field,
-    filter,
-    executionId,
-  });
-}
-
-export async function mongoCollectionStats(connectionId: string, database: string, collection: string, scale?: number, executionId?: string): Promise<MongoCollectionStatsResult> {
-  return invoke("mongo_collection_stats", {
-    connectionId,
-    database,
-    collection,
-    scale,
-    executionId,
-  });
-}
-
-export async function mongoListIndexSpecs(connectionId: string, database: string, collection: string): Promise<MongoIndexSpec[]> {
-  return invoke("mongo_list_index_specs", {
-    connectionId,
-    database,
-    collection,
-  });
-}
-
-export async function mongoCreateIndex(connectionId: string, database: string, collection: string, keysJson: string, optionsJson?: string): Promise<{ name: string }> {
-  return invoke("mongo_create_index", {
-    connectionId,
-    database,
-    collection,
-    keysJson,
-    optionsJson,
-  });
-}
-
-export async function mongoCreateUser(connectionId: string, database: string, userJson: string, writeConcernJson?: string): Promise<{ affected_rows: number }> {
-  return invoke("mongo_create_user", {
-    connectionId,
-    database,
-    userJson,
-    writeConcernJson,
-  });
-}
-
-export async function mongoRunCommand(connectionId: string, database: string, commandJson: string, executionId?: string): Promise<MongoDocumentResult> {
-  return invoke("mongo_run_command", {
-    connectionId,
-    database,
-    commandJson,
-    executionId,
-  });
-}
-
-export async function mongoDropIndexes(connectionId: string, database: string, collection: string, indexesJson?: string, single = false): Promise<MongoDropIndexesResult> {
-  return invoke("mongo_drop_indexes", {
-    connectionId,
-    database,
-    collection,
-    indexesJson,
-    single,
-  });
-}
-
-export async function mongoInsertDocument(connectionId: string, database: string, collection: string, docJson: string, routing?: string): Promise<string> {
-  return documentInsertDocument(connectionId, database, collection, docJson, routing);
-}
-
 export async function documentInsertDocument(connectionId: string, database: string, collection: string, docJson: string, routing?: string, preserveBsonTypes?: boolean): Promise<string> {
   return invoke("document_insert_document", {
     connectionId,
@@ -4974,20 +3966,6 @@ export async function documentInsertDocument(connectionId: string, database: str
   });
 }
 
-export async function mongoInsertDocuments(connectionId: string, database: string, collection: string, docsJson: string): Promise<{ affected_rows: number }> {
-  const affectedRows = await invoke<number>("mongo_insert_documents", {
-    connectionId,
-    database,
-    collection,
-    docsJson,
-  });
-  return { affected_rows: affectedRows };
-}
-
-export async function mongoUpdateDocument(connectionId: string, database: string, collection: string, id: string, docJson: string, routing?: string): Promise<number> {
-  return documentUpdateDocument(connectionId, database, collection, id, docJson, routing);
-}
-
 export async function documentUpdateDocument(connectionId: string, database: string, collection: string, id: string, docJson: string, routing?: string): Promise<number> {
   return invoke("document_update_document", {
     connectionId,
@@ -4997,61 +3975,6 @@ export async function documentUpdateDocument(connectionId: string, database: str
     docJson,
     routing,
   });
-}
-
-export async function mongoExplainFind(connectionId: string, database: string, collection: string, options: { skip: number; limit: number; filter?: string; projection?: string; sort?: string; collation?: string; verbosity?: string }, executionId?: string): Promise<unknown> {
-  return invoke<unknown>("mongo_explain_find", {
-    connectionId,
-    database,
-    collection,
-    skip: options.skip,
-    limit: options.limit,
-    filter: options.filter,
-    projection: options.projection,
-    sort: options.sort,
-    collation: options.collation,
-    verbosity: options.verbosity,
-    executionId,
-  });
-}
-
-export async function mongoBulkWrite(connectionId: string, database: string, collection: string, operationsJson: string, optionsJson?: string): Promise<MongoBulkWriteResult> {
-  return invoke<MongoBulkWriteResult>("mongo_bulk_write", {
-    connectionId,
-    database,
-    collection,
-    operationsJson,
-    optionsJson,
-  });
-}
-
-export async function mongoReplaceDocument(connectionId: string, database: string, collection: string, filterJson: string, replacementJson: string, optionsJson?: string): Promise<{ affected_rows: number }> {
-  const affectedRows = await invoke<number>("mongo_replace_document", {
-    connectionId,
-    database,
-    collection,
-    filterJson,
-    replacementJson,
-    optionsJson,
-  });
-  return { affected_rows: affectedRows };
-}
-
-export async function mongoUpdateDocuments(connectionId: string, database: string, collection: string, filterJson: string, updateJson: string, many: boolean, optionsJson?: string): Promise<{ affected_rows: number }> {
-  const affectedRows = await invoke<number>("mongo_update_documents", {
-    connectionId,
-    database,
-    collection,
-    filterJson,
-    updateJson,
-    many,
-    optionsJson,
-  });
-  return { affected_rows: affectedRows };
-}
-
-export async function mongoDeleteDocument(connectionId: string, database: string, collection: string, id: string, routing?: string): Promise<number> {
-  return documentDeleteDocument(connectionId, database, collection, id, routing);
 }
 
 export async function documentDeleteDocument(connectionId: string, database: string, collection: string, id: string, routing?: string, documentType?: string): Promise<number> {
@@ -5072,69 +3995,6 @@ export async function documentSaveMeilisearchBatch(connectionId: string, collect
     updates,
     deleteIds,
     inserts,
-  });
-}
-
-export async function meilisearchSearchDocuments(
-  connectionId: string,
-  index: string,
-  params: { q?: string | null; filter?: string | null; sort?: string | null; limit: number; offset: number; hybridEmbedder?: string | null; hybridSemanticRatio?: number | null; showRankingScore?: boolean; rankingScoreThreshold?: number | null },
-): Promise<MeilisearchSearchResult> {
-  const result = await invoke<MeilisearchSearchWireResult>("meilisearch_search_documents", {
-    connectionId,
-    index,
-    q: params.q ?? null,
-    filter: params.filter ?? null,
-    sort: params.sort ?? null,
-    limit: params.limit,
-    offset: params.offset,
-    hybridEmbedder: params.hybridEmbedder ?? null,
-    hybridSemanticRatio: params.hybridSemanticRatio ?? null,
-    showRankingScore: params.showRankingScore ?? false,
-    rankingScoreThreshold: params.rankingScoreThreshold ?? null,
-  });
-  return decodeMeilisearchSearchResult(result);
-}
-
-export async function meilisearchFetchDocuments(connectionId: string, index: string, params: { filter?: string | null; sort?: string | null; limit: number; offset: number }): Promise<MeilisearchDocumentPage> {
-  const page = await invoke<MeilisearchDocumentPageWire>("meilisearch_fetch_documents", {
-    connectionId,
-    index,
-    filter: params.filter ?? null,
-    sort: params.sort ?? null,
-    limit: params.limit,
-    offset: params.offset,
-  });
-  return decodeMeilisearchDocumentPage(page);
-}
-
-export async function meilisearchGetDocument(connectionId: string, index: string, id: string): Promise<string> {
-  return invoke("meilisearch_get_document", {
-    connectionId,
-    index,
-    id,
-  });
-}
-
-export async function meilisearchGetIndexSettings(connectionId: string, index: string): Promise<MeilisearchIndexSettings> {
-  return invoke("meilisearch_get_index_settings", {
-    connectionId,
-    index,
-  });
-}
-
-export async function meilisearchUpdateIndexSettings(connectionId: string, index: string, settings: Record<string, unknown>): Promise<void> {
-  return invoke("meilisearch_update_index_settings", {
-    connectionId,
-    index,
-    settings,
-  });
-}
-
-export async function meilisearchGetIndexStats(connectionId: string, index: string): Promise<{ numberOfDocuments: number; isIndexing: boolean; fieldDistribution: Record<string, number> } & Record<string, unknown>> {
-  return invoke("meilisearch_get_index_stats", {
-    connectionId,
-    index,
   });
 }
 
@@ -5160,114 +4020,6 @@ export interface MeilisearchIndexOverview {
   databaseSize: number | null;
 }
 
-export async function meilisearchGetIndexOverview(connectionId: string, index: string): Promise<MeilisearchIndexOverview> {
-  return invoke("meilisearch_get_index_overview", {
-    connectionId,
-    index,
-  });
-}
-
-export async function meilisearchCreateIndex(connectionId: string, input: MeilisearchCreateIndexInput): Promise<void> {
-  return invoke("meilisearch_create_index", { connectionId, input });
-}
-
-export async function meilisearchDeleteIndex(connectionId: string, index: string): Promise<void> {
-  return invoke("meilisearch_delete_index", {
-    connectionId,
-    index,
-  });
-}
-
-export async function meilisearchDeleteAllDocuments(connectionId: string, index: string): Promise<void> {
-  return invoke("meilisearch_delete_all_documents", {
-    connectionId,
-    index,
-  });
-}
-
-export async function meilisearchGetSystemOverview(connectionId: string): Promise<MeilisearchSystemOverview> {
-  return invokeBackend("meilisearch_get_system_overview", { connectionId });
-}
-
-export async function meilisearchListKeys(connectionId: string, offset = 0, limit = 20): Promise<KeyPage> {
-  return invokeBackend("meilisearch_list_keys", { connectionId, offset, limit });
-}
-
-export async function meilisearchGetKey(connectionId: string, uid: string): Promise<KeyListItem> {
-  return invokeBackend("meilisearch_get_key", { connectionId, uid });
-}
-
-export async function meilisearchCreateKey(connectionId: string, input: KeyCreateInput): Promise<CreatedKey> {
-  return invokeBackend("meilisearch_create_key", { connectionId, input });
-}
-
-export async function meilisearchUpdateKey(connectionId: string, uid: string, input: KeyUpdateInput): Promise<KeyListItem> {
-  return invokeBackend("meilisearch_update_key", { connectionId, uid, input });
-}
-
-export async function meilisearchDeleteKey(connectionId: string, uid: string): Promise<void> {
-  return invokeBackend("meilisearch_delete_key", { connectionId, uid });
-}
-
-export async function meilisearchGetTasks(connectionId: string, input: TaskListInput): Promise<TaskPage> {
-  return invokeBackend("meilisearch_get_tasks", { connectionId, input });
-}
-
-export async function meilisearchGetTask(connectionId: string, uid: number, expectedIndexUid?: string): Promise<MeilisearchTask> {
-  return invokeBackend("meilisearch_get_task", { connectionId, uid, expectedIndexUid: expectedIndexUid ?? null });
-}
-
-export async function meilisearchCancelTasks(connectionId: string, selector: TaskSelector): Promise<EnqueuedTaskSummary> {
-  return invokeBackend("meilisearch_cancel_tasks", { connectionId, selector });
-}
-
-export async function meilisearchDeleteTasks(connectionId: string, selector: TaskSelector): Promise<EnqueuedTaskSummary> {
-  return invokeBackend("meilisearch_delete_tasks", { connectionId, selector });
-}
-
-export async function mongoDeleteDocuments(connectionId: string, database: string, collection: string, filterJson: string, many: boolean): Promise<{ affected_rows: number }> {
-  const affectedRows = await invoke<number>("mongo_delete_documents", {
-    connectionId,
-    database,
-    collection,
-    filterJson,
-    many,
-  });
-  return { affected_rows: affectedRows };
-}
-
-export async function mongoFindOneAndUpdate(connectionId: string, database: string, collection: string, filterJson: string, updateJson: string, optionsJson?: string): Promise<MongoDocumentResult> {
-  return invoke("mongo_find_one_and_update", {
-    connectionId,
-    database,
-    collection,
-    filterJson,
-    updateJson,
-    optionsJson,
-  });
-}
-
-export async function mongoFindOneAndReplace(connectionId: string, database: string, collection: string, filterJson: string, replacementJson: string, optionsJson?: string): Promise<MongoDocumentResult> {
-  return invoke("mongo_find_one_and_replace", {
-    connectionId,
-    database,
-    collection,
-    filterJson,
-    replacementJson,
-    optionsJson,
-  });
-}
-
-export async function mongoFindOneAndDelete(connectionId: string, database: string, collection: string, filterJson: string, optionsJson?: string): Promise<MongoDocumentResult> {
-  return invoke("mongo_find_one_and_delete", {
-    connectionId,
-    database,
-    collection,
-    filterJson,
-    optionsJson,
-  });
-}
-
 // --- History ---
 export interface HistoryEntry {
   id: string;
@@ -5279,7 +4031,7 @@ export interface HistoryEntry {
   execution_time_ms: number;
   success: boolean;
   error?: string;
-  activity_kind?: "query" | "data_change" | "schema_change" | "import" | "transfer" | "redis_command";
+  activity_kind?: "query" | "data_change" | "schema_change" | "import" | "transfer";
   operation?: string;
   target?: string;
   affected_rows?: number | null;
@@ -6342,10 +5094,6 @@ export async function exportQueryResultHtml(filePath: string, title: string | un
     },
   });
 }
-
-export * from "@/lib/backend/mq-tauri";
-export * from "@/lib/backend/mqtt-tauri";
-export * from "@/lib/backend/nacos-tauri";
 
 export async function openQueryResultTempFile(path: string): Promise<void> {
   return invoke("open_query_result_temp_file", { path });

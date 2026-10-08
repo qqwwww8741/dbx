@@ -13,7 +13,6 @@ import {
   hasTransferSqlPreview,
   rebuildUnavailableReason,
   resolveTransferStrategy,
-  supportsTransferUpsert,
   transferPlanReviewText,
   transferPreviewSql,
   transferStrategyOptions,
@@ -23,7 +22,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
+
 import SearchableSelect from "@/components/ui/searchable-select/SearchableSelect.vue";
 import ConnectionTreeSelect from "@/components/connection/ConnectionTreeSelect.vue";
 import { useConnectionStore } from "@/stores/connectionStore";
@@ -38,12 +37,12 @@ import DataTransferProgressDialog from "@/components/transfer/DataTransferProgre
 import DangerConfirmDialog from "@/components/editor/DangerConfirmDialog.vue";
 import type { DatabaseType } from "@/types/database";
 import type { TransferTask, TransferTaskConfig } from "@/types/database";
-import { isSchemaAware, supportsTransfer } from "@/lib/database/databaseCapabilities";
+import { supportsTransfer } from "@/lib/database/databaseCapabilities";
 import { transferDatabaseTypeForConnection } from "@/lib/database/jdbcDialect";
-import { isDorisFamilyCatalogCapable } from "@/lib/database/databaseFeatureSupport";
+
 import { decodeTransferDatabaseOption, encodeTransferDatabaseOptions, formatTransferEndpointLabel, isSameTransferDatabase, isTransferDatabaseSelected, normalizeTransferCatalog } from "@/lib/database/dataTransferSelection";
 import { formatDatabaseLabel } from "@/lib/database/defaultDatabase";
-import { databaseOptionsForConnection, fetchCatalogNamespaceOptions, fetchNamespaceOptionsForConnection, namespaceOptionsAreSchemas } from "@/composables/useDatabaseOptions";
+import { fetchCatalogNamespaceOptions, fetchNamespaceOptionsForConnection, namespaceOptionsAreSchemas } from "@/composables/useDatabaseOptions";
 import { useExportTracker } from "@/composables/useExportTracker";
 import { openDataTransferTask } from "@/composables/useDialogSources";
 import { useTransferTaskStore, TransferTaskNameConflictError, nextTransferTaskCopyName } from "@/stores/transferTaskStore";
@@ -237,7 +236,7 @@ function connectionType(id: string): DatabaseType | undefined {
 // Keep in sync with `transfer_table_filter_supported` in dbx-core.
 const tableFilterSupported = computed(() => {
   const type = connectionType(sourceConnectionId.value);
-  return type === "mysql" || type === "gbase" || type === "postgres" || type === "kingbase" || type === "gaussdb" || type === "opengauss" || type === "kwdb";
+  return type === "mysql";
 });
 
 const activeTableFilterCount = computed(() => selectedTableList.value.filter((table) => (tableFilters.value[table] ?? "").trim().length > 0).length);
@@ -270,14 +269,8 @@ function requestedTableFilters(): Record<string, string> | undefined {
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
-function isMongoConnection(id: string): boolean {
-  return connectionType(id) === "mongodb";
-}
-
-const showTargetColumnQuoteOption = computed(() => ["gaussdb", "opengauss"].includes(connectionType(targetConnectionId.value) ?? ""));
-
 const rebuildDisabledReason = computed(() => rebuildUnavailableReason(transferContent.value, connectionType(targetConnectionId.value)));
-const upsertSupported = computed(() => supportsTransferUpsert(connectionType(targetConnectionId.value)));
+const upsertSupported = computed(() => true);
 const rebuildDisabledHint = computed(() => {
   if (rebuildDisabledReason.value === "dataOnly") return t("transfer.rebuildDataOnlyDisabled");
   if (rebuildDisabledReason.value === "unsupported") return t("transfer.rebuildUnsupportedDisabled");
@@ -285,8 +278,8 @@ const rebuildDisabledHint = computed(() => {
 });
 
 function isCatalogCapable(id: string): boolean {
-  const config = store.getConfig(id);
-  return isDorisFamilyCatalogCapable(config?.db_type, config?.driver_profile);
+  store.getConfig(id);
+  return false;
 }
 
 function decodedDatabase(connectionId: string, option: string): string {
@@ -324,7 +317,6 @@ const canStart = computed(() => {
     (targetCatalogs.value.length <= 1 || !!targetCatalog.value) &&
     (selectedTables.value.size > 0 || Object.values(selectedObjects.value).some((names) => names.size > 0)) &&
     (targetTableStrategy.value !== "rebuild" || !rebuildDisabledReason.value) &&
-    (transferContent.value === "structureOnly" || targetTableStrategy.value !== "upsert" || upsertSupported.value) &&
     !sameSourceAndTarget
   );
 });
@@ -373,7 +365,7 @@ async function loadDatabases(connectionId: string, target: "source" | "target", 
     await store.ensureConnected(connectionId);
     const config = store.getConfig(connectionId);
     if (!config) return;
-    const names = isMongoConnection(connectionId) ? databaseOptionsForConnection(await api.mongoListDatabases(connectionId), config) : await fetchNamespaceOptionsForConnection(connectionId, config);
+    const names = await fetchNamespaceOptionsForConnection(connectionId, config);
     const options = encodeTransferDatabaseOptions(config.db_type, names);
     if (isStale()) return;
     if (target === "source") {
@@ -416,48 +408,6 @@ async function loadDatabasesForCatalog(connectionId: string, catalog: string, ta
     if (isStale()) return;
     if (target === "source") sourceDatabases.value = [];
     else targetDatabases.value = [];
-  }
-}
-
-async function loadSchemas(connectionId: string, database: string, side: "source" | "target", preferredSchema = "", isCancelled: () => boolean = () => false) {
-  if (!connectionId) return;
-  // 竞态防护：连接或数据库切换后，旧请求的 schema 列表回调直接丢弃。
-  const isStale = () => {
-    const currentConnection = side === "source" ? sourceConnectionId.value : targetConnectionId.value;
-    const currentDatabase = side === "source" ? sourceDatabaseName.value : targetDatabaseName.value;
-    return isCancelled() || currentConnection !== connectionId || currentDatabase !== database;
-  };
-  if (isMongoConnection(connectionId)) {
-    if (isStale()) return;
-    if (side === "source") {
-      sourceSchemas.value = [];
-      sourceSchema.value = database;
-    } else {
-      targetSchemas.value = [];
-      targetSchema.value = database;
-    }
-    return;
-  }
-  try {
-    const schemas = await api.listSchemas(connectionId, database);
-    if (isStale()) return;
-    const selected = preferredSchema && schemas.includes(preferredSchema) ? preferredSchema : schemas.includes("public") ? "public" : (schemas[0] ?? "");
-    if (side === "source") {
-      sourceSchemas.value = schemas;
-      sourceSchema.value = selected;
-    } else {
-      targetSchemas.value = schemas;
-      targetSchema.value = selected;
-    }
-  } catch {
-    if (isStale()) return;
-    if (side === "source") {
-      sourceSchemas.value = [];
-      sourceSchema.value = "";
-    } else {
-      targetSchemas.value = [];
-      targetSchema.value = "";
-    }
   }
 }
 
@@ -514,17 +464,11 @@ async function loadObjects(isCancelled: () => boolean = () => false) {
   const isStale = () => isCancelled() || sourceConnectionId.value !== connectionId || sourceDatabase.value !== databaseOption || (sourceCatalog.value || undefined) !== catalog || sourceSchema.value !== schemaValue;
   loadingObjects.value = true;
   try {
-    if (isMongoConnection(connectionId)) {
-      const collections = await api.mongoListCollections(connectionId, database);
-      if (isStale()) return;
-      objectGroups.value = { TABLE: collections.map((c) => c.name) };
-      applyPendingTableSelection();
-      applyPendingObjectSelection();
-      return;
+    {
     }
     const config = store.getConfig(connectionId);
-    const needsSchema = isSchemaAware(config?.db_type);
-    const schema = needsSchema && schemaValue ? schemaValue : database;
+
+    const schema = database;
     const kinds = transferObjectKindsForDatabase(transferDatabaseTypeForConnection(config));
     const groups: Partial<Record<TransferObjectKind, string[]>> = {};
     for (const kind of kinds) {
@@ -616,9 +560,6 @@ watch(sourceDatabase, async (db) => {
       // also the schema used for metadata lookup and qualified transfer SQL.
       sourceSchemas.value = [];
       sourceSchema.value = database;
-    } else if (isSchemaAware(config?.db_type)) {
-      await loadSchemas(sourceConnectionId.value, database, "source", pendingSourceSchemaPrefill.value);
-      pendingSourceSchemaPrefill.value = "";
     } else {
       sourceSchema.value = database;
     }
@@ -682,9 +623,6 @@ watch(targetDatabase, async (db) => {
     if (namespaceOptionsAreSchemas(config)) {
       targetSchemas.value = [];
       targetSchema.value = database;
-    } else if (isSchemaAware(config?.db_type)) {
-      await loadSchemas(targetConnectionId.value, database, "target", pendingTargetSchemaPrefill.value);
-      pendingTargetSchemaPrefill.value = "";
     } else {
       targetSchema.value = database;
     }
@@ -1048,9 +986,6 @@ async function loadTaskIntoForm(task: TransferTask) {
   if (namespaceOptionsAreSchemas(sourceConfig)) {
     sourceSchemas.value = [];
     sourceSchema.value = config.sourceDatabase;
-  } else if (isSchemaAware(sourceConfig?.db_type)) {
-    await loadSchemas(config.sourceConnectionId, config.sourceDatabase, "source", config.sourceSchema ?? "", isTaskLoadStale);
-    if (isTaskLoadStale()) return;
   } else {
     sourceSchema.value = config.sourceDatabase;
   }
@@ -1085,9 +1020,6 @@ async function loadTaskIntoForm(task: TransferTask) {
   if (namespaceOptionsAreSchemas(targetConfig)) {
     targetSchemas.value = [];
     targetSchema.value = config.targetDatabase;
-  } else if (isSchemaAware(targetConfig?.db_type)) {
-    await loadSchemas(config.targetConnectionId, config.targetDatabase, "target", config.targetSchema ?? "", isTaskLoadStale);
-    if (isTaskLoadStale()) return;
   } else {
     targetSchema.value = config.targetDatabase;
   }
@@ -1560,10 +1492,7 @@ async function saveConfigTask() {
                   </SelectContent>
                 </Select>
               </div>
-              <div v-if="showTargetColumnQuoteOption" class="flex items-center gap-3">
-                <Label for="transfer-quote-target-column-names" class="text-xs shrink-0">{{ t("transfer.quoteTargetColumnNames") }}</Label>
-                <Switch id="transfer-quote-target-column-names" v-model="quoteTargetColumnNames" size="sm" />
-              </div>
+
               <div class="flex items-center gap-3">
                 <Label class="text-xs shrink-0">{{ t("transfer.batchSize") }}</Label>
                 <Input v-model.number="batchSize" type="number" min="100" max="10000" step="100" class="h-7 text-xs w-24" />

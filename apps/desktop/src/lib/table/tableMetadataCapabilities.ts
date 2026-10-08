@@ -27,137 +27,14 @@ const defaultCapabilities: TableMetadataCapabilities = {
 };
 
 const capabilityByType: Partial<Record<DatabaseType, Partial<TableMetadataCapabilities>>> = {
-  oracle: {
-    constraints: true,
-  },
   // KingbaseES V9 shares PostgreSQL's declarative partition catalog and DDL.
-  kingbase: {
-    constraints: true,
-    partitions: true,
-  },
-  vastbase: {
-    constraints: true,
-  },
-  opengauss: {
-    constraints: true,
-  },
   // PostgreSQL reports full pg_constraint metadata (PK/FK/UNIQUE/CHECK/
   // EXCLUDE/NOT NULL) through list_constraints.
-  postgres: {
-    constraints: true,
-    partitions: true,
-  },
   // SQL Server reports PK/UNIQUE/FOREIGN KEY/CHECK/DEFAULT constraints from the
   // sys.* catalog views through list_constraints.
-  sqlserver: {
-    constraints: true,
-  },
-  mongodb: {
-    columns: false,
-    foreignKeys: false,
-    triggers: false,
-    ddl: false,
-  },
-  clickhouse: {
-    foreignKeys: false,
-    triggers: false,
-  },
-  manticoresearch: {
-    foreignKeys: false,
-    triggers: false,
-  },
-  elasticsearch: {
-    indexes: false,
-    foreignKeys: false,
-    triggers: false,
-    ddl: false,
-  },
-  easysearch: {
-    indexes: false,
-    foreignKeys: false,
-    triggers: false,
-    ddl: false,
-  },
-  meilisearch: {
-    indexes: false,
-    foreignKeys: false,
-    triggers: false,
-    ddl: false,
-  },
-  solr: {
-    indexes: false,
-    foreignKeys: false,
-    triggers: false,
-    ddl: false,
-  },
-  couchdb: {
-    indexes: false,
-    foreignKeys: false,
-    triggers: false,
-    ddl: false,
-  },
   // A Salesforce object only has describe metadata: the driver lists fields, and
   // there is no index, foreign key, trigger or DDL surface behind an SObject, so
   // those structure tabs would render permanently empty.
-  salesforce: {
-    indexes: false,
-    foreignKeys: false,
-    triggers: false,
-    ddl: false,
-  },
-  hbase: {
-    indexes: false,
-    foreignKeys: false,
-    triggers: false,
-    ddl: false,
-  },
-  qdrant: {
-    indexes: false,
-    foreignKeys: false,
-    triggers: false,
-    ddl: false,
-  },
-  milvus: {
-    indexes: false,
-    foreignKeys: false,
-    triggers: false,
-    ddl: false,
-  },
-  weaviate: {
-    indexes: false,
-    foreignKeys: false,
-    triggers: false,
-    ddl: false,
-  },
-  chromadb: {
-    indexes: false,
-    foreignKeys: false,
-    triggers: false,
-    ddl: false,
-  },
-  influxdb3: {
-    indexes: false,
-    foreignKeys: false,
-    triggers: false,
-    ddl: false,
-  },
-  influxdb: {
-    indexes: false,
-    foreignKeys: false,
-    triggers: false,
-    ddl: false,
-  },
-  victoriametrics: {
-    indexes: false,
-    foreignKeys: false,
-    triggers: false,
-    ddl: false,
-  },
-  questdb: {
-    indexes: true,
-    foreignKeys: false,
-    triggers: false,
-  },
 };
 
 export function getTableMetadataCapabilities(dbType?: DatabaseType): TableMetadataCapabilities {

@@ -62,14 +62,11 @@ export type DataGridExtractorOptionsError = "column-separator-empty" | "row-sepa
 /** Extractors that emit relational SQL predicates not supported by some stores.
  * sql-updates has a Mongo-specific updateOne path, so Mongo is NOT disabled;
  * where-clause has no Mongo equivalent, so Mongo IS disabled. */
-const NO_SQL_UPDATE_DATABASE_TYPES: ReadonlyArray<string> = ["neo4j", "tdengine"];
-const NO_WHERE_CLAUSE_DATABASE_TYPES: ReadonlyArray<string> = ["neo4j", "tdengine", "mongodb"];
 
 /** True when the extractor emits relational SQL the database type cannot run. */
-export function extractorUnavailableForDatabase(extractor: DataGridCopyExtractorId, databaseType: string | undefined | null): boolean {
-  const db = databaseType ?? "";
-  if (extractor === "sql-updates") return NO_SQL_UPDATE_DATABASE_TYPES.includes(db);
-  if (extractor === "where-clause" || extractor === "sql-select") return NO_WHERE_CLAUSE_DATABASE_TYPES.includes(db);
+export function extractorUnavailableForDatabase(extractor: DataGridCopyExtractorId, _databaseType: string | undefined | null): boolean {
+  if (extractor === "sql-updates") return false;
+  if (extractor === "where-clause" || extractor === "sql-select") return false;
   return false;
 }
 

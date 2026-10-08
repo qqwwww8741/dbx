@@ -66,7 +66,7 @@ import { useDataGridActions } from "@/composables/useDataGridActions";
 import type { DataGridSortMode } from "@/lib/dataGrid/dataGridSort";
 import { useTauriEvents } from "@/composables/useTauriEvents";
 import { useCloseActionPrompt, type AppCloseAction, type AppCloseRequestOptions } from "@/composables/useCloseActionPrompt";
-import { disposeAllSqlServerActivityTraces } from "@/lib/sqlserver/sqlServerActivityTraceRuntime";
+
 import { useVisibilityChange } from "@/composables/useVisibilityChange";
 import { useExternalSqlFileChanges } from "@/composables/useExternalSqlFileChanges";
 import { useWebDavAutoUpload } from "@/composables/useWebDavAutoUpload";
@@ -84,9 +84,9 @@ import { quickConnectionOpenTarget } from "@/lib/connection/connectionOpenTarget
 import { OBJECT_BROWSER_SEARCH_FOCUS_EVENT, objectBrowserSearchFocusTabId } from "@/lib/tabs/objectBrowserSearchFocus";
 import { parseRecentConnectionIds, rankRecentConnections, RECENT_CONNECTION_IDS_STORAGE_KEY, recordRecentConnection } from "@/lib/connection/recentConnections";
 import { resolveDefaultDatabase } from "@/lib/database/defaultDatabase";
-import { normalizeSqliteNamespace } from "@/lib/database/sqliteNamespace";
+
 import { findTreeNodeById, resolveNewQueryTarget, resolveNewQueryInitialSql } from "@/lib/sql/newQueryContext";
-import { isSqlObjectNavigationRoutineType, normalizeOracleNavigationTarget, sqlObjectNavigationSourceKind, sqlObjectNavigationSourceName, sqlObjectNavigationSourceSchema, sqlObjectNavigationTableType, type SqlObjectNavigationTarget } from "@/lib/sql/sqlNavigation";
+import { isSqlObjectNavigationRoutineType, sqlObjectNavigationSourceKind, sqlObjectNavigationSourceName, sqlObjectNavigationSourceSchema, sqlObjectNavigationTableType, type SqlObjectNavigationTarget } from "@/lib/sql/sqlNavigation";
 import { buildEditableObjectSource, buildExecutableObjectSourceStatements, executeObjectSourceSave } from "@/lib/table/objectSourceEditor";
 import { loadEditableObjectSourceForEditor } from "@/lib/table/objectSourceLoad";
 import { schemaAfterConnectionSwitch } from "@/lib/schema/connectionSchemaInitialization";
@@ -173,13 +173,12 @@ import { hasTreeNodeDatabaseContext } from "@/lib/sidebar/treeNodeContext";
 import { objectBrowserTablesToAiTreeNodes } from "@/lib/ai/objectBrowserToAiTargets";
 import { aiTargetFromTab, type AiConversationBinding } from "@/lib/ai/aiConversationBinding";
 import type { AiExternalContextRequest } from "@/lib/ai/aiExternalContext";
-import { isSchemaAware, isSingleDatabase, supportsConnectionQueryActions, usesTreeSchemaMode } from "@/lib/database/databaseFeatureSupport";
-import { codeMirrorSqlDialect, connectionObjectTreeNodeSchema, connectionUsesDatabaseObjectTreeMode, effectiveDatabaseTypeForConnection } from "@/lib/database/jdbcDialect";
-import { canFormatSqlForDatabaseType, formatSqlForEditing, sqlFormatDialectForDbType } from "@/lib/sql/sqlFormatter";
+
+import { codeMirrorSqlDialect, connectionObjectTreeNodeSchema, effectiveDatabaseTypeForConnection } from "@/lib/database/jdbcDialect";
+import { formatSqlForEditing, sqlFormatDialectForDbType } from "@/lib/sql/sqlFormatter";
 import { formatSqlSnapshotForSave } from "@/lib/sql/sqlFormatOnSave";
 import { detectAndFormatStructured } from "@/lib/sql/autoFormat";
-import { formatMongoShellText } from "@/lib/mongo/mongoFormatter";
-import { detectAndFormatElasticsearchRequests } from "@/lib/elasticsearch/elasticsearchFormatter";
+
 import { detectDatabaseFileType } from "@/lib/database/databaseFileDetection";
 import { ensureJdbcxRuntimeDrivers } from "@/lib/database/jdbcxBuiltinDriver";
 import { ensureRegisteredJdbcProductRuntimeDrivers } from "@/lib/database/jdbcProductProfiles";
@@ -188,7 +187,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import type { HistoryEntry } from "@/lib/backend/tauri";
-import { resolveDefaultAiSchema, type AiAction } from "@/lib/ai/ai";
+import { type AiAction } from "@/lib/ai/ai";
 import { useBackgroundImage } from "@/composables/useBackgroundImage";
 import ExternalSqlFileChangeDialog from "@/components/editor/ExternalSqlFileChangeDialog.vue";
 import { resolveWindowContext } from "@/lib/app/windowContext";
@@ -400,7 +399,7 @@ const showQueryEditorDdlDialog = ref(false);
 const showQueryEditorObjectSourceDialog = ref(false);
 const driverStoreTabOpen = ref(false);
 const driverStoreActive = ref(false);
-const driverStoreActiveTab = ref<"agent" | "jdbc" | "storage" | "runtime">("agent");
+const driverStoreActiveTab = ref<"agent" | "storage" | "runtime">("agent");
 const pluginCenterTabOpen = ref(false);
 const pluginCenterActive = ref(false);
 const pluginCenterFocus = ref<PluginCenterFocus | null>(null);
@@ -526,9 +525,9 @@ let aiRunsQuitConfirmed = false;
 const activeTab = computed(() => queryStore.tabs.find((t) => t.id === queryStore.activeTabId));
 const pluginAiRecommendationsByTab = ref<Record<string, PluginAiRecommendationHostUpdate>>({});
 const activePluginAiRecommendations = computed(() => {
-  const tab = activeTab.value;
-  if (!tab || tab.mode !== "plugin-workbench" || !tab.pluginWorkbench) return undefined;
-  return pluginAiRecommendationsByTab.value[tab.id];
+  {
+    return undefined;
+  }
 });
 
 function updatePluginAiRecommendations(tabId: string, update: PluginAiRecommendationHostUpdate): void {
@@ -541,7 +540,7 @@ function updatePluginAiRecommendations(tabId: string, update: PluginAiRecommenda
 // Plugin workbench tabs stay mounted once opened (hidden via v-show): an
 // iframe moved out of the DOM reloads from scratch, so KeepAlive/ContentArea
 // remounts flash the whole webview and drop its live session state.
-const mountedPluginWorkbenchTabs = computed(() => queryStore.tabs.filter((tab) => tab.mode === "plugin-workbench" && tab.pluginWorkbench));
+const mountedPluginWorkbenchTabs = computed(() => queryStore.tabs.filter((_tab) => false));
 type PluginWorkbenchTabHandle = { refresh: () => Promise<unknown> };
 const pluginWorkbenchTabRefs = new Map<string, PluginWorkbenchTabHandle>();
 let detachedEventUnlisteners: Array<() => void> = [];
@@ -867,7 +866,7 @@ watch(
 );
 
 function supportsZenMode(mode: QueryTab["mode"] | undefined) {
-  return mode === "data" || mode === "nacos";
+  return mode === "data";
 }
 
 watch(activeOutputView, (view) => {
@@ -905,7 +904,7 @@ function supportsGenericNewQuery(connection: ConnectionConfig | undefined): bool
   // workbench (for example MQ or Nacos), so those remain valid actions even
   // though they do not support a generic SQL editor.
   if (quickConnectionOpenTarget(connection).kind !== "query") return true;
-  return supportsConnectionQueryActions(effectiveDatabaseTypeForConnection(connection) ?? connection.db_type);
+  return true;
 }
 
 const canCreateNewQuery = computed(() => connectionStore.connections.some((connection) => supportsGenericNewQuery(connection)));
@@ -1222,7 +1221,6 @@ useScheduledDatabaseBackups({ scheduler: true });
 
 const appVersion = ref("");
 const isClassicLayout = computed(() => settingsStore.editorSettings.appLayout === "classic");
-const isVerticalTabPlacement = computed(() => settingsStore.editorSettings.tabPlacement === "left" || settingsStore.editorSettings.tabPlacement === "right");
 
 // Every pane's vertical strip writes back to this shared width/collapse state.
 function startTabBarResize(event: PointerEvent) {
@@ -1506,8 +1504,7 @@ function installComponentUpdates(category: ComponentUpdateCategory) {
 function availableComponentUpdateCategories(): ComponentUpdateCategory[] {
   const categories: ComponentUpdateCategory[] = [];
   if (toolbarDriverUpdateCount.value > 0) categories.push("drivers");
-  if (toolbarJdbcUpdateAvailable.value) categories.push("jdbc");
-  if (toolbarMcpUpdateAvailable.value) categories.push("mcp");
+  if (toolbarJdbcUpdateAvailable.value) if (toolbarMcpUpdateAvailable.value) categories.push("mcp");
   if (componentUpdates.pluginUpdateCount.value > 0) categories.push("plugins");
   return categories;
 }
@@ -1759,18 +1756,7 @@ function currentGlobalNavigationEntry(): GlobalNavigationEntry | null {
   const sourceIdentity = tab ? captureSourceNavigationIdentity(tab, sourceNavigationIdentity.get(tab.id)) : undefined;
   if (tab && sourceIdentity) sourceNavigationIdentity.set(tab.id, sourceIdentity);
   if (tab?.sourceView && !tab.ddlViewer && !sourceIdentity) return null;
-  const kind: GlobalNavigationKind =
-    surface !== "query"
-      ? "special"
-      : tab?.ddlViewer
-        ? "ddl"
-        : tab?.sourceView || tab?.objectSource
-          ? "objectSource"
-          : tab?.mode === "data" || (tab?.mode === "mongo" && tab.tableMeta?.tableName && connectionStore.getConfig(tab.connectionId)?.db_type === "mongodb")
-            ? "data"
-            : tab?.mode === "structure"
-              ? "structure"
-              : "query";
+  const kind: GlobalNavigationKind = surface !== "query" ? "special" : tab?.ddlViewer ? "ddl" : tab?.sourceView || tab?.objectSource ? "objectSource" : tab?.mode === "data" ? "data" : tab?.mode === "structure" ? "structure" : "query";
   const entry: GlobalNavigationEntry = {
     id: "",
     surface,
@@ -2026,16 +2012,10 @@ async function addToAi(nodesInput: TreeNode | TreeNode[]) {
     if (node.type === "connection") {
       const options = await getDatabaseOptions(node.connectionId);
       if (requestId !== addToAiRequestId) return;
-      target =
-        connection.db_type === "dameng"
-          ? {
-              database: resolveDefaultDatabase(connection, []),
-              schema: resolveDefaultAiSchema(connection, options),
-            }
-          : {
-              database: resolveDefaultDatabase(connection, options),
-              schema: connection.default_schema,
-            };
+      target = {
+        database: resolveDefaultDatabase(connection, options),
+        schema: connection.default_schema,
+      };
     } else if (hasTreeNodeDatabaseContext(node)) {
       target = { database: node.database, schema: node.schema, catalog: node.catalog };
     }
@@ -2090,7 +2070,7 @@ function analyzeHistoryWithAi(entry: HistoryEntry) {
 
   openAiPanel();
   const storedDatabase = entry.database || activeTab.value?.database || resolveDefaultDatabase(config, []);
-  const database = config.db_type === "sqlite" ? normalizeSqliteNamespace(storedDatabase, config) : storedDatabase;
+  const database = storedDatabase;
   const title = t("history.aiAnalysisTab");
   const tabId = queryStore.createTab(connectionId, database || "", title, "query");
   queryStore.updateSql(tabId, entry.sql);
@@ -2104,9 +2084,9 @@ function resolveToolbarTab(tabId?: string) {
 function formatActiveSql(tabId?: string) {
   const tab = resolveToolbarTab(tabId);
   if (!tab || tab.mode !== "query" || !tab.sql.trim()) return;
-  const connection = connectionStore.getConfig(tab.connectionId);
-  const databaseType = effectiveDatabaseTypeForConnection(connection) ?? connection?.db_type;
-  if (!canFormatSqlForDatabaseType(databaseType)) return;
+  connectionStore.getConfig(tab.connectionId);
+
+  {}
   formatSqlRequest.value = {
     id: (formatSqlRequest.value?.id ?? 0) + 1,
     tabId: tab.id,
@@ -2249,7 +2229,7 @@ async function finishPendingAppClose(action: AppCloseAction) {
   }
   pendingAppCloseAction.value = null;
   pendingSaveShouldCloseTab.value = true;
-  const disposeRuntimeBeforeClose = () => (action === "quit" ? disposeAllSqlServerActivityTraces().catch(() => undefined) : Promise.resolve());
+  const disposeRuntimeBeforeClose = () => Promise.resolve();
   if (queryStore.requiresAppCloseDraftPersist) {
     await finishAppCloseWithRequiredPersist({
       persist: () => queryStore.flushPendingPersist(),
@@ -2386,19 +2366,19 @@ async function formattedSqlForSave(tab: QueryTab): Promise<string> {
   if (!settingsStore.editorSettings.formatSqlOnSqlFileSave) return tab.sql;
   const connection = connectionStore.getConfig(tab.connectionId);
   const databaseType = effectiveDatabaseTypeForConnection(connection) ?? connection?.db_type;
-  if (tab.externalSqlPath && !isSqlFilePath(tab.externalSqlPath) && !(databaseType === "mongodb" && /\.js$/i.test(tab.externalSqlPath))) return tab.sql;
+  if (tab.externalSqlPath && !isSqlFilePath(tab.externalSqlPath)) return tab.sql;
   const sqlSnapshot = tab.sql;
   if (!sqlSnapshot.trim()) return sqlSnapshot;
-  if (!canFormatSqlForDatabaseType(databaseType)) return sqlSnapshot;
+  {}
   try {
     return await formatSqlSnapshotForSave(
       sqlSnapshot,
       () => tab.sql,
       async (sql) => {
-        if (databaseType === "mongodb") return formatMongoShellText(sql, settingsStore.editorSettings.sqlFormatter);
-        const esRequest = detectAndFormatElasticsearchRequests(sql, databaseType, settingsStore.editorSettings.sqlFormatter.tabWidth);
-        if (esRequest.kind === "elasticsearch") return esRequest.formatted;
-        if (esRequest.kind === "unsupported") return sql;
+        {}
+
+        {}
+        {}
         const structured = detectAndFormatStructured(sql, {
           indentSize: settingsStore.editorSettings.sqlFormatter.tabWidth,
           useTabs: settingsStore.editorSettings.sqlFormatter.useTabs,
@@ -2744,8 +2724,8 @@ async function saveExternalSqlTabAs(tab: QueryTab): Promise<boolean> {
     const currentFileName = tab.externalSqlPath?.split(/[\\/]/).pop()?.trim() ?? "";
     const connection = connectionStore.getConfig(tab.connectionId);
     const databaseType = effectiveDatabaseTypeForConnection(connection) ?? connection?.db_type;
-    const isMongo = databaseType === "mongodb";
-    const filterExtension = currentFileName.includes(".") ? currentFileName.split(".").pop()?.toLowerCase() : isMongo ? "js" : undefined;
+
+    const filterExtension = currentFileName.includes(".") ? currentFileName.split(".").pop()?.toLowerCase() : undefined;
     const defaultName = currentFileName || defaultSavedQueryFileName(tab.title, databaseType);
     const saved = await api.saveExternalSqlFile(defaultName, await formattedSqlForSave(tab), filterExtension, tab.externalSqlEncoding === "auto" ? "utf8" : tab.externalSqlEncoding);
     if (!saved) return false;
@@ -2917,7 +2897,7 @@ async function openDbFilePath(path: string) {
       name,
       db_type: dbType,
       driver_profile: dbType,
-      driver_label: dbType === "duckdb" ? "DuckDB" : "SQLite",
+      driver_label: "SQLite",
       url_params: "",
       host: path,
       port: 0,
@@ -3103,15 +3083,12 @@ async function newQuery() {
   if (connectionTarget.kind !== "query") {
     try {
       await connectionStore.ensureConnected(target.connectionId);
-      if (connectionTarget.kind === "mq-admin") {
-        queryStore.openMqAdmin(target.connectionId);
-      } else if (connectionTarget.kind === "nacos-admin") {
-        await connectionStore.loadNacosNamespaces(target.connectionId);
-        queryStore.openNacosAdmin(target.connectionId);
-      } else if (connectionTarget.kind === "plugin-workbench") {
-        await queryStore.openPluginConnection(target.connectionId);
-      } else {
-        queryStore.createTab(target.connectionId, "", `${conn.name}:keys`, connectionTarget.kind);
+      {
+        {
+          {
+            queryStore.createTab(target.connectionId, "", `${conn.name}:keys`, connectionTarget.kind);
+          }
+        }
       }
     } catch (e: any) {
       toast(
@@ -3168,51 +3145,10 @@ async function openConnectionQuery(connectionId: string) {
   rememberRecentConnection(connectionId);
   connectionStore.activeConnectionId = connectionId;
   const initialTarget = quickConnectionOpenTarget(connection);
-  if (initialTarget.kind === "mq-admin") {
-    queryStore.openMqAdmin(connectionId);
-    return;
-  }
-  if (initialTarget.kind === "nacos-admin") {
-    try {
-      await connectionStore.ensureConnected(connectionId);
-      await connectionStore.loadNacosNamespaces(connectionId);
-    } catch (e: any) {
-      toast(
-        t("connection.connectFailed", {
-          message: translateBackendError(t, e),
-        }),
-        5000,
-      );
-    }
-    return;
-  }
-  if (initialTarget.kind === "plugin-workbench") {
-    try {
-      await queryStore.openPluginConnection(connectionId);
-    } catch (e: any) {
-      toast(
-        t("connection.connectFailed", {
-          message: translateBackendError(t, e),
-        }),
-        5000,
-      );
-    }
-    return;
-  }
-  if (initialTarget.kind === "etcd" || initialTarget.kind === "zookeeper" || initialTarget.kind === "consul") {
-    try {
-      await connectionStore.ensureConnected(connectionId);
-      queryStore.createTab(connectionId, "", `${connection.name}:keys`, initialTarget.kind);
-    } catch (e: any) {
-      toast(
-        t("connection.connectFailed", {
-          message: translateBackendError(t, e),
-        }),
-        5000,
-      );
-    }
-    return;
-  }
+  {}
+  {}
+  {}
+  {}
   const tabId = queryStore.createTab(connectionId, initialTarget.database);
   try {
     await connectionStore.ensureConnected(connectionId);
@@ -3269,7 +3205,7 @@ function tableTargetFromActiveTab(table: string | SqlObjectNavigationTarget) {
     schema = parts[parts.length - 2];
   } else if (parts.length === 2) {
     const dbType = connectionStore.getConfig(connectionId)?.db_type;
-    if (dbType && !isSchemaAware(dbType) && !isSingleDatabase(dbType)) {
+    if (dbType) {
       database = parts[0] || database;
       schema = undefined;
     } else {
@@ -3333,9 +3269,9 @@ function onEditTableStructure(table: SqlObjectNavigationTarget) {
 function onOpenObjectSource(table: SqlObjectNavigationTarget, initialEditing: boolean) {
   const provisionalTarget = tableTargetFromActiveTab(table);
   if (!provisionalTarget) return;
-  const databaseType = effectiveDatabaseTypeForConnection(connectionStore.getConfig(provisionalTarget.connectionId));
+  effectiveDatabaseTypeForConnection(connectionStore.getConfig(provisionalTarget.connectionId));
   // Oracle-family: unquoted → UPPER; quoted mixed-case keeps written case for ALL_SOURCE lookup.
-  const navigation = databaseType === "oracle" || databaseType === "dameng" || databaseType === "oceanbase-oracle" || databaseType === "yashandb" || databaseType === "oscar" ? normalizeOracleNavigationTarget(table) : table;
+  const navigation = table;
   const target = tableTargetFromActiveTab(navigation);
   const objectType = sqlObjectNavigationSourceKind(navigation);
   if (!target || !objectType) return;
@@ -3401,7 +3337,7 @@ async function changeActiveConnection(tabId: string, connectionId: string) {
     queryStore.updateDatabase(tab.id, database);
     isCurrentTarget = queryStore.createExecutionTargetGuard(tab.id);
     if (tab.externalSqlPath) rememberExternalSqlFileTarget(tab.externalSqlPath, { connectionId, database, catalog: undefined, schema: undefined });
-    if (connection.default_schema || connection.db_type === "oracle") {
+    if (connection.default_schema) {
       try {
         // A configured default wins. Otherwise Oracle returns the session's current schema first.
         const orderedSchemas = connection.default_schema ? [] : await api.listSchemas(connectionId, database);
@@ -3509,20 +3445,11 @@ function ensureQueryTabForConnection(target: AiConversationBinding): string {
 }
 
 /** Bounded wait for a newly selected Redis console to mount. */
-const REDIS_CONSOLE_READY_TIMEOUT_MS = 2000;
-const REDIS_CONSOLE_READY_POLL_MS = 50;
 
-function routeAiRedisCommand(command: string, execute: boolean, target: AiConversationBinding): boolean {
-  const connection = target.connectionId ? connectionStore.getConfig(target.connectionId) : undefined;
-  if (connection?.db_type !== "redis") return false;
-
-  // Redis has no headless command path — the console *is* the execution vehicle,
-  // and it renders only for the active tab. We deliberately do NOT switch to the
-  // bound connection's console: "an AI action never moves the workspace" is the
-  // whole point of #9902, and an exception here would reintroduce exactly the
-  // behaviour it removes. The user opens that console and retries instead.
-  void deliverRedisAiCommand(command, execute, target);
-  return true;
+function routeAiRedisCommand(_command: string, _execute: boolean, _target: AiConversationBinding): boolean {
+  {
+    return false;
+  }
 }
 
 /**
@@ -3534,26 +3461,6 @@ function routeAiRedisCommand(command: string, execute: boolean, target: AiConver
  * probe rather than re-issuing the command: a command that ran but reported
  * `false` (e.g. a dangerous command awaiting confirmation) must not execute twice.
  */
-async function deliverRedisAiCommand(command: string, execute: boolean, target: AiConversationBinding): Promise<void> {
-  const deadline = performance.now() + REDIS_CONSOLE_READY_TIMEOUT_MS;
-  while (!contentAreaRef.value?.isRedisConsoleReady(target)) {
-    if (performance.now() >= deadline) {
-      // A console.warn is invisible in a desktop app, and the command the user
-      // asked for is simply not going to run — say so, and say what to do.
-      console.warn("[DBX] Redis AI command could not reach the bound Redis console");
-      toast(t("ai.redisConsoleUnreachable"), 5000);
-      return;
-    }
-    await nextTick();
-    await new Promise((resolve) => setTimeout(resolve, REDIS_CONSOLE_READY_POLL_MS));
-  }
-  const routed = execute ? contentAreaRef.value?.executeRedisCommand(command, target) : contentAreaRef.value?.insertRedisCommand(command, target);
-  const handled = await routed;
-  if (!handled) {
-    console.warn("[DBX] Redis AI command was not accepted by the bound Redis console");
-    toast(t("ai.redisConsoleUnreachable"), 5000);
-  }
-}
 
 /** Current editor text of the tab an AI action targets. */
 function aiTargetTabSql(tabId: string): string {
@@ -3696,25 +3603,23 @@ async function handleQuickOpenSelect(item: any) {
     // Tree node ID for connection is just the connectionId
     const connNode = findTreeNodeById(connectionStore.treeNodes, item.connectionId);
     if (connNode && !connNode.isExpanded) {
-      const config = connectionStore.getConfig(item.connectionId);
-      if (config?.db_type === "redis") {
-        await connectionStore.loadRedisDatabases(item.connectionId);
-      } else if (config?.db_type === "etcd") {
-        await connectionStore.loadEtcdRoot(item.connectionId);
-      } else if (config?.db_type === "zookeeper") {
-        await connectionStore.loadZooKeeperRoot(item.connectionId);
-      } else if (config?.db_type === "consul") {
-        await connectionStore.loadConsulRoot(item.connectionId);
-      } else if (config?.db_type === "mongodb") {
-        await connectionStore.loadMongoDatabases(item.connectionId);
-      } else if (config?.db_type === "elasticsearch" || config?.db_type === "easysearch" || config?.db_type === "meilisearch" || config?.db_type === "solr") {
-        await connectionStore.openElasticsearchConnectionTree(item.connectionId);
-      } else if (config?.db_type === "qdrant" || config?.db_type === "milvus" || config?.db_type === "weaviate" || config?.db_type === "chromadb") {
-        await connectionStore.loadVectorCollections(item.connectionId);
-      } else if (config?.db_type === "mq") {
-        await connectionStore.loadMqTenants(item.connectionId);
-      } else {
-        await connectionStore.loadDatabases(item.connectionId);
+      connectionStore.getConfig(item.connectionId);
+      {
+        {
+          {
+            {
+              {
+                {
+                  {
+                    {
+                      await connectionStore.loadDatabases(item.connectionId);
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     }
     return;
@@ -3723,25 +3628,23 @@ async function handleQuickOpenSelect(item: any) {
     // Tree node ID for connection is just the connectionId
     const connNode = findTreeNodeById(connectionStore.treeNodes, item.connectionId);
     if (connNode && !connNode.isExpanded) {
-      const config = connectionStore.getConfig(item.connectionId);
-      if (config?.db_type === "redis") {
-        await connectionStore.loadRedisDatabases(item.connectionId);
-      } else if (config?.db_type === "etcd") {
-        await connectionStore.loadEtcdRoot(item.connectionId);
-      } else if (config?.db_type === "zookeeper") {
-        await connectionStore.loadZooKeeperRoot(item.connectionId);
-      } else if (config?.db_type === "consul") {
-        await connectionStore.loadConsulRoot(item.connectionId);
-      } else if (config?.db_type === "mongodb") {
-        await connectionStore.loadMongoDatabases(item.connectionId);
-      } else if (config?.db_type === "elasticsearch" || config?.db_type === "easysearch" || config?.db_type === "meilisearch" || config?.db_type === "solr") {
-        await connectionStore.openElasticsearchConnectionTree(item.connectionId);
-      } else if (config?.db_type === "qdrant" || config?.db_type === "milvus" || config?.db_type === "weaviate" || config?.db_type === "chromadb") {
-        await connectionStore.loadVectorCollections(item.connectionId);
-      } else if (config?.db_type === "mq") {
-        await connectionStore.loadMqTenants(item.connectionId);
-      } else {
-        await connectionStore.loadDatabases(item.connectionId);
+      connectionStore.getConfig(item.connectionId);
+      {
+        {
+          {
+            {
+              {
+                {
+                  {
+                    {
+                      await connectionStore.loadDatabases(item.connectionId);
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     }
 
@@ -3751,13 +3654,11 @@ async function handleQuickOpenSelect(item: any) {
     const dbNode = findTreeNodeById(connectionStore.treeNodes, dbNodeId);
     if (dbNode && !dbNode.isExpanded) {
       const config = connectionStore.getConfig(item.connectionId);
-      const effectiveDbType = effectiveDatabaseTypeForConnection(config);
-      if (config?.db_type === "sqlserver") {
-        await connectionStore.loadSqlServerDatabaseObjects(item.connectionId, item.database);
-      } else if (usesTreeSchemaMode(effectiveDbType) && !connectionUsesDatabaseObjectTreeMode(config)) {
-        await connectionStore.loadSchemas(item.connectionId, item.database);
-      } else {
-        await connectionStore.loadTables(item.connectionId, item.database);
+      effectiveDatabaseTypeForConnection(config);
+      {
+        {
+          await connectionStore.loadTables(item.connectionId, item.database);
+        }
       }
     }
     return;
@@ -4082,7 +3983,7 @@ function focusSearchInAuxiliarySurface(target: Element | null): boolean {
   }
   if (showSettingsPage.value) return focusSearchInput("[data-settings-global-search]");
   if (showDriverStore.value) {
-    const selector = driverStoreActiveTab.value === "jdbc" ? "[data-driver-store-jdbc-search]" : "[data-driver-store-agent-search]";
+    const selector = "[data-driver-store-agent-search]";
     return focusSearchInput(selector);
   }
   if (showPluginCenter.value) return focusSearchInput("[data-plugin-marketplace-search]");
@@ -4127,12 +4028,9 @@ function setPluginWorkbenchTabRef(tabId: string, element: unknown) {
 }
 
 function refreshActivePluginWorkbench(): boolean {
-  const tab = activeTab.value;
-  if (tab?.mode !== "plugin-workbench") return false;
-  const pluginWorkbench = pluginWorkbenchTabRefs.get(tab.id);
-  if (!pluginWorkbench) return false;
-  void pluginWorkbench.refresh();
-  return true;
+  {
+    return false;
+  }
 }
 
 // Installs/rollbacks replace the plugin runtime in place; already-open
@@ -4886,15 +4784,11 @@ onUnmounted(() => {
                   </DialogFooter>
                 </DialogContent>
               </Dialog>
-              <div
-                v-show="!driverStoreActive && !pluginCenterActive && !settingsStore.settingsPageActive"
-                class="flex min-h-0 min-w-0 flex-1"
-                :class="activeTab?.mode === 'plugin-workbench' && isVerticalTabPlacement ? (settingsStore.editorSettings.tabPlacement === 'right' ? 'flex-row-reverse' : 'flex-row') : 'flex-col'"
-              >
-                <div class="flex min-h-0" :class="activeTab?.mode === 'plugin-workbench' ? (isVerticalTabPlacement ? 'h-full flex-none flex-col' : 'flex-none flex-col') : 'flex-1 flex-col'">
+              <div v-show="!driverStoreActive && !pluginCenterActive && !settingsStore.settingsPageActive" class="flex min-h-0 min-w-0 flex-1" :class="'flex-col'">
+                <div class="flex min-h-0" :class="'flex-1 flex-col'">
                   <SqlEditorWorkspace
                     ref="contentAreaRef"
-                    :content-suppressed="activeTab?.mode === 'plugin-workbench'"
+                    :content-suppressed="false"
                     @locate-tab="locateTabInSidebar"
                     @close-tab="
                       (tabId: string) => {

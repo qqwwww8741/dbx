@@ -33,14 +33,14 @@ import { createSidebarSearchLoadingTracker } from "@/lib/sidebar/sidebarSearchLo
 import { isCancelSearchShortcut, isCopySidebarSelectionShortcut, isDisconnectSidebarConnectionShortcut, isEditSidebarConnectionShortcut, isPasteSidebarSelectionShortcut, isViewTableDdlShortcut } from "@/lib/editor/keyboardShortcuts";
 import { sidebarNodeSupportsDdlView } from "@/lib/sidebar/sidebarTreeDdlShortcut";
 import { objectSourceTargetForTreeNode } from "@/lib/sidebar/treeNodeClick";
-import { supportsTypeObjectSource } from "@/lib/database/databaseObjectCapabilities";
+
 import { copyToClipboard } from "@/lib/common/clipboard";
 import { connectionPasteTargetGroupId, copySelectedConnectionsToClipboards, selectedConnectionDisconnectTargets, selectedConnectionEditTarget } from "@/lib/sidebar/sidebarConnectionSelection";
 import { formatSidebarTableCopyText } from "@/lib/sidebar/sidebarTableNameCopy";
 import { pruneTreeSelectionToVisibleNodeIds } from "@/lib/sidebar/sidebarTreeSelection";
 import { isEditableSidebarTypeSearchTarget, sidebarTypeSearchNextQuery } from "@/lib/sidebar/sidebarTypeSearch";
-import { isInternalDorisCatalog, usesTreeSchemaMode } from "@/lib/database/databaseFeatureSupport";
-import { connectionObjectTreeNodeSchema, connectionShouldDiscoverJdbcSchemas, connectionUsesConnectionRootSchemaMode, connectionUsesDatabaseObjectTreeMode, effectiveDatabaseTypeForConnection } from "@/lib/database/jdbcDialect";
+
+import { connectionObjectTreeNodeSchema, connectionUsesConnectionRootSchemaMode, effectiveDatabaseTypeForConnection } from "@/lib/database/jdbcDialect";
 import {
   activeTabSidebarTarget,
   findSidebarConnectionNode,
@@ -87,7 +87,7 @@ import { createSidebarActionTarget, findSidebarActionTarget, matchesSidebarActio
 import { syncSidebarTreeNodeExpansion } from "@/lib/sidebar/sidebarTreeExpansion";
 import type { SidebarDangerDialogOption, SidebarDangerDialogRequest } from "@/lib/sidebar/sidebarDangerDialog";
 import { resetSidebarTreeDialogState, sidebarDangerRunningExecutionId } from "./sidebarTreeDialogState";
-import { SidebarDangerConfirmDialog, SidebarDdlViewDialog, SidebarElasticsearchIndexMetadataDialog, SidebarObjectSourceDialog, SidebarProcedureExecutionDialog, SidebarVisibleDatabasesDialog, SidebarVisibleNacosNamespacesDialog, SidebarVisibleSchemasDialog } from "./sidebarAsyncDialogs";
+import { SidebarDangerConfirmDialog, SidebarDdlViewDialog, SidebarObjectSourceDialog, SidebarProcedureExecutionDialog, SidebarVisibleDatabasesDialog, SidebarVisibleSchemasDialog } from "./sidebarAsyncDialogs";
 import { sortConnectionListForDisplay } from "@/lib/sidebar/connectionListSort";
 import { sidebarDisplayTableName } from "@/lib/sidebar/sidebarTableNameDisplay";
 import { alignedSidebarCommentLabelWidths, isSidebarCommentAlignableNode, sidebarTreeNaturalContentWidth, sidebarTreeNodeComment, usesFullWidthTreeLabel } from "@/lib/sidebar/sidebarTreeItemLayout";
@@ -363,7 +363,7 @@ const searchableObjectGroupTypes = new Set<TreeNodeType>([
   "group-packages",
   "group-types",
 ]);
-const simpleObjectParentTypes = new Set<TreeNodeType>(["database", "schema", "linked-server-schema"]);
+const simpleObjectParentTypes = new Set<TreeNodeType>(["database", "schema"]);
 
 function isSimpleObjectSearchParent(node: TreeNode): boolean {
   return settingsStore.editorSettings.sidebarObjectDisplay === "simple" && simpleObjectParentTypes.has(node.type) && node.connectionId != null && node.database != null;
@@ -492,9 +492,9 @@ const isRootListPartial = computed(() => sidebarFilterGuards.value.isRootListPar
 
 const SEARCH_SCOPE_TO_NODE_TYPES: Record<SearchScope, TreeNodeType[]> = {
   connection: ["connection"],
-  database: ["database", "redis-db", "mq-tenant", "nacos-namespace", "consul-root", "mongo-db"],
+  database: ["database"],
   schema: ["schema"],
-  table: ["table", "mongo-collection", "mongo-bucket", "dynamodb-table", "vector-collection", "elasticsearch-index"],
+  table: ["table", "dynamodb-table"],
   view: ["view"],
 };
 
@@ -788,7 +788,7 @@ const filteredNodes = computed(() => {
   const q = deferredSearchQuery.value;
   nodes = filterSidebarTree(nodes, q, searchCollapsedIds.value, searchableNodeTypes.value, {
     regexMode: regexMode.value,
-    resolveLabel: (node) => (node.type === "nacos-access-control" ? t("nacos.accessControlSidebarLabel") : node.label),
+    resolveLabel: (node) => node.label,
   });
   if (q && !regexMode.value) {
     nodes = filterSidebarSearchRootsByConnectionState(nodes, store.connectedIds);
@@ -875,7 +875,7 @@ const sidebarCommentLabelWidths = shallowRef(new Map<string, number>());
 let sidebarCommentMeasureFrame = 0;
 const sidebarTreeContentWidth = ref(0);
 let sidebarTreeContentMeasureFrame = 0;
-const sidebarTableNameDisplayTypes = new Set<TreeNodeType>(["table", "view", "materialized_view", "mongo-collection", "dynamodb-table", "vector-collection", "elasticsearch-index"]);
+const sidebarTableNameDisplayTypes = new Set<TreeNodeType>(["table", "view", "materialized_view", "dynamodb-table"]);
 const sidebarStorageDisplayTypes = new Set<TreeNodeType>(["database", "table", "materialized_view"]);
 
 function sidebarCommentLabel(node: TreeNode): string {
@@ -1445,7 +1445,7 @@ provide(sidebarTreeContextKey, {
     };
     void (async () => {
       const parent = findNode(store.treeNodes);
-      if (parent?.connectionId && parent.database && (parent.type === "database" || parent.type === "schema" || parent.type === "linked-server-schema" || parent.type === "group-tables")) {
+      if (parent?.connectionId && parent.database && (parent.type === "database" || parent.type === "schema" || parent.type === "group-tables")) {
         // Refresh only the tables group. Refreshing the database/schema node
         // also reloads views, routines, triggers, etc., causing a visible
         // redraw of the whole sidebar for a table-only operation.
@@ -1739,7 +1739,7 @@ function resolveLoadedLocateTarget(target: ActiveTabSidebarTarget, candidate: Qu
 }
 
 async function ensureTreeLoadedForTarget(target: ActiveTabSidebarTarget, opts?: { force?: boolean }) {
-  if (target.type === "saved-sql-file" || target.type === "etcd-root" || target.type === "etcd-dashboard" || target.type === "etcd-access-control" || target.type === "zookeeper-root" || target.type === "consul-root") return;
+  if (target.type === "saved-sql-file") return;
   const connId = target.connectionId;
   if (!connId) return;
 
@@ -1757,47 +1757,35 @@ async function ensureTreeLoadedForTarget(target: ActiveTabSidebarTarget, opts?: 
   const connNode = findSidebarConnectionNode(store.treeNodes, connId);
   if (connNode && (force || !connNode.children || connNode.children.length === 0)) {
     try {
-      if (config.db_type === "redis") {
-        await store.loadRedisDatabases(connId);
-      } else if (config.db_type === "mongodb") {
-        await store.loadMongoDatabases(connId);
-      } else if (config.db_type === "dynamodb") {
-        await store.loadDynamoDbTables(connId);
-      } else if (config.db_type === "elasticsearch" || config.db_type === "easysearch" || config.db_type === "meilisearch" || config.db_type === "solr" || config.db_type === "couchdb") {
-        await store.loadElasticsearchIndices(connId);
-      } else if (config.db_type === "qdrant" || config.db_type === "milvus" || config.db_type === "weaviate" || config.db_type === "chromadb") {
-        await store.loadVectorCollections(connId);
-      } else if (config.db_type === "mq") {
-        await store.loadMqTenants(connId, loadOptions);
-      } else if (config.db_type === "nacos") {
-        await store.loadNacosNamespaces(connId, loadOptions);
-      } else {
-        await store.loadDatabases(connId, loadOptions);
+      {
+        {
+          {
+            {
+              {
+                {
+                  {
+                    await store.loadDatabases(connId, loadOptions);
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     } catch {
       return;
     }
   }
 
-  if (config.db_type === "mq" || config.db_type === "nacos" || config.db_type === "consul") return;
+  {}
   if (!("database" in target) || !target.database) return;
 
   const usesExactCatalogScope = target.type === "query-context";
   const targetCatalog = usesExactCatalogScope ? target.catalog : undefined;
-  if (usesExactCatalogScope) {
-    const catalogNode = findDorisCatalogNode(store.treeNodes, connId, targetCatalog);
-    if (catalogNode && (force || !catalogNode.children || catalogNode.children.length === 0)) {
-      try {
-        await store.loadDorisCatalogDatabases(catalogNode, loadOptions);
-      } catch {
-        return;
-      }
-    }
-  }
 
   // Find the database node
   const targetSchema = "schema" in target ? target.schema : undefined;
-  const effectiveDbType = effectiveDatabaseTypeForConnection(config);
+  effectiveDatabaseTypeForConnection(config);
   if (target.type === "table" && connectionUsesConnectionRootSchemaMode(config)) {
     const schemaName = targetSchema || target.database;
     if (!schemaName) return;
@@ -1813,35 +1801,15 @@ async function ensureTreeLoadedForTarget(target: ActiveTabSidebarTarget, opts?: 
   const dbNode = findDatabaseNode(store.treeNodes, connId, target.database, targetCatalog, usesExactCatalogScope);
   if (!dbNode) return;
   const databaseChildrenLoaded = !!dbNode.children && dbNode.children.length > 0;
-  const usesSchemaTree = (usesTreeSchemaMode(effectiveDbType) && !connectionUsesDatabaseObjectTreeMode(config)) || connectionShouldDiscoverJdbcSchemas(config);
-  const shouldLoadSchemaTables = target.type === "table" && !!targetSchema && usesSchemaTree;
-  if (!force && databaseChildrenLoaded && !shouldLoadSchemaTables) return;
+
+  if (!force && databaseChildrenLoaded) return;
 
   // Load database contents
   try {
-    if (config.db_type === "sqlserver") {
-      if (force || !databaseChildrenLoaded) {
-        await store.loadSqlServerDatabaseObjects(connId, target.database, loadOptions);
+    {
+      {
+        await store.loadTables(connId, target.database, undefined, loadOptions);
       }
-      if (targetSchema) {
-        const schemaNode = findSchemaNode(store.treeNodes, connId, target.database, targetSchema);
-        if (schemaNode && (force || !schemaNode.children || schemaNode.children.length === 0)) {
-          await store.loadTables(connId, target.database, targetSchema, loadOptions);
-        }
-      }
-    } else if (usesSchemaTree) {
-      if (force || !databaseChildrenLoaded) {
-        await store.loadSchemas(connId, target.database, loadOptions);
-      }
-      // If we have a schema, also load tables under that schema
-      if (targetSchema) {
-        const schemaNode = findSchemaNode(store.treeNodes, connId, target.database, targetSchema);
-        if (schemaNode && (force || !schemaNode.children || schemaNode.children.length === 0)) {
-          await store.loadTables(connId, target.database, targetSchema, loadOptions);
-        }
-      }
-    } else {
-      await store.loadTables(connId, target.database, undefined, loadOptions);
     }
 
     if (target.type === "table") {
@@ -1880,20 +1848,6 @@ function findTableObjectGroupNodes(nodes: TreeNode[], target: Extract<ActiveTabS
 
 function sameTreeName(left: string | undefined, right: string | undefined): boolean {
   return (left || "").toLowerCase() === (right || "").toLowerCase();
-}
-
-function findDorisCatalogNode(nodes: TreeNode[], connId: string, catalog: string | undefined): TreeNode | null {
-  for (const node of nodes) {
-    if (node.type === "doris-catalog" && node.connectionId === connId) {
-      const matches = catalog ? sameTreeName(node.catalog, catalog) : isInternalDorisCatalog(node.catalogType, node.catalog);
-      if (matches) return node;
-    }
-    if (node.children) {
-      const found = findDorisCatalogNode(node.children, connId, catalog);
-      if (found) return found;
-    }
-  }
-  return null;
 }
 
 function findDatabaseNode(nodes: TreeNode[], connId: string, database: string, catalog?: string, exactCatalog = false): TreeNode | null {
@@ -2136,7 +2090,7 @@ function openSidebarObjectSource(node: TreeNode, initialEditing: boolean) {
   if (!node.connectionId || !node.database || !objectSourceTargetForTreeNode(node)) return;
   // TYPE/TYPE_BODY only have a source implementation on Xugu; PostgreSQL-family
   // connections list user-defined types without a CREATE TYPE getter this cycle.
-  if ((node.type === "type" || node.type === "type-body") && !supportsTypeObjectSource(store.getConfig(node.connectionId)?.db_type)) return;
+  if (node.type === "type" || node.type === "type-body") return;
   const target = createSidebarActionTarget(node);
   beginSidebarAction();
   // issue #9035：弹窗立即挂载。此前先 await ensureConnected 再开弹窗，这段时间
@@ -2188,11 +2142,10 @@ function openSidebarVisibleSchemas(node: TreeNode) {
   sidebarVisibleSchemasOpen.value = true;
 }
 
-function openSidebarVisibleNacosNamespaces(node: TreeNode) {
-  if (node.type !== "connection" || !node.connectionId || store.getConfig(node.connectionId)?.db_type !== "nacos") return;
-  beginSidebarAction();
-  sidebarVisibleNacosNamespacesTarget.value = createSidebarActionTarget(node);
-  sidebarVisibleNacosNamespacesOpen.value = true;
+function openSidebarVisibleNacosNamespaces(_node: TreeNode) {
+  {
+    return;
+  }
 }
 
 function tableNameFilterScopeForNode(node: TreeNode): string | null {
@@ -2831,14 +2784,6 @@ defineExpose({ focusSearch, createNewGroup, collapseAllTreeNodes, locateTabInSid
       :format-dialect="sqlFormatDialectForDbType(sidebarDdlDatabaseType)"
     />
 
-    <SidebarElasticsearchIndexMetadataDialog
-      v-if="sidebarElasticsearchIndexMetadataTarget"
-      v-model:open="sidebarElasticsearchIndexMetadataOpen"
-      :connection-id="sidebarElasticsearchIndexMetadataTarget.node.connectionId!"
-      :index="sidebarElasticsearchIndexMetadataTarget.node.label"
-      :kind="sidebarElasticsearchIndexMetadataTarget.kind"
-    />
-
     <SidebarObjectSourceDialog
       v-if="sidebarObjectSourceTarget && sidebarObjectSourceType"
       v-model:open="sidebarObjectSourceOpen"
@@ -2878,7 +2823,6 @@ defineExpose({ focusSearch, createNewGroup, collapseAllTreeNodes, locateTabInSid
       :database="sidebarVisibleSchemasTarget.database"
     />
 
-    <SidebarVisibleNacosNamespacesDialog v-if="sidebarVisibleNacosNamespacesTarget?.connectionId" v-model:open="sidebarVisibleNacosNamespacesOpen" :connection-id="sidebarVisibleNacosNamespacesTarget.connectionId" :connection-name="sidebarVisibleNacosNamespacesTarget.label" />
     <Dialog v-model:open="sidebarTableNameFilterOpen">
       <DialogContent class="max-w-xl">
         <DialogHeader class="space-y-2">

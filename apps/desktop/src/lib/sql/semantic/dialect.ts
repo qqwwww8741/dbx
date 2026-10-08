@@ -25,10 +25,6 @@ function defaultNormalize(identifier: string): string {
   return identifier;
 }
 
-function lowerUnquoted(identifier: string, quoted?: boolean): string {
-  return quoted ? identifier : identifier.toLowerCase();
-}
-
 function upperUnquoted(identifier: string, quoted?: boolean): string {
   return quoted ? identifier : identifier.toUpperCase();
 }
@@ -73,15 +69,7 @@ export const SQL_SEMANTIC_DIALECTS: Record<string, SqlSemanticDialectAdapter> = 
     quoteIdentifier: (identifier) => quoteWith(identifier, '"'),
     qualifierRole: roleForGenericQualifier,
   },
-  postgres: {
-    id: "postgres",
-    identifierQuotes: [{ open: '"', close: '"' }],
-    supportsAsForTableAlias: true,
-    projectionAliasVisibility: defaultProjectionAliasVisibility,
-    normalizeIdentifier: lowerUnquoted,
-    quoteIdentifier: (identifier) => quoteWith(identifier, '"'),
-    qualifierRole: roleForGenericQualifier,
-  },
+
   mysql: {
     id: "mysql",
     identifierQuotes: [
@@ -94,86 +82,7 @@ export const SQL_SEMANTIC_DIALECTS: Record<string, SqlSemanticDialectAdapter> = 
     quoteIdentifier: (identifier) => quoteWith(identifier, "`"),
     qualifierRole: roleForMysqlLikeQualifier,
   },
-  doris: {
-    id: "doris",
-    identifierQuotes: [
-      { open: "`", close: "`" },
-      { open: '"', close: '"' },
-    ],
-    supportsAsForTableAlias: true,
-    projectionAliasVisibility: { where: false, groupBy: true, having: true, orderBy: true },
-    normalizeIdentifier: defaultNormalize,
-    quoteIdentifier: (identifier) => quoteWith(identifier, "`"),
-    qualifierRole: roleForMysqlLikeQualifier,
-  },
-  clickhouse: {
-    id: "clickhouse",
-    identifierQuotes: [
-      { open: "`", close: "`" },
-      { open: '"', close: '"' },
-    ],
-    supportsAsForTableAlias: true,
-    projectionAliasVisibility: { where: false, groupBy: true, having: true, orderBy: true },
-    normalizeIdentifier: defaultNormalize,
-    quoteIdentifier: (identifier) => quoteWith(identifier, "`"),
-    qualifierRole(parts, context) {
-      if (context === "column") return parts.length >= 2 ? "table" : "table";
-      if (context === "routine") return parts.length >= 2 ? "package" : "schema";
-      return parts.length >= 1 ? "schema" : "unknown";
-    },
-  },
-  sqlserver: {
-    id: "sqlserver",
-    identifierQuotes: [
-      { open: "[", close: "]" },
-      { open: '"', close: '"' },
-    ],
-    supportsAsForTableAlias: true,
-    projectionAliasVisibility: defaultProjectionAliasVisibility,
-    normalizeIdentifier: defaultNormalize,
-    quoteIdentifier: (identifier) => `[${identifier.replaceAll("]", "]]")}]`,
-    qualifierRole(parts, context) {
-      if (context === "column") return parts.length >= 2 ? "table" : "table";
-      if (context === "routine") return parts.length >= 2 ? "package" : "schema";
-      if (parts.length >= 2) return "schema";
-      return "schema";
-    },
-  },
-  sqlite: {
-    id: "sqlite",
-    identifierQuotes: [
-      { open: '"', close: '"' },
-      { open: "`", close: "`" },
-      { open: "[", close: "]" },
-    ],
-    supportsAsForTableAlias: true,
-    projectionAliasVisibility: { where: false, groupBy: true, having: true, orderBy: true },
-    normalizeIdentifier: defaultNormalize,
-    quoteIdentifier: (identifier) => quoteWith(identifier, '"'),
-    qualifierRole: roleForGenericQualifier,
-  },
-  duckdb: {
-    id: "duckdb",
-    identifierQuotes: [{ open: '"', close: '"' }],
-    supportsAsForTableAlias: true,
-    projectionAliasVisibility: defaultProjectionAliasVisibility,
-    normalizeIdentifier: defaultNormalize,
-    quoteIdentifier: (identifier) => quoteWith(identifier, '"'),
-    qualifierRole: roleForGenericQualifier,
-  },
-  oracle: {
-    id: "oracle",
-    identifierQuotes: [{ open: '"', close: '"' }],
-    supportsAsForTableAlias: false,
-    projectionAliasVisibility: defaultProjectionAliasVisibility,
-    normalizeIdentifier: upperUnquoted,
-    quoteIdentifier: (identifier) => quoteWith(identifier, '"'),
-    qualifierRole(parts, context) {
-      if (context === "column") return parts.length >= 2 ? "table" : "table";
-      if (context === "routine") return parts.length >= 2 ? "package" : "schema";
-      return parts.length >= 1 ? "schema" : "unknown";
-    },
-  },
+
   // SOQL: identifiers are never quoted, field names are case-insensitive, there are
   // no table aliases or projection aliases, and a qualifier is a relationship path
   // segment (Account.Owner) that always resolves to a related sObject ("table").
@@ -192,49 +101,26 @@ export const SQL_SEMANTIC_DIALECTS: Record<string, SqlSemanticDialectAdapter> = 
 };
 
 export function sqlReferenceAnalysisDialectFor(options: { databaseType?: DatabaseType; identifierQuote?: string; fallbackDialect: string }): string {
-  if (options.databaseType === "kyuubi") return "spark";
-  if (options.databaseType === "kingbase" && options.identifierQuote === "`") return "mysql";
-  if (options.databaseType === "doris" || options.databaseType === "starrocks") return "doris";
+  {}
+  {}
+  {}
   return options.fallbackDialect;
 }
 
-export function sqlSemanticDialectFor(options: { databaseType?: DatabaseType; dialect?: "mysql" | "postgres" | "sqlserver" | "clickhouse" | "doris" | "soql" }): SqlSemanticDialectAdapter {
-  if (options.databaseType === "snowflake") return SQL_SEMANTIC_DIALECTS.snowflake;
-  if (options.databaseType === "salesforce") return SQL_SEMANTIC_DIALECTS.soql;
-  if (options.databaseType === "clickhouse") return SQL_SEMANTIC_DIALECTS.clickhouse;
+export function sqlSemanticDialectFor(options: { databaseType?: DatabaseType; dialect?: "mysql" | "soql" }): SqlSemanticDialectAdapter {
+  {}
+  {}
+  {}
   // Doris/StarRocks connections ride the editor's MySQL fallback dialect (codeMirrorSqlDialect maps
   // them to "mysql"), so the explicit-dialect branch below would otherwise mask the doris adapter
   // (LATERAL VIEW modeling, etc.) on the real editor path. Like clickhouse, they win on
   // databaseType regardless of the passed dialect.
-  if (options.databaseType === "doris" || options.databaseType === "starrocks") return SQL_SEMANTIC_DIALECTS.doris;
+  {}
   if (options.dialect && SQL_SEMANTIC_DIALECTS[options.dialect]) return SQL_SEMANTIC_DIALECTS[options.dialect];
   switch (options.databaseType) {
-    case "postgres":
-    case "redshift":
-    case "opengauss":
-    case "gaussdb":
-    case "highgo":
-    case "uxdb":
-      return SQL_SEMANTIC_DIALECTS.postgres;
     case "mysql":
       return SQL_SEMANTIC_DIALECTS.mysql;
-    case "sqlserver":
-      return SQL_SEMANTIC_DIALECTS.sqlserver;
-    case "sqlite":
-    case "rqlite":
-    case "turso":
-    case "cloudflare-d1":
-      return SQL_SEMANTIC_DIALECTS.sqlite;
-    case "duckdb":
-      return SQL_SEMANTIC_DIALECTS.duckdb;
-    case "oracle":
-    case "oceanbase-oracle":
-    case "dameng":
-    case "kingbase":
-    case "vastbase":
-    case "goldendb":
-    case "yashandb":
-      return SQL_SEMANTIC_DIALECTS.oracle;
+
     default:
       return SQL_SEMANTIC_DIALECTS.generic;
   }
@@ -248,6 +134,6 @@ export function sqlSemanticDialectFor(options: { databaseType?: DatabaseType; di
  * "generic" default), matching tokenizeSqlSemantic's default and preserving the behavior callers
  * had before dialect-aware scanning existed.
  */
-export function resolveSqlDialectId(options: { databaseType?: DatabaseType; dialect?: "mysql" | "postgres" | "sqlserver" | "clickhouse" | "doris" | "soql" }): string {
+export function resolveSqlDialectId(options: { databaseType?: DatabaseType; dialect?: "mysql" | "soql" }): string {
   return options.databaseType || options.dialect ? sqlSemanticDialectFor(options).id : "mysql";
 }

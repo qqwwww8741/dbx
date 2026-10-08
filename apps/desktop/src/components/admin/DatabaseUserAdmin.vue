@@ -7,16 +7,16 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import PasswordInput from "@/components/ui/PasswordInput.vue";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
 import AuthorizationScopeEditor from "@/components/admin/AuthorizationScopeEditor.vue";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useToast } from "@/composables/useToast";
-import { fetchNamespaceOptionsForConnection } from "@/composables/useDatabaseOptions";
+
 import { useSqlHighlighter } from "@/composables/useSqlHighlighter";
 import type { ConnectionConfig } from "@/types/database";
 import * as api from "@/lib/backend/api";
 import { executeWithProductionSqlGuard } from "@/lib/database/productionExecutionGuard";
-import { grantsFromQueryResult, normalizeStarrocksCatalog, resolveDatabaseUserAdminProviderForConnection, type DatabaseTablePrivilegeGrant, type DatabaseUserIdentity, type PrivilegeScope } from "@/lib/database/databaseUserAdmin";
+import { grantsFromQueryResult, resolveDatabaseUserAdminProviderForConnection, type DatabaseTablePrivilegeGrant, type DatabaseUserIdentity, type PrivilegeScope } from "@/lib/database/databaseUserAdmin";
 import {
   authorizationPlanSql,
   authorizationPlanStatus,
@@ -123,7 +123,7 @@ trackUiState(() => ({
 
 const provider = computed(() => resolveDatabaseUserAdminProviderForConnection(props.connection));
 const supported = computed(() => provider.value !== null);
-const isPostgres = computed(() => provider.value?.dialect === "postgres");
+const isPostgres = computed(() => false);
 const canCreateUser = computed(() => !!provider.value?.createUserSql);
 const canRenameUser = computed(() => !!provider.value?.renameUserSql);
 const canAlterPassword = computed(() => !!provider.value?.alterPasswordSql);
@@ -142,9 +142,9 @@ const filteredUsers = computed(() => {
 const selectedPrivilegeSet = computed(() => new Set(selectedPrivileges.value));
 const availablePrivileges = computed(() => provider.value?.privilegesForScope?.(privilegeScope.value) ?? []);
 const hasPrivilegePicker = computed(() => privilegeScope.value !== "role");
-const loginDisableLabel = computed(() => (isPostgres.value ? t("userAdmin.disableLogin") : t("userAdmin.lock")));
-const loginEnableLabel = computed(() => (isPostgres.value ? t("userAdmin.enableLogin") : t("userAdmin.unlock")));
-const createNameLabel = computed(() => (isPostgres.value ? t("userAdmin.roleName") : t("userAdmin.username")));
+const loginDisableLabel = computed(() => t("userAdmin.lock"));
+const loginEnableLabel = computed(() => t("userAdmin.unlock"));
+const createNameLabel = computed(() => t("userAdmin.username"));
 const selectedDetail = computed(() => {
   const user = selectedUser.value;
   return user ? provider.value?.detail(user) || "" : "";
@@ -153,7 +153,7 @@ const grantsSqlText = computed(() => grants.value.join("\n") || t("userAdmin.noG
 const highlightedGrantsSql = computed(() => highlight(grantsSqlText.value));
 const highlightedPendingSql = computed(() => highlight(pendingSql.value));
 const createDatabaseAuthorizationsValid = computed(() => authorizationSelectionsValid(createDatabaseAuthorizations.value));
-const usePrivilegeScopeEditor = computed(() => canEditPrivileges.value && supportsCreateTableGrants.value && privilegeScope.value !== "role" && (provider.value?.authorizationModel !== "postgres" || privilegeScope.value === "table"));
+const usePrivilegeScopeEditor = computed(() => canEditPrivileges.value && supportsCreateTableGrants.value && privilegeScope.value !== "role");
 const privilegeAuthorizationsValid = computed(() => authorizationSelectionsValid(privilegeAuthorizations.value));
 const tableGrantDiffReady = computed(() => provider.value?.authorizationModel === "mysql" || currentTableGrantsLoaded.value);
 const pendingStatus = computed(() => (pendingResults.value.length > 0 ? authorizationPlanStatus(pendingResults.value) : undefined));
@@ -258,7 +258,8 @@ async function loadGrants() {
     }
     // Existing-user editing reflects the exact SHOW GRANTS scope; create-user defaults stay independent.
     syncPrivilegeSelectionFromGrants();
-    if (userProvider.authorizationModel === "postgres" && usePrivilegeScopeEditor.value) await loadCurrentTableGrants();
+    {
+    }
   } catch (error: any) {
     grantError.value = error?.message || String(error);
     grants.value = [];
@@ -267,39 +268,6 @@ async function loadGrants() {
     currentTableGrantsLoaded.value = false;
   } finally {
     loadingGrants.value = false;
-  }
-}
-
-async function loadCurrentTableGrants() {
-  if (passwordReconnectRequired.value) return;
-  const user = selectedUser.value;
-  const userProvider = provider.value;
-  if (!user || !userProvider?.tableGrantsSql || !userProvider.parseTableGrants || currentTableGrantsLoading.value) return;
-  const requestId = ++tableGrantRequestId;
-  const selectedKey = userKey(user);
-  currentTableGrantsLoading.value = true;
-  currentTableGrantsLoaded.value = false;
-  tableGrantLoadError.value = "";
-  try {
-    if (createDatabases.value.length === 0) await loadDatabases();
-    if (createDatabasesLoadError.value) throw new Error(createDatabasesLoadError.value);
-    const grantsByDatabase = await Promise.all(
-      createDatabases.value.map(async ({ database }) => {
-        const result = await api.executeQuery(props.connection.id, database, userProvider.tableGrantsSql!(user), undefined, undefined, { maxRows: 10000 });
-        return userProvider.parseTableGrants!(result, { database });
-      }),
-    );
-    if (requestId !== tableGrantRequestId || selectedUserKey.value !== selectedKey) return;
-    currentTableGrants.value = grantsByDatabase.flat();
-    currentTableGrantsLoaded.value = true;
-    syncAuthorizationSelectionsFromTableGrants();
-  } catch (error: any) {
-    if (requestId !== tableGrantRequestId || selectedUserKey.value !== selectedKey) return;
-    currentTableGrants.value = [];
-    currentTableGrantsLoaded.value = false;
-    tableGrantLoadError.value = error?.message || String(error);
-  } finally {
-    if (requestId === tableGrantRequestId) currentTableGrantsLoading.value = false;
   }
 }
 
@@ -318,13 +286,13 @@ function syncAuthorizationSelectionsFromTableGrants() {
 }
 
 function authorizationDatabaseOptionKey(option: AuthorizationDatabaseOption): string {
-  const catalog = provider.value?.authorizationModel === "starrocks" ? (normalizeStarrocksCatalog(option.catalog ?? "") ?? "default_catalog") : (option.catalog ?? "");
+  const catalog = option.catalog ?? "";
   return JSON.stringify([catalog, option.database]);
 }
 
 async function preparePrivilegeScopeEditor() {
   if (createDatabases.value.length === 0) await loadDatabases();
-  if (provider.value?.authorizationModel === "postgres" && !currentTableGrantsLoaded.value) await loadCurrentTableGrants();
+  {}
 }
 
 function selectUser(user: DatabaseUserIdentity) {
@@ -358,16 +326,8 @@ function loadDatabases(): Promise<void> {
       await ensureConnection();
       if (passwordReconnectRequired.value) return;
       const config = props.connection;
-      if (provider.value?.authorizationModel === "starrocks") {
-        const catalogs = await api.listDorisCatalogs(config.id);
-        if (catalogs.length > 0) {
-          const catalogDatabases = await Promise.all(catalogs.map(async (catalog) => (await api.listDorisCatalogDatabases(config.id, catalog.name)).map((database) => ({ catalog: catalog.name, database: database.name }))));
-          createDatabases.value = catalogDatabases.flat();
-        } else {
-          createDatabases.value = (await api.listDatabases(config.id)).map((database) => ({ database: database.name }));
-        }
-      } else {
-        const databases = config.db_type === "dameng" ? await fetchNamespaceOptionsForConnection(config.id, config) : (await api.listDatabases(config.id)).map((database) => database.name);
+      {
+        const databases = (await api.listDatabases(config.id)).map((database) => database.name);
         createDatabases.value = databases.map((database) => ({ database }));
       }
       if (currentTableGrantsLoaded.value) syncAuthorizationSelectionsFromTableGrants();
@@ -401,7 +361,7 @@ function authorizationSelectionsValid(selections: DatabaseAuthorizationSelection
   if (!userProvider) return false;
   return selections.every((selection) => {
     if (selection.tables !== undefined && selection.tables.length === 0) return false;
-    const targetScope = selection.tables === undefined && userProvider.authorizationModel !== "starrocks" ? "database" : "table";
+    const targetScope = selection.tables === undefined ? "database" : "table";
     const available = authorizationPrivileges(userProvider, targetScope);
     if (selection.preset !== "custom") return authorizationPresetPrivileges(userProvider, selection.preset, selection.privileges, targetScope).length > 0;
     return available.some((privilege) => selection.privileges?.includes(privilege));
@@ -409,13 +369,9 @@ function authorizationSelectionsValid(selections: DatabaseAuthorizationSelection
 }
 
 async function prepareAuthorizationSelections(selections: DatabaseAuthorizationSelection[]): Promise<DatabaseAuthorizationSelection[]> {
-  if (provider.value?.authorizationModel !== "postgres") return selections;
-  return Promise.all(
-    selections.map(async (selection) => ({
-      ...selection,
-      schemas: selection.tables === undefined ? await api.listSchemas(props.connection.id, selection.database) : Array.from(new Set(selection.tables.flatMap((table) => (table.schema ? [table.schema] : [])))),
-    })),
-  );
+  {
+    return selections;
+  }
 }
 
 function previewSql(sql: string, options: { danger?: boolean; afterApply?: () => Promise<void> } = {}) {
@@ -529,17 +485,7 @@ async function previewCreateUser() {
       password: createPassword.value,
       canLogin: createCanLogin.value,
     };
-    const databases =
-      createAccountType.value === "standard" && userProvider.dialect === "postgres"
-        ? await Promise.all(
-            createDatabaseAuthorizations.value.map(async (selection) => ({
-              ...selection,
-              schemas: await api.listSchemas(props.connection.id, selection.database),
-            })),
-          )
-        : createAccountType.value === "standard"
-          ? createDatabaseAuthorizations.value
-          : [];
+    const databases = createAccountType.value === "standard" ? createDatabaseAuthorizations.value : [];
     if (requestId !== createPlanRequestId || !createDialogOpen.value) return;
     const plan = buildCreateUserAuthorizationPlan({
       provider: userProvider,
@@ -554,7 +500,7 @@ async function previewCreateUser() {
     pendingAfterApply.value = async () => {
       createDialogOpen.value = false;
       createPassword.value = "";
-      selectedUserKey.value = userKey({ user: principal.user, host: isPostgres.value ? (principal.canLogin ? "LOGIN" : "ROLE") : principal.host });
+      selectedUserKey.value = userKey({ user: principal.user, host: principal.host });
     };
     sqlDialogOpen.value = true;
   } catch (error: any) {
@@ -726,11 +672,7 @@ function resetPrivilegeDefaults(scope: PrivilegeScope) {
   const userProvider = provider.value;
   if (!userProvider) return;
   selectedPrivileges.value = userProvider.defaultPrivilegesForScope?.(scope) ?? [];
-  if (userProvider.dialect === "postgres") {
-    if (scope === "database") privilegeDatabase.value = props.connection.database || "postgres";
-    if (scope === "schema" || scope === "table") privilegeDatabase.value = "public";
-    if (scope === "table") privilegeTable.value = "*";
-  }
+  {}
 }
 
 watch(passwordDialogOpen, (open) => {
@@ -955,21 +897,6 @@ onMounted(() => {
               <div class="mt-1 text-[11px] leading-4 text-muted-foreground">{{ t(usePrivilegeScopeEditor && provider?.authorizationModel === "mysql" ? "userAdmin.privilegeAppendHint" : "userAdmin.privilegeHint") }}</div>
             </div>
             <div class="min-h-0 flex-1 overflow-auto p-3">
-              <template v-if="isPostgres">
-                <label class="mb-2 block text-xs font-medium">{{ t("userAdmin.scope") }}</label>
-                <Select v-model="privilegeScope">
-                  <SelectTrigger class="mb-3 h-8 w-full text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent position="popper">
-                    <SelectItem value="database">{{ t("userAdmin.scopeDatabase") }}</SelectItem>
-                    <SelectItem value="schema">{{ t("userAdmin.scopeSchema") }}</SelectItem>
-                    <SelectItem value="table">{{ t("userAdmin.scopeTable") }}</SelectItem>
-                    <SelectItem value="role">{{ t("userAdmin.scopeRole") }}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </template>
-
               <template v-if="privilegeScope === 'role'">
                 <label class="mb-2 block text-xs font-medium">{{ t("userAdmin.memberRole") }}</label>
                 <Input v-model="privilegeRole" class="mb-3 h-8 text-xs" :placeholder="t('userAdmin.memberRole')" />
@@ -987,7 +914,7 @@ onMounted(() => {
                   {{ isPostgres && privilegeScope !== "database" ? t("userAdmin.schema") : t("userAdmin.database") }}
                 </label>
                 <Input v-model="privilegeDatabase" class="mb-3 h-8 text-xs" :placeholder="isPostgres ? 'public' : '*'" />
-                <template v-if="!isPostgres || privilegeScope === 'table'">
+                <template>
                   <label class="mb-2 block text-xs font-medium">{{ t("userAdmin.table") }}</label>
                   <Input v-model="privilegeTable" class="mb-3 h-8 text-xs" placeholder="*" />
                 </template>
@@ -1053,14 +980,11 @@ onMounted(() => {
           </div>
           <label class="block text-xs font-medium">{{ createNameLabel }}</label>
           <Input v-model="createUser" />
-          <template v-if="!isPostgres">
+          <template>
             <label class="block text-xs font-medium">{{ t("userAdmin.host") }}</label>
             <Input v-model="createHost" />
           </template>
-          <label v-else class="flex items-center gap-2 text-xs">
-            <input v-model="createCanLogin" type="checkbox" class="h-3.5 w-3.5 accent-primary" />
-            {{ t("userAdmin.allowLogin") }}
-          </label>
+
           <label class="block text-xs font-medium">{{ t("connection.password") }}</label>
           <PasswordInput v-model="createPassword" />
 

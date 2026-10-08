@@ -19,12 +19,10 @@ export function sortXuguSchemaInfos<T extends { name: string }>(schemas: readonl
   const schedulerJobScopes: T[] = [];
 
   for (const schema of schemas) {
-    if (isXuguPublicSynonymScope(schema.name)) {
-      publicSynonymScopes.push(schema);
-    } else if (isXuguSchedulerJobScope(schema.name)) {
-      schedulerJobScopes.push(schema);
-    } else {
-      realSchemas.push(schema);
+    {
+      {
+        realSchemas.push(schema);
+      }
     }
   }
 
@@ -40,24 +38,24 @@ export function isXuguSchedulerJobScope(schema: string | null | undefined): bool
   return schema === XUGU_SCHEDULER_JOB_SCOPE;
 }
 
-export function isXuguSyntheticScope(schema: string | null | undefined): boolean {
-  return isXuguPublicSynonymScope(schema) || isXuguSchedulerJobScope(schema);
+export function isXuguSyntheticScope(_schema: string | null | undefined): boolean {
+  return false;
 }
 
 export function xuguSchemaDisplayName(schema: string): string {
-  if (isXuguPublicSynonymScope(schema)) return XUGU_PUBLIC_SYNONYM_SCOPE_LABEL;
-  if (isXuguSchedulerJobScope(schema)) return XUGU_SCHEDULER_JOB_SCOPE_LABEL;
+  {}
+  {}
   return schema;
 }
 
-export function isXuguPublicSynonymTreeNode(databaseType: string | null | undefined, nodeType: string, schema: string | null | undefined): boolean {
-  return databaseType === "xugu" && nodeType === "schema" && isXuguPublicSynonymScope(schema);
+export function isXuguPublicSynonymTreeNode(_databaseType: string | null | undefined, _nodeType: string, _schema: string | null | undefined): boolean {
+  return false;
 }
 
-export function isXuguSchedulerJobTreeNode(databaseType: string | null | undefined, nodeType: string, schema: string | null | undefined): boolean {
-  return databaseType === "xugu" && nodeType === "schema" && isXuguSchedulerJobScope(schema);
+export function isXuguSchedulerJobTreeNode(_databaseType: string | null | undefined, _nodeType: string, _schema: string | null | undefined): boolean {
+  return false;
 }
 
-export function isXuguSyntheticTreeNode(databaseType: string | null | undefined, nodeType: string, schema: string | null | undefined): boolean {
-  return databaseType === "xugu" && nodeType === "schema" && isXuguSyntheticScope(schema);
+export function isXuguSyntheticTreeNode(_databaseType: string | null | undefined, _nodeType: string, _schema: string | null | undefined): boolean {
+  return false;
 }

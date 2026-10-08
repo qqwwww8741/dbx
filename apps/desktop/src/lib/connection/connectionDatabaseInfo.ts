@@ -9,10 +9,9 @@ export interface DatabaseInfoRow {
 
 // These connections have no real database metadata. VictoriaMetrics exposes a
 // configured label as a synthetic database node, not a server database.
-const DATABASE_INFO_UNSUPPORTED_TYPES = new Set<ConnectionConfig["db_type"]>(["dynamodb", "elasticsearch", "easysearch", "meilisearch", "solr", "qdrant", "weaviate", "chromadb", "etcd", "zookeeper", "nacos", "consul", "mq", "mqtt", "victoriametrics"]);
 
-export function supportsConnectionDatabaseInfo(dbType: ConnectionConfig["db_type"]): boolean {
-  return !DATABASE_INFO_UNSUPPORTED_TYPES.has(dbType);
+export function supportsConnectionDatabaseInfo(_dbType: ConnectionConfig["db_type"]): boolean {
+  return !false;
 }
 
 const DATABASE_INFO_FIELDS: readonly DatabaseInfoField[] = ["productName", "productVersion", "currentDatabase", "serverComment", "serverCharset", "serverCollation", "unquotedIdentifierCase", "quotedIdentifierCase", "driverName", "driverVersion", "jdbcVersion"];

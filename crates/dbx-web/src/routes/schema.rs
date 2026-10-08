@@ -85,122 +85,6 @@ pub async fn list_database_storage(
     Ok(Json(result))
 }
 
-pub async fn list_xugu_tablespaces(
-    State(state): State<Arc<WebState>>,
-    Query(q): Query<SchemaQuery>,
-) -> Result<Json<Vec<dbx_core::db::XuguTablespaceInfo>>, AppError> {
-    let result = dbx_core::schema::list_xugu_tablespaces_core(&state.app, &q.connection_id, q.database.as_deref())
-        .await
-        .map_err(AppError::from)?;
-    Ok(Json(result))
-}
-
-pub async fn get_sqlserver_completion_context(
-    State(state): State<Arc<WebState>>,
-    Query(q): Query<SchemaQuery>,
-) -> Result<Json<dbx_core::db::sqlserver::SqlServerCompletionContext>, AppError> {
-    let database = q.database.as_deref().unwrap_or("");
-    let result = dbx_core::schema::get_sqlserver_completion_context_core(&state.app, &q.connection_id, database)
-        .await
-        .map_err(AppError::from)?;
-    Ok(Json(result))
-}
-
-/// Resolve a non-internal catalog for dispatch to the Doris multi-catalog path.
-async fn external_doris_catalog(state: &Arc<WebState>, connection_id: &str, catalog: Option<&str>) -> Option<String> {
-    dbx_core::schema::resolve_external_doris_catalog(&state.app, connection_id, catalog).await
-}
-
-pub async fn list_doris_catalogs(
-    State(state): State<Arc<WebState>>,
-    Query(q): Query<SchemaQuery>,
-) -> Result<Json<serde_json::Value>, AppError> {
-    let result =
-        dbx_core::schema::list_doris_catalogs_core(&state.app, &q.connection_id).await.map_err(AppError::from)?;
-    Ok(Json(serde_json::to_value(result).map_err(|e| AppError::from(e.to_string()))?))
-}
-
-pub async fn list_doris_catalog_databases(
-    State(state): State<Arc<WebState>>,
-    Query(q): Query<SchemaQuery>,
-) -> Result<Json<serde_json::Value>, AppError> {
-    let catalog = q.catalog.as_deref().unwrap_or("internal");
-    let result = dbx_core::schema::list_doris_catalog_databases_core(&state.app, &q.connection_id, catalog)
-        .await
-        .map_err(AppError::from)?;
-    Ok(Json(serde_json::to_value(result).map_err(|e| AppError::from(e.to_string()))?))
-}
-
-pub async fn list_sqlserver_linked_servers(
-    State(state): State<Arc<WebState>>,
-    Query(q): Query<SchemaQuery>,
-) -> Result<Json<serde_json::Value>, AppError> {
-    let result = dbx_core::schema::list_sqlserver_linked_servers_core(&state.app, &q.connection_id)
-        .await
-        .map_err(AppError::from)?;
-    Ok(Json(serde_json::to_value(result).map_err(|e| AppError::from(e.to_string()))?))
-}
-
-pub async fn list_sqlserver_linked_server_catalogs(
-    State(state): State<Arc<WebState>>,
-    Query(q): Query<SchemaQuery>,
-) -> Result<Json<serde_json::Value>, AppError> {
-    let server = q.server.as_deref().unwrap_or("");
-    let result = dbx_core::schema::list_sqlserver_linked_server_catalogs_core(&state.app, &q.connection_id, server)
-        .await
-        .map_err(AppError::from)?;
-    Ok(Json(serde_json::to_value(result).map_err(|e| AppError::from(e.to_string()))?))
-}
-
-pub async fn list_sqlserver_linked_server_schemas(
-    State(state): State<Arc<WebState>>,
-    Query(q): Query<SchemaQuery>,
-) -> Result<Json<Vec<String>>, AppError> {
-    let server = q.server.as_deref().unwrap_or("");
-    let catalog = q.catalog.as_deref().unwrap_or("");
-    let result =
-        dbx_core::schema::list_sqlserver_linked_server_schemas_core(&state.app, &q.connection_id, server, catalog)
-            .await
-            .map_err(AppError::from)?;
-    Ok(Json(result))
-}
-
-pub async fn list_sqlserver_linked_server_tables(
-    State(state): State<Arc<WebState>>,
-    Query(q): Query<SchemaQuery>,
-) -> Result<Json<serde_json::Value>, AppError> {
-    let server = q.server.as_deref().unwrap_or("");
-    let catalog = q.catalog.as_deref().unwrap_or("");
-    let schema = q.schema.as_deref().unwrap_or("");
-    let result = dbx_core::schema::list_sqlserver_linked_server_tables_core(
-        &state.app,
-        &q.connection_id,
-        server,
-        catalog,
-        schema,
-        q.filter.as_deref(),
-        q.limit,
-        q.offset,
-    )
-    .await
-    .map_err(AppError::from)?;
-    Ok(Json(serde_json::to_value(result).map_err(|e| AppError::from(e.to_string()))?))
-}
-
-pub async fn get_sqlserver_column_metadata(
-    State(state): State<Arc<WebState>>,
-    Query(q): Query<SchemaQuery>,
-) -> Result<Json<serde_json::Value>, AppError> {
-    let database = q.database.as_deref().unwrap_or("");
-    let schema = q.schema.as_deref().unwrap_or("");
-    let table = q.table.as_deref().unwrap_or("");
-    let result =
-        dbx_core::schema::get_sqlserver_column_metadata_core(&state.app, &q.connection_id, database, schema, table)
-            .await
-            .map_err(AppError::from)?;
-    Ok(Json(serde_json::to_value(result).map_err(|e| AppError::from(e.to_string()))?))
-}
-
 pub async fn get_mysql_table_auto_increment(
     State(state): State<Arc<WebState>>,
     Query(q): Query<SchemaQuery>,
@@ -242,21 +126,7 @@ pub async fn list_tables(
         .table_name_filter
         .as_deref()
         .and_then(|value| serde_json::from_str::<dbx_core::schema::TableNameFilter>(value).ok());
-    let result = if let Some(catalog) = external_doris_catalog(&state, &q.connection_id, q.catalog.as_deref()).await {
-        dbx_core::schema::list_doris_catalog_tables_core(
-            &state.app,
-            &q.connection_id,
-            &catalog,
-            database,
-            q.filter.as_deref(),
-            q.limit,
-            q.offset,
-            object_types.as_deref(),
-            table_name_filter.as_ref(),
-        )
-        .await
-        .map_err(AppError::from)?
-    } else {
+    let result = {
         dbx_core::schema::list_tables_core(
             &state.app,
             &q.connection_id,
@@ -292,39 +162,7 @@ pub async fn list_objects(
         .as_deref()
         .and_then(|value| serde_json::from_str::<dbx_core::schema::TableNameFilter>(value).ok());
     let result = run_cancellable(&state, execution_id, async {
-        if let Some(catalog) = external_doris_catalog(&state, &connection_id, catalog.as_deref()).await {
-            let tables = dbx_core::schema::list_doris_catalog_tables_core(
-                &state.app,
-                &connection_id,
-                &catalog,
-                &database,
-                filter.as_deref(),
-                q.limit,
-                q.offset,
-                object_types.as_deref(),
-                table_name_filter.as_ref(),
-            )
-            .await?;
-            Ok(tables
-                .into_iter()
-                .map(|table| dbx_core::db::ObjectInfo {
-                    name: table.name,
-                    object_type: table.table_type,
-                    schema: Some(database.clone()),
-                    valid: None,
-                    signature: None,
-                    custom_type_kind: None,
-                    has_members: None,
-                    comment: table.comment,
-                    created_at: None,
-                    updated_at: None,
-                    parent_schema: table.parent_schema,
-                    parent_name: table.parent_name,
-                    trigger: None,
-                    xugu_type_members_expandable: None,
-                })
-                .collect::<Vec<_>>())
-        } else {
+        {
             dbx_core::schema::list_objects_core(
                 &state.app,
                 &connection_id,
@@ -415,19 +253,6 @@ pub async fn get_event_info(
     Ok(Json(result))
 }
 
-pub async fn get_custom_type_details(
-    State(state): State<Arc<WebState>>,
-    Query(q): Query<SchemaQuery>,
-) -> Result<Json<dbx_core::db::CustomTypeDetails>, AppError> {
-    let database = q.database.as_deref().unwrap_or("");
-    let schema = q.schema.as_deref().unwrap_or("");
-    let name = q.table.as_deref().unwrap_or("");
-    let result = dbx_core::schema::get_custom_type_details_core(&state.app, &q.connection_id, database, schema, name)
-        .await
-        .map_err(AppError::from)?;
-    Ok(Json(result))
-}
-
 pub(crate) use dbx_core::object_cache::object_metadata_cache_prefix;
 use dbx_core::object_cache::{metadata_cache_segment, OBJECT_METADATA_CACHE_PREFIX};
 
@@ -504,13 +329,9 @@ pub async fn list_columns(
     let database = q.database.as_deref().unwrap_or("");
     let schema = q.schema.as_deref().unwrap_or("");
     let table = q.table.as_deref().unwrap_or("");
-    let catalog = external_doris_catalog(&state, &q.connection_id, q.catalog.as_deref()).await;
+    let catalog: Option<String> = None;
     let load_columns = || async {
-        if let Some(catalog) = catalog.as_deref() {
-            dbx_core::schema::get_doris_catalog_columns_core(&state.app, &q.connection_id, catalog, database, table)
-                .await
-                .map_err(AppError::from)
-        } else {
+        {
             dbx_core::schema::get_columns_core_for_session(
                 &state.app,
                 &q.connection_id,
@@ -570,7 +391,7 @@ pub async fn list_indexes(
     let database = q.database.as_deref().unwrap_or("");
     let schema = q.schema.as_deref().unwrap_or("");
     let table = q.table.as_deref().unwrap_or("");
-    let catalog = external_doris_catalog(&state, &q.connection_id, q.catalog.as_deref()).await;
+    let catalog: Option<String> = None;
     let result = cached_metadata(
         &state.app,
         &q.connection_id,
@@ -580,17 +401,7 @@ pub async fn list_indexes(
         catalog.as_deref(),
         "backend-indexes",
         || async {
-            if let Some(catalog) = catalog.as_deref() {
-                dbx_core::schema::list_doris_catalog_indexes_core(
-                    &state.app,
-                    &q.connection_id,
-                    catalog,
-                    database,
-                    table,
-                )
-                .await
-                .map_err(AppError::from)
-            } else {
+            {
                 dbx_core::schema::list_indexes_core(&state.app, &q.connection_id, database, schema, table)
                     .await
                     .map_err(AppError::from)
@@ -608,12 +419,8 @@ pub async fn list_reference_key_columns(
     let database = q.database.as_deref().unwrap_or("");
     let schema = q.schema.as_deref().unwrap_or("");
     let table = q.table.as_deref().unwrap_or("");
-    let catalog = external_doris_catalog(&state, &q.connection_id, q.catalog.as_deref()).await;
-    let indexes = if let Some(catalog) = catalog.as_deref() {
-        dbx_core::schema::list_doris_catalog_indexes_core(&state.app, &q.connection_id, catalog, database, table)
-            .await
-            .map_err(AppError::from)?
-    } else {
+    let catalog: Option<String> = None;
+    let indexes = {
         dbx_core::schema::list_indexes_core(&state.app, &q.connection_id, database, schema, table)
             .await
             .map_err(AppError::from)?
@@ -628,12 +435,8 @@ pub async fn list_reference_keys(
     let database = q.database.as_deref().unwrap_or("");
     let schema = q.schema.as_deref().unwrap_or("");
     let table = q.table.as_deref().unwrap_or("");
-    let catalog = external_doris_catalog(&state, &q.connection_id, q.catalog.as_deref()).await;
-    let indexes = if let Some(catalog) = catalog.as_deref() {
-        dbx_core::schema::list_doris_catalog_indexes_core(&state.app, &q.connection_id, catalog, database, table)
-            .await
-            .map_err(AppError::from)?
-    } else {
+    let catalog: Option<String> = None;
+    let indexes = {
         dbx_core::schema::list_indexes_core(&state.app, &q.connection_id, database, schema, table)
             .await
             .map_err(AppError::from)?
@@ -648,7 +451,7 @@ pub async fn list_foreign_keys(
     let database = q.database.as_deref().unwrap_or("");
     let schema = q.schema.as_deref().unwrap_or("");
     let table = q.table.as_deref().unwrap_or("");
-    let catalog = external_doris_catalog(&state, &q.connection_id, q.catalog.as_deref()).await;
+    let catalog: Option<String> = None;
     let result = cached_metadata(
         &state.app,
         &q.connection_id,
@@ -658,17 +461,7 @@ pub async fn list_foreign_keys(
         catalog.as_deref(),
         "backend-foreign-keys",
         || async {
-            if let Some(catalog) = catalog.as_deref() {
-                dbx_core::schema::list_doris_catalog_foreign_keys_core(
-                    &state.app,
-                    &q.connection_id,
-                    catalog,
-                    database,
-                    table,
-                )
-                .await
-                .map_err(AppError::from)
-            } else {
+            {
                 dbx_core::schema::list_foreign_keys_core(&state.app, &q.connection_id, database, schema, table)
                     .await
                     .map_err(AppError::from)
@@ -701,11 +494,7 @@ pub async fn list_triggers(
     let database = q.database.as_deref().unwrap_or("");
     let schema = q.schema.as_deref().unwrap_or("");
     let table = q.table.as_deref().unwrap_or("");
-    let result = if let Some(catalog) = external_doris_catalog(&state, &q.connection_id, q.catalog.as_deref()).await {
-        dbx_core::schema::list_doris_catalog_triggers_core(&state.app, &q.connection_id, &catalog, database, table)
-            .await
-            .map_err(AppError::from)?
-    } else {
+    let result = {
         dbx_core::schema::list_triggers_core(&state.app, &q.connection_id, database, schema, table)
             .await
             .map_err(AppError::from)?
@@ -799,11 +588,7 @@ pub async fn get_ddl(
     let database = q.database.as_deref().unwrap_or("");
     let schema = q.schema.as_deref().unwrap_or("");
     let table = q.table.as_deref().unwrap_or("");
-    let result = if let Some(catalog) = external_doris_catalog(&state, &q.connection_id, q.catalog.as_deref()).await {
-        dbx_core::schema::get_doris_catalog_table_ddl_core(&state.app, &q.connection_id, &catalog, database, table)
-            .await
-            .map_err(AppError::from)?
-    } else if q.portable.unwrap_or(false) {
+    let result = if q.portable.unwrap_or(false) {
         dbx_core::schema::get_table_export_ddl_core(
             &state.app,
             &q.connection_id,
@@ -903,39 +688,6 @@ pub async fn get_table_owner(
     let schema = q.schema.as_deref().unwrap_or("");
     let table = q.table.as_deref().unwrap_or("");
     let result = dbx_core::schema::get_table_owner_core(&state.app, &q.connection_id, database, schema, table)
-        .await
-        .map_err(AppError::from)?;
-    Ok(Json(serde_json::to_value(result).map_err(|e| AppError::from(e.to_string()))?))
-}
-
-pub async fn list_extensions(
-    State(state): State<Arc<WebState>>,
-    Query(q): Query<SchemaQuery>,
-) -> Result<Json<serde_json::Value>, AppError> {
-    let database = q.database.as_deref().unwrap_or("");
-    let result = dbx_core::schema::list_extensions_core(&state.app, &q.connection_id, database, q.schema.as_deref())
-        .await
-        .map_err(AppError::from)?;
-    Ok(Json(serde_json::to_value(result).map_err(|e| AppError::from(e.to_string()))?))
-}
-
-pub async fn list_available_extensions(
-    State(state): State<Arc<WebState>>,
-    Query(q): Query<SchemaQuery>,
-) -> Result<Json<serde_json::Value>, AppError> {
-    let database = q.database.as_deref().unwrap_or("");
-    let result = dbx_core::schema::list_available_extensions_core(&state.app, &q.connection_id, database)
-        .await
-        .map_err(AppError::from)?;
-    Ok(Json(serde_json::to_value(result).map_err(|e| AppError::from(e.to_string()))?))
-}
-
-pub async fn list_event_triggers(
-    State(state): State<Arc<WebState>>,
-    Query(q): Query<SchemaQuery>,
-) -> Result<Json<serde_json::Value>, AppError> {
-    let database = q.database.as_deref().unwrap_or("");
-    let result = dbx_core::schema::list_event_triggers_core(&state.app, &q.connection_id, database)
         .await
         .map_err(AppError::from)?;
     Ok(Json(serde_json::to_value(result).map_err(|e| AppError::from(e.to_string()))?))

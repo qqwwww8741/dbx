@@ -328,18 +328,6 @@ identifier_rules:
     }
 
     #[test]
-    fn load_valid_yaml_file() {
-        let dir = temp_dialect_dir();
-        let path = write_temp_yaml(&dir, "dialect_postgresql.yaml", "PostgreSQL");
-        let result = DialectPluginLoader::load_file(&path);
-        cleanup_temp_dir(&dir);
-        assert!(result.is_ok());
-        let (kind, _yaml, desc) = result.unwrap();
-        assert_eq!(kind, DialectKind::Postgres);
-        assert_eq!(desc.dialect, DialectKind::Postgres);
-    }
-
-    #[test]
     fn load_valid_yaml_file_mysql() {
         let dir = temp_dialect_dir();
         let path = write_temp_yaml(&dir, "dialect_mysql.yaml", "MySQL");

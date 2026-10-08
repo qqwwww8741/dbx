@@ -1,9 +1,7 @@
 import type { ConnectionConfig, DatabaseType } from "@/types/database";
 
-const unsupportedBareMysqlTlsProfiles = new Set(["selectdb", "oceanbase"]);
-
-export function supportsMysqlTlsOptions(dbType: DatabaseType, selectedType: string): boolean {
-  return dbType === "doris" || dbType === "starrocks" || (dbType === "mysql" && !unsupportedBareMysqlTlsProfiles.has(selectedType));
+export function supportsMysqlTlsOptions(dbType: DatabaseType, _selectedType: string): boolean {
+  return dbType === "mysql";
 }
 
 export function supportsMysqlTlsTab(dbType: DatabaseType, selectedType: string): boolean {

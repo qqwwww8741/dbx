@@ -78,6 +78,24 @@ pub fn format_ch_array_element(val: &serde_json::Value) -> String {
     }
 }
 
+pub fn quote_string_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn string_literal_quotes_normal_unicode_empty_and_apostrophe_values() {
+        assert_eq!(quote_string_literal("hello"), "'hello'");
+        assert_eq!(quote_string_literal("O'Reilly"), "'O''Reilly'");
+        assert_eq!(quote_string_literal(""), "''");
+        assert_eq!(quote_string_literal("中文注释"), "'中文注释'");
+    }
+}
+
 pub fn quote_postgres_string_literal(value: &str) -> String {
     if !value.contains('\\') && !value.chars().any(|character| character.is_ascii_control()) {
         return quote_string_literal(value);
@@ -107,80 +125,4 @@ pub fn quote_postgres_string_literal(value: &str) -> String {
     // Escape string constants keep control characters out of the physical
     // script and remain correct regardless of standard_conforming_strings.
     format!("E'{escaped}'")
-}
-
-pub fn is_postgres_vector_type(column_type: Option<&str>) -> bool {
-    column_type
-        .map(|column_type| {
-            let normalized = column_type.trim().trim_matches('"').to_ascii_lowercase();
-            if normalized.trim_end().ends_with("[]") {
-                return false;
-            }
-            let base = normalized.split(['(', ' ', '\t', '\n']).next().unwrap_or("").trim_matches('"');
-            matches!(base, "vector" | "halfvec") || base.ends_with(".vector") || base.ends_with(".halfvec")
-        })
-        .unwrap_or(false)
-}
-
-pub fn format_postgres_vector_sql_literal(value: &serde_json::Value) -> String {
-    if value.is_null() {
-        return "NULL".to_string();
-    }
-    let text = match value {
-        // pgvector vector/halfvec are scalar extension types whose importable
-        // literal grammar uses square brackets, unlike PostgreSQL arrays.
-        serde_json::Value::Array(arr) => {
-            let elements = arr.iter().map(format_postgres_vector_element).collect::<Vec<_>>();
-            format!("[{}]", elements.join(","))
-        }
-        serde_json::Value::String(text) => text.to_string(),
-        _ => value.to_string(),
-    };
-    quote_postgres_string_literal(&text)
-}
-
-pub fn format_postgres_vector_element(value: &serde_json::Value) -> String {
-    match value {
-        serde_json::Value::String(text) => text.trim().to_string(),
-        serde_json::Value::Number(number) => number.to_string(),
-        serde_json::Value::Bool(value) => value.to_string(),
-        serde_json::Value::Null => "NULL".to_string(),
-        _ => value.to_string(),
-    }
-}
-
-pub fn quote_string_literal(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "''"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn string_literal_quotes_normal_unicode_empty_and_apostrophe_values() {
-        assert_eq!(quote_string_literal("hello"), "'hello'");
-        assert_eq!(quote_string_literal("O'Reilly"), "'O''Reilly'");
-        assert_eq!(quote_string_literal(""), "''");
-        assert_eq!(quote_string_literal("中文注释"), "'中文注释'");
-    }
-
-    #[test]
-    fn pg_array_literal_without_backslashes_stays_a_plain_string() {
-        assert_eq!(format_pg_array_sql_literal(&[]), "'{}'");
-        assert_eq!(format_pg_array_sql_literal(&[json!("a"), json!(null), json!(1)]), r#"'{"a",NULL,1}'"#);
-        assert_eq!(format_pg_array_sql_literal(&[json!("it's")]), r#"'{"it''s"}'"#);
-    }
-
-    #[test]
-    fn pg_array_literal_escapes_backslashes_inside_an_escape_string() {
-        // PostgreSQL reads E'{"C:\\\\tmp"}' as the array text {"C:\\tmp"},
-        // whose single element is C:\tmp.
-        assert_eq!(format_pg_array_sql_literal(&[json!(r"C:\tmp")]), r#"E'{"C:\\\\tmp"}'"#);
-        // A double quote is escaped as \" in the array text; without the E
-        // prefix PostgreSQL keeps both backslashes, the first escapes the
-        // second, and the quote then ends the element early.
-        assert_eq!(format_pg_array_sql_literal(&[json!(r#"say "hi""#)]), r#"E'{"say \\"hi\\""}'"#);
-    }
 }

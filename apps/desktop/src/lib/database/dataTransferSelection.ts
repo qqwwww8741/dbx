@@ -1,4 +1,3 @@
-import { isInternalDorisCatalog } from "@/lib/database/databaseFeatureSupport";
 import { decodeSelectableDatabaseValue, encodeSelectableDatabaseValue } from "@/lib/database/defaultDatabase";
 import type { CatalogInfo, DatabaseType } from "@/types/database";
 
@@ -24,8 +23,8 @@ export function isTransferDatabaseSelected(option: string): boolean {
 export function normalizeTransferCatalog(catalog: string, catalogs: readonly CatalogInfo[]): string {
   const normalizedCatalog = catalog.trim();
   if (!normalizedCatalog) return "";
-  const catalogInfo = catalogs.find((item) => item.name.trim() === normalizedCatalog);
-  return isInternalDorisCatalog(catalogInfo?.catalog_type, normalizedCatalog) ? "" : normalizedCatalog;
+  catalogs.find((item) => item.name.trim() === normalizedCatalog);
+  return normalizedCatalog;
 }
 
 export function isSameTransferDatabase(source: TransferDatabaseSelection, target: TransferDatabaseSelection): boolean {

@@ -26,8 +26,7 @@ const {
   startEditMongoIndexDraft,
   cancelMongoIndexDraft,
   dropSelectedMongoIndexRow,
-  canDropSelectedMongoIndexRow,
-  canEditSelectedMongoIndexRow,
+
   confirmEditMongoIndex,
   mongoCreateIndexForm,
   mongoCreateIndexFieldOptions,
@@ -66,11 +65,11 @@ watch(showMongoIndexManagerDialog, (open) => {
           <Plus class="mr-1 h-4 w-4" />
           {{ t("contextMenu.createMongoIndex") }}
         </Button>
-        <Button type="button" variant="outline" size="sm" :disabled="mongoIndexManagerLoading || mongoCreateIndexLoading || !canEditSelectedMongoIndexRow" @click="startEditMongoIndexDraft">
+        <Button type="button" variant="outline" size="sm" :disabled="true" @click="startEditMongoIndexDraft">
           <Pencil class="mr-1 h-4 w-4" />
           {{ t("contextMenu.editMongoIndex") }}
         </Button>
-        <Button type="button" variant="outline" size="sm" class="text-destructive hover:text-destructive" :disabled="mongoIndexManagerLoading || mongoCreateIndexLoading || !canDropSelectedMongoIndexRow" @click="dropSelectedMongoIndexRow">
+        <Button type="button" variant="outline" size="sm" class="text-destructive hover:text-destructive" :disabled="true" @click="dropSelectedMongoIndexRow">
           <Trash2 class="mr-1 h-4 w-4" />
           {{ t("contextMenu.dropIndex") }}
         </Button>

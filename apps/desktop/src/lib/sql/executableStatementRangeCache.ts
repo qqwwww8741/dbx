@@ -115,7 +115,7 @@ function executableStartAfterLeadingDirective(sql: string, range: SqlTextRange, 
       continue;
     }
 
-    if (databaseType !== "sqlserver" && text[offset] === "#" && readSqlBracedParameterAt(sql, range.from + offset, parameterOptions)?.syntax !== "mybatis") {
+    if (text[offset] === "#" && readSqlBracedParameterAt(sql, range.from + offset, parameterOptions)?.syntax !== "mybatis") {
       const newline = text.indexOf("\n", offset + 1);
       if (newline < 0) return null;
       offset = newline + 1;

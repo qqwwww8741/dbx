@@ -82,7 +82,7 @@ export function mysqlTableEngineSqlOption(draft: MysqlTableEngineDraft, isCreate
 }
 
 export function supportsMysqlTableEngine(connection: Pick<ConnectionConfig, "db_type" | "driver_profile"> | undefined): boolean {
-  if (connection?.db_type !== "mysql") return false;
+  if (!connection || connection.db_type !== "mysql") return false;
   const profile = connection.driver_profile?.trim().toLowerCase();
   return !profile || profile === "mysql";
 }

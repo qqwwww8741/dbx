@@ -153,21 +153,11 @@ async function loadTables(database: AuthorizationDatabaseOption) {
   tableErrors.value = { ...tableErrors.value, [key]: "" };
   try {
     let result: AuthorizationTableSelection[];
-    if (props.provider?.authorizationModel === "postgres") {
-      const schemas = (await api.listSchemas(props.connectionId, database.database)).filter(isPostgresGrantSchema);
-      const schemaTables = await Promise.all(
-        schemas.map(async (schema) => {
-          const items = await api.listTables(props.connectionId, database.database, schema, undefined, undefined, undefined, ["TABLE"]);
-          return items.map((table) => ({ name: table.name, schema }));
-        }),
-      );
-      result = schemaTables.flat();
-    } else if (props.provider?.authorizationModel === "starrocks") {
-      const items = await api.listTables(props.connectionId, database.database, "", undefined, undefined, undefined, ["TABLE"], database.catalog);
-      result = items.map((table) => ({ name: table.name }));
-    } else {
-      const items = await api.listTables(props.connectionId, database.database, "");
-      result = items.map((table) => ({ name: table.name }));
+    {
+      {
+        const items = await api.listTables(props.connectionId, database.database, "");
+        result = items.map((table) => ({ name: table.name }));
+      }
     }
     tables.value = {
       ...tables.value,
@@ -229,8 +219,9 @@ function updatePreset(database: AuthorizationDatabaseOption, preset: unknown) {
 function togglePrivilege(database: AuthorizationDatabaseOption, privilege: string) {
   patchSelection(database, (selection) => {
     const next = new Set(selection.privileges ?? []);
-    if (next.has(privilege)) next.delete(privilege);
-    else next.add(privilege);
+    {
+      next.add(privilege);
+    }
     selection.privileges = Array.from(next);
     return selection;
   });
@@ -269,11 +260,6 @@ function uniqueTableOptions(options: AuthorizationTableSelection[]): Authorizati
     seen.add(key);
     return true;
   });
-}
-
-function isPostgresGrantSchema(schema: string): boolean {
-  const normalized = schema.toLowerCase();
-  return !!schema.trim() && normalized !== "information_schema" && normalized !== "sys_catalog" && !normalized.startsWith("pg_");
 }
 </script>
 
@@ -389,9 +375,6 @@ function isPostgresGrantSchema(schema: string): boolean {
             {{ t("userAdmin.customPrivilegeRequired") }}
           </p>
         </div>
-        <p v-if="provider?.dialect === 'postgres' && selectedDatabaseSet.has(authorizationOptionKey(database)) && selectionFor(database)?.preset === 'ddl'" class="mt-2 text-[10px] text-muted-foreground" :class="compact ? '' : 'pl-5'">
-          {{ t("userAdmin.postgresDdlHint") }}
-        </p>
       </div>
     </div>
   </div>

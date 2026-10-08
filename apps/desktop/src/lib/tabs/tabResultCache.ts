@@ -365,9 +365,7 @@ function stripSessionIds(result: QueryResult | undefined): QueryResult | undefin
     spatial_values: result.spatial_values?.map((row) => [...row]),
     large_value_cells: result.large_value_cells?.map((cell) => ({ ...cell })),
     rows: result.rows.map((row) => [...row]),
-    mongo_documents: result.mongo_documents ? clonePlain(result.mongo_documents) : undefined,
-    mongo_copy_documents: result.mongo_copy_documents ? clonePlain(result.mongo_copy_documents) : undefined,
-    redis_console_output: result.redis_console_output,
+
     affected_rows: result.affected_rows,
     execution_time_ms: result.execution_time_ms,
     server_execute_time_us: result.server_execute_time_us,
@@ -431,9 +429,7 @@ function toColumnarResult(result: QueryResult | undefined): ColumnarQueryResult 
     spatial_values: result.spatial_values?.map((row) => [...row]),
     large_value_cells: result.large_value_cells?.map((cell) => ({ ...cell })),
     rowCount,
-    mongo_documents: result.mongo_documents ? clonePlain(result.mongo_documents) : undefined,
-    mongo_copy_documents: result.mongo_copy_documents ? clonePlain(result.mongo_copy_documents) : undefined,
-    redis_console_output: result.redis_console_output,
+
     affected_rows: result.affected_rows,
     execution_time_ms: result.execution_time_ms,
     server_execute_time_us: result.server_execute_time_us,
@@ -469,9 +465,7 @@ function fromColumnarResult(result: ColumnarQueryResult | undefined): QueryResul
     spatial_values: result.spatial_values?.map((row) => [...row]),
     large_value_cells: result.large_value_cells?.map((cell) => ({ ...cell })),
     rows,
-    mongo_documents: result.mongo_documents ? clonePlain(result.mongo_documents) : undefined,
-    mongo_copy_documents: result.mongo_copy_documents ? clonePlain(result.mongo_copy_documents) : undefined,
-    redis_console_output: result.redis_console_output,
+
     affected_rows: result.affected_rows,
     execution_time_ms: result.execution_time_ms,
     server_execute_time_us: result.server_execute_time_us,

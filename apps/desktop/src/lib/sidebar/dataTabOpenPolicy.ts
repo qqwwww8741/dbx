@@ -34,7 +34,7 @@ export function dataTabOpenModeFromTreeClick(type: TreeNodeType, event: Omit<Sho
   return matchesModifierOnlyShortcut(event, shortcut) ? "new-tab" : "default";
 }
 
-function isSameDatabase(tab: DataTabLike, target: Pick<DataTabTarget, "connectionId" | "database">, mode: "data" | "mongo" = "data"): boolean {
+function isSameDatabase(tab: DataTabLike, target: Pick<DataTabTarget, "connectionId" | "database">, mode: "data" = "data"): boolean {
   return tab.mode === mode && tab.connectionId === target.connectionId && tab.database === target.database;
 }
 
@@ -47,16 +47,12 @@ function isSameTable(tab: DataTabLike, target: DataTabTarget): boolean {
   return isSameDatabase(tab, target) && dataTabCatalog(tab) === (target.catalog || "") && tabSchema === (target.schema || "") && (tab.tableMeta?.tableName || tab.title) === target.tableName;
 }
 
-function canReuseActiveTableTab(tab: DataTabLike | undefined, target: DataTabTarget, mode: "data" | "mongo"): boolean {
+function canReuseActiveTableTab(tab: DataTabLike | undefined, target: DataTabTarget, mode: "data"): boolean {
   return tab !== undefined && isSameDatabase(tab, target, mode) && dataTabCatalog(tab) === (target.catalog || "") && !tab.pinned && !tab.isExecuting && !tab.isCancelling && !tab.isExplaining && !tab.txnSessionId && !tab.pendingDataChangeCount && !tab.hasPendingDataEditorDraft;
 }
 
 export function canReuseActiveDataTab(tab: DataTabLike | undefined, target: DataTabTarget): boolean {
   return canReuseActiveTableTab(tab, target, "data");
-}
-
-export function canReuseActiveMongoTab(tab: DataTabLike | undefined, target: DataTabTarget): boolean {
-  return canReuseActiveTableTab(tab, target, "mongo");
 }
 
 export function canApplyDataTabMetadata(tab: DataTabLike | undefined, target: DataTabTarget, signal?: AbortSignal): boolean {

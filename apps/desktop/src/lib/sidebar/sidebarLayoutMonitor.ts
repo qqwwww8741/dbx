@@ -348,7 +348,7 @@ function captureVirtualInternals(virtualScroller: Record<string, unknown> | null
   if (typeof getScroll === "function") {
     try {
       const result = (getScroll as () => unknown)();
-      if (typeof result === "object" && result !== null) scrollWindow = result;
+      if (typeof result === "object") scrollWindow = result;
     } catch {
       // Reading scroller internals must never break the app.
     }

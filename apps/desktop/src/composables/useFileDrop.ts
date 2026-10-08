@@ -31,7 +31,7 @@ export function useFileDrop() {
       : activeTabExternalSqlFileTarget(queryStore.tabs, queryStore.activeTabId, (connectionId) => connectionStore.getConfig(connectionId), options);
     // Dropped .js files only open when they resolve to a MongoDB target so they
     // never bind to a relational SQL tab.
-    if (!isSqlFilePath(name) && connectionStore.getConfig(target.connectionId)?.db_type !== "mongodb") return;
+    if (!isSqlFilePath(name)) return;
     if (path) {
       queryStore.openExternalSqlFile(target.connectionId, target.database, path, content, version, target.catalog, target.schema, undefined, encoding);
     } else {
@@ -56,34 +56,8 @@ export function useFileDrop() {
         for (const path of event.payload.paths) {
           const name = path.split("/").pop()?.split("\\").pop() || path;
 
-          const dataQuery = await getDataFileQuery(path);
-          if (dataQuery) {
-            const config: ConnectionConfig = {
-              id: uuid(),
-              name: `[Preview] ${name}`,
-              db_type: "duckdb",
-              driver_profile: "duckdb",
-              driver_label: "DuckDB",
-              url_params: "",
-              host: ":memory:",
-              port: 0,
-              username: "",
-              password: "",
-              one_time: true,
-            };
-            let connectionId: string;
-            try {
-              connectionId = await api.connectDb(config);
-            } catch (e: any) {
-              toast(t("welcome.fileOpenFailed", { name, message: e?.message || String(e) }), 5000);
-              continue;
-            }
-            connectionStore.addEphemeralConnection({ ...config, id: connectionId });
-            const tabId = queryStore.createTab(connectionId, "", name, "query");
-            queryStore.updateSql(tabId, dataQuery);
-            queryStore.executeCurrentTab();
-            toast(t("welcome.fileOpened", { name }));
-            continue;
+          await getDataFileQuery(path);
+          {
           }
 
           if (isScriptFilePath(path)) {
@@ -105,7 +79,7 @@ export function useFileDrop() {
             name,
             db_type: dbType,
             driver_profile: dbType,
-            driver_label: dbType === "duckdb" ? "DuckDB" : "SQLite",
+            driver_label: "SQLite",
             url_params: "",
             host: path,
             port: 0,

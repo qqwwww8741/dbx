@@ -5,14 +5,12 @@ import type { useSettingsStore } from "@/stores/settingsStore";
 import type { Completion } from "@codemirror/autocomplete";
 
 import type { EditorView as EditorViewType } from "@codemirror/view";
-import { type ElasticsearchCompletionItem } from "@/lib/elasticsearch/elasticsearchCompletion";
-import { type MongoCompletionItem } from "@/lib/mongo/mongoCompletion";
+
 import { batchColumnSelectionColumnList, batchColumnSelectionInsertReplacement, batchColumnSelectionReplaceTo, isBatchColumnSelectionCompletionActive } from "@/lib/editor/batchColumnSelection";
-import { type RedisCompletionItem } from "@/lib/redis/redisCompletion";
-import { type SoqlCompletionItem } from "@/lib/soql/soqlCompletion";
+
 import type { SqlCompletionItem } from "@/lib/sql/sqlCompletion";
 
-export type QueryCompletionItem = SqlCompletionItem | ElasticsearchCompletionItem | RedisCompletionItem | MongoCompletionItem | SoqlCompletionItem;
+export type QueryCompletionItem = SqlCompletionItem;
 
 export interface BatchColumnSelectionActionItem {
   label: string;

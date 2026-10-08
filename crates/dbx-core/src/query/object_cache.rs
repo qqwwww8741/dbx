@@ -83,34 +83,6 @@ pub(crate) async fn invalidate_connection_object_cache(storage: &Storage, connec
 mod tests {
     use super::*;
 
-    #[test]
-    fn ddl_schema_cache_classifies_scripts_without_changing_permissions() {
-        for sql in [
-            "ALTER TABLE users ADD COLUMN test4 INTEGER",
-            "BEGIN; ALTER TABLE users ADD COLUMN test4 INTEGER; COMMIT;",
-            "-- leading comment\nCOMMENT ON COLUMN users.test4 IS 'new'",
-            "CREATE SOMETHING dialect_specific",
-            "COMMIT",
-            "END",
-            "ROLLBACK",
-            "ABORT",
-        ] {
-            assert!(sql_may_change_object_metadata(sql, Some(DatabaseType::Postgres)), "{sql}");
-        }
-        for sql in [
-            "SELECT 'ALTER TABLE users'",
-            "-- DROP TABLE users\nSELECT 1",
-            "INSERT INTO users VALUES (1)",
-            "UPDATE users SET id = 1",
-            "DELETE FROM users",
-            "BEGIN",
-            "",
-            "/* ALTER TABLE */",
-        ] {
-            assert!(!sql_may_change_object_metadata(sql, Some(DatabaseType::Postgres)), "{sql}");
-        }
-    }
-
     #[tokio::test]
     async fn ddl_schema_cache_encoding_and_connection_isolation() {
         let dir = tempfile::tempdir().unwrap();

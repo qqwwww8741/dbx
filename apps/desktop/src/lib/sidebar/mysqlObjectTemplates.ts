@@ -18,9 +18,9 @@ const templateKindByGroup: Partial<Record<TreeNodeType, MysqlObjectTemplateKind>
 };
 
 export function supportsMysqlObjectTemplates(connection?: MysqlTemplateConnection): boolean {
-  if (connection?.db_type !== "mysql") return false;
+  if (!connection || connection.db_type !== "mysql") return false;
   const profile = connection.driver_profile?.trim().toLowerCase();
-  return !profile || profile === "mysql" || profile === "custom_mysql";
+  return !profile || profile === "mysql";
 }
 
 export function mysqlObjectTemplateForGroup(connection: MysqlTemplateConnection | undefined, node: MysqlTemplateNode): MysqlObjectTemplate | null {

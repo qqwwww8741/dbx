@@ -189,10 +189,3 @@ async fn verify_write_then_read_survives_commit(config: ConnectionConfig) {
 async fn live_mysql_write_then_reads_preserve_commit() {
     verify_write_then_read_survives_commit(live_config("DBX_LIVE_MANUAL_TXN_MYSQL", DatabaseType::Mysql, 3306)).await;
 }
-
-#[tokio::test]
-#[ignore = "requires DBX_LIVE_MANUAL_TXN_POSTGRES_* on the remote test server"]
-async fn live_postgres_write_then_reads_preserve_commit() {
-    verify_write_then_read_survives_commit(live_config("DBX_LIVE_MANUAL_TXN_POSTGRES", DatabaseType::Postgres, 5432))
-        .await;
-}

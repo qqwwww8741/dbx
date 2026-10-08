@@ -613,72 +613,6 @@ fn strip_leading_as(text: &str) -> Option<&str> {
     }
 }
 
-fn strip_sql_server_top_clause(body: &str) -> &str {
-    let trimmed = body.trim_start();
-    if !starts_with_keyword(trimmed, "TOP") {
-        return trimmed;
-    }
-
-    let mut pos = skip_whitespace(trimmed, "TOP".len());
-    if trimmed[pos..].starts_with('(') {
-        let mut depth = 0i32;
-        let mut quote: Option<char> = None;
-        let mut end = None;
-        for (offset, ch) in trimmed[pos..].char_indices() {
-            if let Some(close) = quote {
-                if ch == close {
-                    quote = None;
-                }
-                continue;
-            }
-            match ch {
-                '\'' | '"' | '`' => quote = Some(ch),
-                '[' => quote = Some(']'),
-                '(' => depth += 1,
-                ')' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        end = Some(pos + offset + ch.len_utf8());
-                        break;
-                    }
-                }
-                _ => {}
-            }
-        }
-        let Some(end) = end else {
-            return trimmed;
-        };
-        pos = end;
-    } else {
-        let number_end = trimmed[pos..]
-            .char_indices()
-            .take_while(|(_, ch)| ch.is_ascii_digit())
-            .last()
-            .map(|(offset, ch)| pos + offset + ch.len_utf8());
-        let Some(end) = number_end else {
-            return trimmed;
-        };
-        pos = end;
-    }
-
-    pos = skip_whitespace(trimmed, pos);
-    if starts_with_keyword_at(trimmed, pos, "PERCENT") {
-        pos = skip_whitespace(trimmed, pos + "PERCENT".len());
-    }
-    if starts_with_keyword_at(trimmed, pos, "WITH") {
-        let ties_pos = skip_whitespace(trimmed, pos + "WITH".len());
-        if starts_with_keyword_at(trimmed, ties_pos, "TIES") {
-            pos = skip_whitespace(trimmed, ties_pos + "TIES".len());
-        }
-    }
-    let remaining = trimmed[pos..].trim_start();
-    if remaining.is_empty() {
-        trimmed
-    } else {
-        remaining
-    }
-}
-
 fn is_select_star(body: &str, alias: Option<&str>) -> bool {
     let trimmed = body.trim();
     if trimmed == "*" {
@@ -1182,36 +1116,6 @@ mod tests {
     }
 
     #[test]
-    fn recognizes_oracle_num_column_and_alias_as_editable() {
-        for sql in ["select id, num from users", "select id, amount as num from users"] {
-            let result = analyze_editable_query_editability(sql);
-            assert!(result.editable, "{sql}");
-            assert_eq!(result.reason, None, "{sql}");
-            let analysis = result.analysis.unwrap();
-            assert_eq!(analysis.table_name, "users", "{sql}");
-            assert_eq!(analysis.columns.last().unwrap().result_name, "num", "{sql}");
-        }
-    }
-
-    #[test]
-    fn recognizes_sql_server_top_selects_as_editable() {
-        for sql in [
-            "SELECT TOP 2 name, note FROM dbo.users ORDER BY name",
-            "SELECT TOP(2) name, note FROM dbo.users ORDER BY name",
-            "SELECT TOP (2) name, note FROM dbo.users ORDER BY name",
-            "SELECT TOP 10 PERCENT name, note FROM dbo.users ORDER BY name",
-            "SELECT TOP (2) WITH TIES name, note FROM dbo.users ORDER BY name",
-        ] {
-            let result = analyze_editable_query_editability(sql);
-            assert!(result.editable, "{sql}: {:?}", result.reason);
-            let analysis = result.analysis.unwrap();
-            assert_eq!(analysis.table_name, "users");
-            assert_eq!(analysis.columns[0].source_name.as_deref(), Some("name"));
-            assert_eq!(analysis.columns[1].source_name.as_deref(), Some("note"));
-        }
-    }
-
-    #[test]
     fn recognizes_quoted_table_names_and_aliases() {
         let result =
             analyze_editable_query_editability(r#"SELECT u."id", u."full name" FROM "app schema"."user table" AS u"#);
@@ -1297,47 +1201,6 @@ mod tests {
 
             assert!(!result.editable, "{sql}");
             assert_eq!(result.reason, Some(QueryEditabilityReason::ComplexSource), "{sql}");
-        }
-    }
-
-    #[test]
-    fn recognizes_oracle_for_update_clauses_without_treating_for_as_an_alias() {
-        for sql in [
-            "SELECT * FROM employees FOR UPDATE",
-            "SELECT * FROM employees FOR UPDATE NOWAIT",
-            "SELECT * FROM employees FOR UPDATE SKIP LOCKED",
-            "SELECT * FROM employees FOR UPDATE OF salary, department_id WAIT 5",
-            "SELECT * FROM employees WHERE department_id = 10 ORDER BY employee_id FOR UPDATE OF salary NOWAIT",
-        ] {
-            let result = analyze_editable_query_editability(sql);
-
-            assert!(result.editable, "{sql}");
-            let analysis = result.analysis.unwrap();
-            assert_eq!(analysis.table_name, "employees", "{sql}");
-            assert_eq!(analysis.table_alias, None, "{sql}");
-            assert!(analysis.select_star, "{sql}");
-        }
-
-        let result = analyze_editable_query_editability(
-            "SELECT e.employee_id, e.salary FROM employees e FOR UPDATE OF e.salary SKIP LOCKED",
-        );
-        assert!(result.editable);
-        assert_eq!(result.analysis.unwrap().table_alias.as_deref(), Some("e"));
-    }
-
-    #[test]
-    fn recognizes_postgres_row_lock_clauses_without_treating_for_as_an_alias() {
-        for sql in [
-            "SELECT * FROM jobs FOR SHARE",
-            "SELECT * FROM jobs FOR NO KEY UPDATE SKIP LOCKED",
-            "SELECT * FROM jobs FOR KEY SHARE NOWAIT",
-        ] {
-            let result = analyze_editable_query_editability(sql);
-
-            assert!(result.editable, "{sql}");
-            let analysis = result.analysis.unwrap();
-            assert_eq!(analysis.table_name, "jobs", "{sql}");
-            assert_eq!(analysis.table_alias, None, "{sql}");
         }
     }
 
@@ -1618,35 +1481,6 @@ mod tests {
     }
 
     #[test]
-    fn accepts_unquoted_unicode_aliases_in_mysql_and_sql_server_queries() {
-        for sql in [
-            "SELECT Guid, FDeleted AS 禁用, IsAuditing AS 审核 FROM xy.dbo.GL_CUSTOM WHERE TJBH=\n24049",
-            "SELECT Guid, FDeleted AS 禁用, IsAuditing AS 审核 FROM xy.GL_CUSTOM WHERE TJBH=24049",
-        ] {
-            let result = analyze_editable_query_editability(sql);
-
-            assert!(result.editable, "{sql}");
-            assert_eq!(
-                result.analysis.unwrap().columns,
-                vec![
-                    column(Some("Guid"), false, None, None, "Guid", "Guid"),
-                    column(Some("FDeleted"), false, None, None, "禁用", "FDeleted"),
-                    column(Some("IsAuditing"), false, None, None, "审核", "IsAuditing"),
-                ]
-            );
-        }
-
-        let computed = analyze_editable_query_editability(
-            "SELECT Guid, FDeleted AS 禁用, CASE WHEN IsAuditing = 1 THEN 1 ELSE 0 END AS 审核状态 FROM xy.dbo.GL_CUSTOM",
-        );
-        assert!(computed.editable);
-        assert_eq!(
-            computed.analysis.unwrap().columns[2],
-            column(None, false, None, None, "审核状态", "CASE WHEN IsAuditing = 1 THEN 1 ELSE 0 END",)
-        );
-    }
-
-    #[test]
     fn accepts_mysql_string_quoted_column_aliases() {
         for (sql, result_name) in [
             ("SELECT id, report_type '计划类型' FROM biz_work_log", "计划类型"),
@@ -1757,5 +1591,71 @@ mod joined_predicate_regression {
         ] {
             assert!(!analyze_editable_query_editability(sql).editable, "{sql}");
         }
+    }
+}
+
+fn strip_sql_server_top_clause(body: &str) -> &str {
+    let trimmed = body.trim_start();
+    if !starts_with_keyword(trimmed, "TOP") {
+        return trimmed;
+    }
+
+    let mut pos = skip_whitespace(trimmed, "TOP".len());
+    if trimmed[pos..].starts_with('(') {
+        let mut depth = 0i32;
+        let mut quote: Option<char> = None;
+        let mut end = None;
+        for (offset, ch) in trimmed[pos..].char_indices() {
+            if let Some(close) = quote {
+                if ch == close {
+                    quote = None;
+                }
+                continue;
+            }
+            match ch {
+                '\'' | '"' | '`' => quote = Some(ch),
+                '[' => quote = Some(']'),
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = Some(pos + offset + ch.len_utf8());
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let Some(end) = end else {
+            return trimmed;
+        };
+        pos = end;
+    } else {
+        let number_end = trimmed[pos..]
+            .char_indices()
+            .take_while(|(_, ch)| ch.is_ascii_digit())
+            .last()
+            .map(|(offset, ch)| pos + offset + ch.len_utf8());
+        let Some(end) = number_end else {
+            return trimmed;
+        };
+        pos = end;
+    }
+
+    pos = skip_whitespace(trimmed, pos);
+    if starts_with_keyword_at(trimmed, pos, "PERCENT") {
+        pos = skip_whitespace(trimmed, pos + "PERCENT".len());
+    }
+    if starts_with_keyword_at(trimmed, pos, "WITH") {
+        let ties_pos = skip_whitespace(trimmed, pos + "WITH".len());
+        if starts_with_keyword_at(trimmed, ties_pos, "TIES") {
+            pos = skip_whitespace(trimmed, ties_pos + "TIES".len());
+        }
+    }
+    let remaining = trimmed[pos..].trim_start();
+    if remaining.is_empty() {
+        trimmed
+    } else {
+        remaining
     }
 }

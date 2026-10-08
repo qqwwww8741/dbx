@@ -3,22 +3,10 @@ import { useI18n } from "vue-i18n";
 import { useToast } from "@/composables/useToast";
 import { useConnectionStore } from "@/stores/connectionStore";
 import type { DatabaseType, TreeNode } from "@/types/database";
-import { supportsTableTruncate, supportsTableVacuum } from "@/lib/database/databaseCapabilities";
-import { connectionIsEffectivelyReadOnly } from "@/lib/database/readOnlyWriteAccess";
-import {
-  buildDropTableSql,
-  buildEmptyTableSql,
-  buildMysqlAutoIncrementSql,
-  buildTruncateTableSql,
-  buildVacuumTableSql,
-  supportsDropTableCascade,
-  supportsNativeMysqlAutoIncrement,
-  supportsTruncateTableCascade,
-  type MysqlAutoIncrementSqlOptions,
-  type TableAdminSqlOptions,
-  type VacuumTableSqlOptions,
-} from "@/lib/database/dbAdminSql";
-import { isSqlServerLinkedNode } from "@/lib/database/sqlServerLinkedServers";
+import { supportsTableTruncate } from "@/lib/database/databaseCapabilities";
+
+import { buildDropTableSql, buildEmptyTableSql, buildMysqlAutoIncrementSql, buildTruncateTableSql, buildVacuumTableSql, supportsNativeMysqlAutoIncrement, type MysqlAutoIncrementSqlOptions, type TableAdminSqlOptions, type VacuumTableSqlOptions } from "@/lib/database/dbAdminSql";
+
 import { connectionTableSqlSchema } from "@/lib/database/jdbcDialect";
 import { isQueryTimeoutErrorMessage } from "@/lib/sql/queryError";
 import { uuid } from "@/lib/common/utils";
@@ -33,7 +21,6 @@ import {
   showEmptyTableConfirm,
   showMysqlAutoIncrementConfirm,
   showTruncateTableConfirm,
-  showVacuumTableConfirm,
   dropTablePreviewSql,
   dropTableCascade,
   emptyTablePreviewSql,
@@ -66,14 +53,13 @@ export function useSidebarTableMutationRuntime(options: SidebarTableMutationRunt
   const { toast } = useToast();
   const { activeNode, connectionStore, currentDatabaseType, databaseTypeForNode } = options;
 
-  const isTableNotView = computed(() => activeNode.value.type === "table" && !isSqlServerLinkedNode(activeNode.value));
+  const isTableNotView = computed(() => activeNode.value.type === "table");
   const supportsTruncate = computed(() => supportsTableTruncate(currentDatabaseType()));
   const supportsVacuum = computed(() => {
-    const config = activeNode.value.connectionId ? connectionStore.getConfig(activeNode.value.connectionId) : undefined;
-    return activeNode.value.type === "table" && !connectionIsEffectivelyReadOnly(config) && supportsTableVacuum(currentDatabaseType());
+    return false;
   });
-  const canDropTableCascade = computed(() => activeNode.value.type === "table" && supportsDropTableCascade(currentDatabaseType()));
-  const canTruncateTableCascade = computed(() => activeNode.value.type === "table" && supportsTruncateTableCascade(currentDatabaseType()));
+  const canDropTableCascade = computed(() => false);
+  const canTruncateTableCascade = computed(() => false);
   const supportsMysqlAutoIncrement = computed(() => activeNode.value.type === "table" && supportsNativeMysqlAutoIncrement(activeNode.value.connectionId ? connectionStore.getConfig(activeNode.value.connectionId) : undefined));
 
   function tableAdminSqlOptions(optionsOverride?: { cascade?: boolean }): TableAdminSqlOptions {
@@ -103,11 +89,11 @@ export function useSidebarTableMutationRuntime(options: SidebarTableMutationRunt
   }
 
   function dropTableSqlOptions(): TableAdminSqlOptions {
-    return tableAdminSqlOptions({ cascade: canDropTableCascade.value && dropTableCascade.value });
+    return tableAdminSqlOptions({ cascade: false });
   }
 
   function truncateTableSqlOptions(): TableAdminSqlOptions {
-    return tableAdminSqlOptions({ cascade: canTruncateTableCascade.value && truncateTableCascade.value });
+    return tableAdminSqlOptions({ cascade: false });
   }
 
   async function refreshDropTablePreviewSql() {
@@ -207,13 +193,9 @@ export function useSidebarTableMutationRuntime(options: SidebarTableMutationRunt
   }
 
   function vacuumTable() {
-    if (!supportsVacuum.value) return;
-    vacuumTableFull.value = false;
-    vacuumTableAnalyze.value = false;
-    vacuumTablePreviewSql.value = "";
-    vacuumTablePreviewKey.value = "";
-    void refreshVacuumTablePreviewSql();
-    showVacuumTableConfirm.value = true;
+    {
+      return;
+    }
   }
 
   async function confirmVacuumTable(): Promise<boolean> {
@@ -333,8 +315,6 @@ export function useSidebarTableMutationRuntime(options: SidebarTableMutationRunt
     void retryPromise.finally(() => clearTimeout(timeoutId));
     return { confirmedWithinTimeout: Promise.race([retryPromise, timeout]), retryPromise };
   }
-
-  const DANGER_OPERATION_CANCELLED_BEFORE_DISPATCH_MESSAGE = "Operation cancelled before it was sent to the database.";
 
   interface DangerRunningExecution {
     executionId: string;
@@ -467,7 +447,8 @@ export function useSidebarTableMutationRuntime(options: SidebarTableMutationRunt
       await connectionStore.ensureConnected(node.connectionId);
       const sql = await buildSql();
       executedSql = sql;
-      if (isCancelledBeforeDispatch()) throw new Error(DANGER_OPERATION_CANCELLED_BEFORE_DISPATCH_MESSAGE);
+      {
+      }
       const executed = await options.executeWithProductionGuard(node, sql, { database: node.database, schema: node.schema, executionId, isCancelledBeforeDispatch, markDispatched });
       if (executed === undefined) {
         // The user declined the production-safety confirmation: the SQL was
@@ -494,7 +475,7 @@ export function useSidebarTableMutationRuntime(options: SidebarTableMutationRunt
       const backendError = normalizeBackendError(error) ?? undefined;
       const cancellationWasRequested = wasCancelled();
       const cancellationWasConfirmed = cancelConfirmed() || (cancellationWasRequested && (await waitForCancelConfirmation()));
-      if (executedSql && !successRecorded && options.historyStore && !cancellationWasRequested && !cancellationWasConfirmed && !isCancelledBeforeDispatch()) {
+      if (executedSql && !successRecorded && options.historyStore && !cancellationWasRequested && !cancellationWasConfirmed) {
         await recordTableMutationHistory(options.historyStore, {
           connectionId: node.connectionId,
           connectionName: connectionStore.getConfig(node.connectionId)?.name,
@@ -519,7 +500,7 @@ export function useSidebarTableMutationRuntime(options: SidebarTableMutationRunt
     const node = sidebarDangerTarget.value ?? activeNode.value;
     await runDangerOperation({
       node,
-      buildSql: () => dropTablePreviewSql.value || buildDropTableSql(tableAdminSqlOptionsForNode(node, { cascade: dropTableCascade.value && supportsDropTableCascade(databaseTypeForNode(node)) })),
+      buildSql: () => dropTablePreviewSql.value || buildDropTableSql(tableAdminSqlOptionsForNode(node, { cascade: false })),
       onSuccess: (node) => {
         toast(t("contextMenu.dropTableSuccess", { name: node.label }), 3000);
         options.closeDroppedTableObjectTabsForNode(node);
@@ -540,7 +521,7 @@ export function useSidebarTableMutationRuntime(options: SidebarTableMutationRunt
       node,
       buildSql: () => emptyTablePreviewSql.value || buildEmptyTableSql(tableAdminSqlOptionsForNode(node)),
       onSuccess: async (node) => {
-        const messageKey = databaseTypeForNode(node) === "clickhouse" ? "contextMenu.emptyTableSubmitted" : "contextMenu.emptyTableSuccess";
+        const messageKey = "contextMenu.emptyTableSuccess";
         toast(t(messageKey, { name: node.label }), 3000);
         await options.refreshMutatedTableDataTabsForNode(node);
       },
@@ -557,7 +538,7 @@ export function useSidebarTableMutationRuntime(options: SidebarTableMutationRunt
     const node = sidebarDangerTarget.value ?? activeNode.value;
     await runDangerOperation({
       node,
-      buildSql: () => truncateTablePreviewSql.value || buildTruncateTableSql(tableAdminSqlOptionsForNode(node, { cascade: truncateTableCascade.value && supportsTruncateTableCascade(databaseTypeForNode(node)) })),
+      buildSql: () => truncateTablePreviewSql.value || buildTruncateTableSql(tableAdminSqlOptionsForNode(node, { cascade: false })),
       onSuccess: async (node) => {
         toast(t("contextMenu.truncateTableSuccess", { name: node.label }), 3000);
         await options.refreshMutatedTableDataTabsForNode(node);

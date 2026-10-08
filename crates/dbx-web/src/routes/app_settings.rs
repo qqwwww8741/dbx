@@ -268,3 +268,7 @@ mod tests {
         assert_eq!(error, "wrong_passphrase");
     }
 }
+
+pub async fn list_system_fonts() -> Json<Vec<String>> {
+    Json(dbx_core::host::system_fonts::list_system_fonts())
+}

@@ -13,7 +13,7 @@ import * as api from "@/lib/backend/api";
 import { executeWithProductionSqlGuard } from "@/lib/database/productionExecutionGuard";
 import { clampInterval, createProcessListLoadCoordinator, DEFAULT_REFRESH_SECONDS, processListExecutionError, processListSessionCount } from "@/lib/database/mysqlProcessList";
 import { resolveProcessListDriverForConnection, type ProcessRow } from "@/lib/database/processListDrivers";
-import { effectiveDatabaseTypeForConnection } from "@/lib/database/jdbcDialect";
+
 import { processListSelectionAfterClick } from "@/lib/database/processListSelection";
 import { useTabUiState } from "@/lib/tabs/tabUiState";
 
@@ -35,7 +35,7 @@ const { initialState: restoredUiState, track: trackUiState } = useTabUiState<{
 // The panel is only opened for supported engines; guard the driver defensively so
 // a missing one degrades to an empty table rather than crashing the render.
 const driver = computed(() => resolveProcessListDriverForConnection(props.connection));
-const xuguAdminRequired = computed(() => effectiveDatabaseTypeForConnection(props.connection) === "xugu" && driver.value === null);
+
 const columns = computed(() => driver.value?.columns ?? []);
 const numericKeys = computed(() => new Set(columns.value.filter((column) => column.numeric).map((column) => column.key)));
 
@@ -536,13 +536,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div v-if="xuguAdminRequired" class="flex h-full items-center justify-center bg-background p-6">
-    <div class="flex max-w-md items-start gap-3 rounded-lg border bg-muted/20 p-4 text-sm text-muted-foreground">
-      <AlertTriangle class="mt-0.5 h-4 w-4 shrink-0" />
-      <span>{{ t("processList.transactionRequiresSysdba") }}</span>
-    </div>
-  </div>
-  <div v-else class="flex h-full min-h-0 flex-col bg-background">
+  <div class="flex h-full min-h-0 flex-col bg-background">
     <div class="flex min-h-11 shrink-0 flex-wrap items-center gap-2 border-b bg-muted/20 px-3 py-1">
       <div class="flex min-w-0 items-center gap-2">
         <Activity class="h-4 w-4 text-primary" />

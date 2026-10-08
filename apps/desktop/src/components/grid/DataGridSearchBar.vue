@@ -2,7 +2,7 @@
 import { ref } from "vue";
 import { CaseSensitive, ChevronDown, ChevronRight, ChevronUp, Search, X } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
-import { vNamingStyleSupport } from "@/directives/vNamingStyleSupport";
+
 import type { DataGridReplaceScope } from "@/lib/dataGrid/dataGridReplace";
 
 const { t } = useI18n();

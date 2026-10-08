@@ -33,12 +33,7 @@ export function navigationTableTarget(entry: GlobalNavigationEntry): NavigationT
 
 export function matchesNavigationDataTab(tab: QueryTab, entry: GlobalNavigationEntry): boolean {
   return (
-    tab.mode === (entry.mode === "mongo" ? "mongo" : "data") &&
-    tab.connectionId === entry.connectionId &&
-    tab.database === entry.database &&
-    (tab.tableMeta?.catalog ?? tab.catalog ?? "") === (entry.catalog ?? "") &&
-    (tab.tableMeta?.schema ?? tab.schema ?? "") === (entry.schema ?? "") &&
-    tab.tableMeta?.tableName === entry.tableName
+    tab.mode === "data" && tab.connectionId === entry.connectionId && tab.database === entry.database && (tab.tableMeta?.catalog ?? tab.catalog ?? "") === (entry.catalog ?? "") && (tab.tableMeta?.schema ?? tab.schema ?? "") === (entry.schema ?? "") && tab.tableMeta?.tableName === entry.tableName
   );
 }
 

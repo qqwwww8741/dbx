@@ -55,7 +55,7 @@ export class SqlCompletionAnalysisEngine {
   }
 
   private editorStateFor(request: SqlCompletionAnalysisRequest): EditorState {
-    const dialectName = request.syntaxDialect ?? (request.dialect === "doris" ? "mysql" : request.dialect) ?? "mysql";
+    const dialectName = request.syntaxDialect ?? request.dialect ?? "mysql";
     const dialectKey = `${request.databaseType ?? ""}:${dialectName}:${request.driverProfile ?? ""}`;
     if (!this.state || this.dialectKey !== dialectKey) {
       this.state = EditorState.create({

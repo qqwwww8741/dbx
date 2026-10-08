@@ -7,6 +7,19 @@ use dbx_core::sql_file_import::execute_sql_file_path;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
+async fn cleanup_test_directory(dir: &std::path::Path) {
+    for attempt in 0..20 {
+        match std::fs::remove_dir_all(dir) {
+            Ok(()) => return,
+            Err(error) if attempt < 19 && cfg!(windows) => {
+                let _ = error;
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            Err(error) => panic!("failed to remove test directory: {error}"),
+        }
+    }
+}
+
 fn exported_view_position(sql: &str, view_name: &str) -> Option<usize> {
     regex::Regex::new(&format!(r"(?is)\bCREATE\b[^;]*\bVIEW\s+(?:`[^`]+`\.)?`{}`\s+AS\b", regex::escape(view_name)))
         .unwrap()
@@ -107,7 +120,7 @@ async fn live_mysql_selected_table_restore_preserves_unselected_tables() {
     let cleanup =
         execute_sql_statement(&state, &connection_id, "", &format!("DROP DATABASE `{database}`"), None, None).await;
     drop(state);
-    std::fs::remove_dir_all(&dir).unwrap();
+    cleanup_test_directory(&dir).await;
     cleanup.unwrap();
     outcome.unwrap().unwrap();
 }
@@ -212,11 +225,12 @@ async fn live_mysql_database_export_restores_dependent_views() {
         execute_sql_statement(&state, &connection_id, "", &format!("DROP DATABASE `{database}`"), None, None).await;
 
     cleanup.unwrap();
-    std::fs::remove_dir_all(dir).unwrap();
+    drop(state);
+    cleanup_test_directory(&dir).await;
     let (referenced_view, dependent_view, result, spatial_result) = test_result.unwrap();
     assert!(referenced_view < dependent_view);
     assert_eq!(result.rows, vec![vec![serde_json::json!("7")]]);
-    assert_eq!(spatial_result.rows, vec![vec![serde_json::json!(4326), serde_json::json!(1)]]);
+    assert_eq!(spatial_result.rows, vec![vec![serde_json::json!("4326"), serde_json::json!("1")]]);
 }
 
 /// Regression coverage for #6882. A whole-database export prefetches MySQL
@@ -334,7 +348,8 @@ async fn run_live_mysql_database_export_handles_many_tables_including_empty_tabl
     let cleanup =
         execute_sql_statement(&state, &connection_id, "", &format!("DROP DATABASE `{database}`"), None, None).await;
     cleanup.unwrap();
-    std::fs::remove_dir_all(dir).unwrap();
+    drop(state);
+    cleanup_test_directory(&dir).await;
     test_result.unwrap();
 }
 
@@ -424,7 +439,8 @@ async fn live_mysql_database_export_creates_missing_destination_directory() {
     assert!(charset < create_database, "SET NAMES must precede the CREATE DATABASE preamble");
     assert!(charset < create_table, "SET NAMES must precede the table DDL");
 
-    std::fs::remove_dir_all(dir).unwrap();
+    drop(state);
+    cleanup_test_directory(&dir).await;
 }
 
 /// Regression test for the #6327 review of the #6109 fix: once a destination
@@ -500,7 +516,8 @@ async fn live_mysql_database_export_refuses_to_recreate_a_destination_that_disap
     assert!(result.is_err(), "export must not silently recreate a destination that previously existed");
     assert!(!destination_dir.exists(), "the backup directory must not be resurrected on the wrong filesystem");
 
-    std::fs::remove_dir_all(dir).unwrap();
+    drop(state);
+    cleanup_test_directory(&dir).await;
 }
 
 /// Regression test for review feedback on #6327: scheduled plans live in the
@@ -589,5 +606,6 @@ async fn live_mysql_database_export_refuses_a_destination_that_vanished_before_i
     assert!(!destination_dir.exists(), "the backup directory must not be resurrected on the wrong filesystem");
     assert!(!file_path.exists(), "no backup should have been written to the resurrected directory");
 
-    std::fs::remove_dir_all(dir).unwrap();
+    drop(state);
+    cleanup_test_directory(&dir).await;
 }

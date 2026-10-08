@@ -11,7 +11,7 @@ function convertCase(text: string, mode: "upper" | "lower"): string {
   return mode === "upper" ? text.toUpperCase() : text.toLowerCase();
 }
 
-export function convertSqlSelectionCase(sql: string, range: SqlSelectionRange, mode: SqlSelectionCaseMode, dialectId?: "mysql" | "postgres" | "sqlserver"): string {
+export function convertSqlSelectionCase(sql: string, range: SqlSelectionRange, mode: SqlSelectionCaseMode, dialectId?: "mysql"): string {
   const from = Math.max(0, Math.min(range.from, sql.length));
   const to = Math.max(from, Math.min(range.to, sql.length));
   if (mode === "toggle") {

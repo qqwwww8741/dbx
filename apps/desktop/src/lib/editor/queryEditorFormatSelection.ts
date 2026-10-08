@@ -27,7 +27,7 @@ function tokenKey(value: SqlSemanticToken): string {
 }
 
 function tokenizeForFormatting(text: string, dialectId: string): SqlSemanticToken[] {
-  const mysqlFamily = dialectId === "mysql" || dialectId === "doris";
+  const mysqlFamily = dialectId === "mysql";
   return tokenizeSqlSemantic(text, dialectId, {
     mysqlBackslashEscape: mysqlFamily,
     mysqlDashCommentRequiresWhitespace: mysqlFamily,

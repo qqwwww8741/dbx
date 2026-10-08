@@ -60,7 +60,7 @@ pub fn normalize_mysql_export_ddl(ddl: &str, opts: DdlNormalizeOptions) -> Strin
     // One winnow pass over the whole DDL (wrapped in `LocatingSlice`), so every
     // option carries an absolute byte span into `ddl` — no offset math.
     let Some(options) = parse_create_table_options(ddl) else {
-        return ddl.to_string(); // fail-open: unparseable DDL returned verbatim
+        return ddl.to_string();
     };
 
     // Compute edits as absolute byte ranges in `ddl`. An empty replacement means

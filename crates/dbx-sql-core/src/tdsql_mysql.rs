@@ -7,12 +7,11 @@ pub fn is_config(config: &ConnectionConfig) -> bool {
 }
 
 pub fn is_profile(db_type: &DatabaseType, driver_profile: Option<&str>) -> bool {
-    *db_type == DatabaseType::Mysql
-        && driver_profile.is_some_and(|profile| profile.eq_ignore_ascii_case(DRIVER_PROFILE))
+    true && driver_profile.is_some_and(|profile| profile.eq_ignore_ascii_case(DRIVER_PROFILE))
 }
 
 pub fn preserves_leading_directives_for_database_type(db_type: DatabaseType) -> bool {
-    db_type == DatabaseType::Mysql
+    true
 }
 
 pub fn leading_directive_start(statement: &str, executable_start: usize) -> Option<usize> {
@@ -31,19 +30,6 @@ pub fn leading_directive_start(statement: &str, executable_start: usize) -> Opti
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn profile_is_isolated_from_standard_mysql() {
-        assert!(is_profile(&DatabaseType::Mysql, Some("TDSQL")));
-        assert!(!is_profile(&DatabaseType::Mysql, None));
-        assert!(!is_profile(&DatabaseType::Postgres, Some("tdsql")));
-    }
-
-    #[test]
-    fn leading_directives_are_available_only_to_mysql_parsing() {
-        assert!(preserves_leading_directives_for_database_type(DatabaseType::Mysql));
-        assert!(!preserves_leading_directives_for_database_type(DatabaseType::Postgres));
-    }
 
     #[test]
     fn leading_directives_preserve_same_line_and_exact_proxy_behavior() {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { BarChart3, ListChecks, MessageSquareText, SquareTerminal } from "@lucide/vue";
+import { BarChart3, ListChecks, MessageSquareText } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 import { Button } from "@/components/ui/button";
 import LightTooltip from "@/components/ui/LightTooltip.vue";
@@ -38,42 +38,13 @@ function selectView(view: PrimaryResultView) {
   if (props.activeView === view) return;
   emit("selectView", view);
 }
-
-function selectResultMode(mode: RedisResultViewMode) {
-  if (props.activeView === "result" && effectiveResultMode.value === mode) return;
-  if (props.canShowRedisConsole && props.resultMode !== mode) emit("selectResultMode", mode);
-  if (props.activeView !== "result") emit("selectView", "result");
-}
 </script>
 
 <template>
   <div data-query-result-view-switcher class="flex shrink-0 items-center gap-1 px-1">
-    <Button
-      size="sm"
-      :variant="activeView === 'result' && effectiveResultMode === 'grid' ? 'secondary' : 'ghost'"
-      class="h-5 shrink-0 px-2 text-xs leading-none"
-      :disabled="!canShowResult"
-      :aria-pressed="activeView === 'result' && effectiveResultMode === 'grid'"
-      @click="canShowRedisConsole ? selectResultMode('grid') : selectView('result')"
-    >
+    <Button size="sm" :variant="activeView === 'result' && effectiveResultMode === 'grid' ? 'secondary' : 'ghost'" class="h-5 shrink-0 px-2 text-xs leading-none" :disabled="!canShowResult" :aria-pressed="activeView === 'result' && effectiveResultMode === 'grid'" @click="selectView('result')">
       <span class="inline-flex h-4 items-center leading-none">{{ t("tabs.tableData") }}</span>
     </Button>
-
-    <LightTooltip v-if="canShowRedisConsole" :text="t('redis.commandLine')" :disabled="!compact" side="bottom" :delay="0" :close-delay="0" nowrap>
-      <Button
-        size="sm"
-        :variant="activeView === 'result' && effectiveResultMode === 'console' ? 'secondary' : 'ghost'"
-        class="h-5 shrink-0 text-xs leading-none"
-        :class="compact ? 'w-6 gap-0 px-0' : 'gap-1 px-2'"
-        :title="t('redis.commandLine')"
-        :aria-label="t('redis.commandLine')"
-        :aria-pressed="activeView === 'result' && effectiveResultMode === 'console'"
-        @click="selectResultMode('console')"
-      >
-        <SquareTerminal class="block h-3.5 w-3.5 self-center" />
-        <span v-if="!compact" class="inline-flex h-4 items-center leading-none">{{ t("redis.commandLine") }}</span>
-      </Button>
-    </LightTooltip>
 
     <LightTooltip :text="t('tabs.executionSummary')" :disabled="!compact" side="bottom" :delay="0" :close-delay="0" nowrap>
       <Button

@@ -2,7 +2,7 @@ import { safeLocalStorageGet, safeLocalStorageRemove, safeLocalStorageSet } from
 
 const PENDING_COMPONENT_UPDATES_STORAGE_KEY = "dbx:updates:pending-components-after-restart";
 
-export const COMPONENT_UPDATE_CATEGORIES = ["drivers", "jdbc", "mcp", "plugins"] as const;
+export const COMPONENT_UPDATE_CATEGORIES = ["drivers", "mcp", "plugins"] as const;
 
 export type ComponentUpdateCategory = (typeof COMPONENT_UPDATE_CATEGORIES)[number];
 

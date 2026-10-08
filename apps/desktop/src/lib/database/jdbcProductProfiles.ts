@@ -1,9 +1,8 @@
 import type { ConnectionConfig } from "@/types/database";
-import { PHOENIX_JDBC_PRODUCT_PROFILE } from "@/lib/database/phoenixConnection";
-import { createJdbcProductProfileRegistry, ensureJdbcProductRuntimeDrivers, isJdbcProductRuntimeInstallError, jdbcProductProfileMatches, validateJdbcProductManagedDriver, type JdbcProductProfileDefinition, type JdbcProductRuntimeApi } from "@/lib/database/jdbcProductProfile";
+import { createJdbcProductProfileRegistry, ensureJdbcProductRuntimeDrivers, jdbcProductProfileMatches, validateJdbcProductManagedDriver, type JdbcProductProfileDefinition, type JdbcProductRuntimeApi } from "@/lib/database/jdbcProductProfile";
 import { managedJdbcDriverDefinition } from "@/lib/database/managedJdbcDrivers";
 
-export const JDBC_PRODUCT_PROFILES = [PHOENIX_JDBC_PRODUCT_PROFILE] as const satisfies readonly JdbcProductProfileDefinition[];
+export const JDBC_PRODUCT_PROFILES: readonly JdbcProductProfileDefinition[] = [];
 
 const jdbcProductProfileRegistry = createJdbcProductProfileRegistry(JDBC_PRODUCT_PROFILES);
 for (const profile of JDBC_PRODUCT_PROFILES) {
@@ -45,9 +44,9 @@ export function jdbcProductProfileIdsForCategory(category: string): string[] {
   return JDBC_PRODUCT_PROFILES.filter((profile) => profile.category === category).map((profile) => profile.id);
 }
 
-export function isRegisteredJdbcProductRuntimeInstallError(config: Pick<ConnectionConfig, "db_type" | "driver_profile">, message: string): boolean {
-  const profile = jdbcProductProfileForConfig(config);
-  return Boolean(profile && isJdbcProductRuntimeInstallError(profile, message));
+export function isRegisteredJdbcProductRuntimeInstallError(config: Pick<ConnectionConfig, "db_type" | "driver_profile">, _message: string): boolean {
+  jdbcProductProfileForConfig(config);
+  return Boolean(false);
 }
 
 export async function ensureRegisteredJdbcProductRuntimeDrivers(config: ConnectionConfig, api: JdbcProductRuntimeApi) {

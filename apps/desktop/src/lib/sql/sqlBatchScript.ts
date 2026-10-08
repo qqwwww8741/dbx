@@ -6,7 +6,8 @@ import type { DatabaseType } from "@/types/database";
  * GO-aware runner) treat each statement as an independent batch. GO only defines batch
  * boundaries; whether execution continues after an error depends on the client policy.
  */
-export function joinSqlStatementsForScript(statements: readonly string[], databaseType?: DatabaseType): string {
-  if (databaseType !== "sqlserver") return statements.join("\n");
-  return statements.map((statement) => statement.trimEnd()).join("\nGO\n");
+export function joinSqlStatementsForScript(statements: readonly string[], _databaseType?: DatabaseType): string {
+  {
+    return statements.join("\n");
+  }
 }

@@ -267,13 +267,7 @@ pub enum MySqlCatalogDialect {
 }
 
 pub fn mysql_catalog_dialect(db_type: DatabaseType, driver_profile: Option<&str>) -> Option<MySqlCatalogDialect> {
-    if super::doris::is_profile(&db_type, driver_profile) {
-        Some(MySqlCatalogDialect::Doris)
-    } else if super::starrocks::is_profile(&db_type, driver_profile) {
-        Some(MySqlCatalogDialect::StarRocks)
-    } else {
-        None
-    }
+    None
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -349,30 +343,11 @@ const MYSQL_RESULT_CELL_PREVIEW_MAX_BYTES: usize = 8 * 1024;
 
 impl MySqlQueryDialect {
     pub fn for_connection(db_type: DatabaseType, driver_profile: Option<&str>) -> Self {
-        Self {
-            supports_admin_show_results: super::doris::is_profile(&db_type, driver_profile)
-                || super::starrocks::is_profile(&db_type, driver_profile)
-                || super::manticoresearch::is_profile(&db_type, driver_profile)
-                || super::tidb::is_profile(&db_type, driver_profile),
-            is_doris: super::doris::is_native_profile(&db_type, driver_profile),
-        }
+        Self::default()
     }
 }
 
 type DorisOpaqueColumnTypes = HashMap<(Vec<u8>, Vec<u8>, Vec<u8>), String>;
-type DorisOpaqueColumnKey = (Vec<u8>, Vec<u8>, Vec<u8>);
-
-fn insert_doris_opaque_column_type(
-    resolved: &mut DorisOpaqueColumnTypes,
-    ambiguous: &mut HashSet<DorisOpaqueColumnKey>,
-    key: DorisOpaqueColumnKey,
-    data_type: String,
-) {
-    if ambiguous.contains(&key) || resolved.insert(key.clone(), data_type).is_some() {
-        resolved.remove(&key);
-        ambiguous.insert(key);
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct DorisSourceTable {
@@ -449,75 +424,6 @@ impl Visitor for DorisPreflightVisitor {
     }
 }
 
-fn doris_preflight_sources(sql: &str, dialect: MySqlQueryDialect) -> Option<Vec<DorisSourceTable>> {
-    if !dialect.is_doris {
-        return None;
-    }
-    let statements = Parser::parse_sql(&MySqlDialect {}, sql).ok()?;
-    let [Statement::Query(query)] = statements.as_slice() else {
-        return None;
-    };
-    let mut visitor = DorisPreflightVisitor::default();
-    let _ = query.visit(&mut visitor);
-    if visitor.unsupported || visitor.sources.is_empty() {
-        return None;
-    }
-    Some(visitor.sources.into_iter().collect())
-}
-
-async fn resolve_doris_opaque_column_types(
-    conn: &mut mysql_async::Conn,
-    sql: &str,
-    dialect: MySqlQueryDialect,
-) -> DorisOpaqueColumnTypes {
-    let Some(mut sources) = doris_preflight_sources(sql, dialect) else {
-        return HashMap::new();
-    };
-    if sources.iter().any(|source| source.database.is_none()) {
-        let current_database = conn
-            .query_first::<String, _>("SELECT DATABASE()")
-            .await
-            .ok()
-            .flatten()
-            .filter(|database| !database.is_empty());
-        let Some(current_database) = current_database else {
-            return HashMap::new();
-        };
-        for source in &mut sources {
-            if source.database.is_none() {
-                source.database = Some(current_database.clone());
-            }
-        }
-    }
-    sources.sort_by(|left, right| (&left.database, &left.table).cmp(&(&right.database, &right.table)));
-    sources.dedup();
-
-    let mut resolved = HashMap::new();
-    let mut ambiguous = HashSet::new();
-    for source in sources {
-        let Some(database) = source.database else { continue };
-        match fetch_columns_show(conn, &database, &source.table).await {
-            Ok(columns) => {
-                for column in columns {
-                    if is_opaque_aggregate_state_type(&column.data_type) {
-                        let key = (
-                            database.as_bytes().to_vec(),
-                            source.table.as_bytes().to_vec(),
-                            column.name.as_bytes().to_vec(),
-                        );
-                        insert_doris_opaque_column_type(&mut resolved, &mut ambiguous, key, column.data_type);
-                    }
-                }
-            }
-            Err(error) => log::debug!(
-                "Failed to resolve Doris aggregate-state columns for `{database}`.`{}`: {error}",
-                source.table
-            ),
-        }
-    }
-    resolved
-}
-
 fn effective_mysql_column_types(columns: &[mysql_async::Column], opaque_types: &DorisOpaqueColumnTypes) -> Vec<String> {
     columns
         .iter()
@@ -558,25 +464,6 @@ fn mysql_value_to_json_with_effective_type(
         };
     }
     mysql_value_to_json(row, index)
-}
-
-fn ensure_doris_opaque_cells_fit_budget(
-    row: &mysql_async::Row,
-    effective_types: &[String],
-    max_result_bytes: Option<usize>,
-) -> Result<(), String> {
-    let Some(max_result_bytes) = max_result_bytes else { return Ok(()) };
-    for (index, effective_type) in effective_types.iter().enumerate() {
-        if is_opaque_aggregate_state_type(effective_type)
-            && matches!(row.as_ref(index), Some(mysql_async::Value::Bytes(bytes)) if bytes.len().saturating_mul(2).saturating_add(2) > max_result_bytes)
-        {
-            return Err(format!(
-                "Doris aggregate-state value in column {} exceeds the interactive byte budget; use a streaming representation export to preserve the complete bytes",
-                index + 1
-            ));
-        }
-    }
-    Ok(())
 }
 
 pub enum MySqlQueryStreamItem {
@@ -703,9 +590,6 @@ pub async fn database_connection_info(
 pub fn protocol_product_name(config: &ConnectionConfig) -> String {
     config.driver_label.as_deref().map(str::trim).filter(|value| !value.is_empty()).map(str::to_string).unwrap_or_else(
         || match config.db_type {
-            DatabaseType::Doris => "Doris".to_string(),
-            DatabaseType::StarRocks => "StarRocks".to_string(),
-            DatabaseType::ManticoreSearch => "Manticore Search".to_string(),
             _ => "MySQL".to_string(),
         },
     )
@@ -2805,57 +2689,6 @@ fn mysql_url_verifies_identity(url: &str) -> bool {
     })
 }
 
-fn is_jdbc_param(key: &str) -> bool {
-    matches!(
-        key.to_ascii_lowercase().as_str(),
-        "useunicode"
-            | "characterencoding"
-            | "zerodatetimebehavior"
-            | "usessl"
-            | "servertimezone"
-            | "allowpublickeyretrieval"
-            | "autoreconnect"
-            | "maxreconnects"
-            | "uselegacydatetimecode"
-            | "usecompression"
-            | "cacheprepstmts"
-            | "useserverprepstmts"
-            | "useconfigs"
-            | "usecursorfetch"
-            | "defaultfetchsize"
-            | "usejdbccomplianttimezoneshift"
-            | "usesspscompatibletimezoneshift"
-            | "failoverreadonly"
-            | "maxallowedpacket"
-            | "tinyint1isbit"
-            | "transformedbitisboolean"
-            | "yearisdatetype"
-            | "createdatabaseifnotexist"
-            | "allowmultiqueries"
-            | "noaccesstoprocedurebodies"
-            | "nullcatalogmeanscurrent"
-            | "nullnamepatternmatchesall"
-            | "dumponqueriesexception"
-            | "enablequerytimeouts"
-            | "useinformationschema"
-            | "gatherperfmetrics"
-            | "reportmetricsintervalmillis"
-            | "maxquerysizetolog"
-            | "packetdebugbuffersize"
-            | "usenanosforelapsedtime"
-            | "slowquerythresholdmillis"
-            | "autoslowlog"
-            | "explainslowqueries"
-            | "resultsetsizethreshold"
-            | "nettimeoutforstreamingresults"
-            | "useusageadvisor"
-            | "uselocalsessionstate"
-            | "rewritebatchedstatements"
-            | "prepstmtcachesqllimit"
-            | "prepstmtcachesize"
-    )
-}
-
 fn is_dbx_handled_mysql_url_param(key: &str) -> bool {
     matches!(
         key.to_ascii_lowercase().as_str(),
@@ -2895,113 +2728,6 @@ fn strip_mysql_url_path(base: &str) -> &str {
     match rest.find('/') {
         Some(idx) => &base[.."mysql://".len() + idx],
         None => base,
-    }
-}
-
-fn mysql_async_url(url: &str) -> Cow<'_, str> {
-    let Some((base, query)) = url.split_once('?') else {
-        return Cow::Borrowed(url);
-    };
-
-    let original_count = query.split('&').filter(|segment| !segment.trim().is_empty()).count();
-    let mut filtered: Vec<String> = Vec::new();
-    let mut changed = false;
-    let mut has_catalog = false;
-    let mut enable_cleartext_plugin = false;
-    let has_native_tls_param = query.split('&').any(|segment| {
-        let key = segment.split_once('=').map(|(key, _)| key).unwrap_or(segment).trim();
-        key.eq_ignore_ascii_case("ssl-mode")
-            || key.eq_ignore_ascii_case("sslmode")
-            || key.eq_ignore_ascii_case("require_ssl")
-    });
-    let jdbc_tls_mode = mysql_jdbc_tls_mode(Some(query));
-    for segment in query.split('&') {
-        let segment = segment.trim();
-        if segment.is_empty() {
-            changed = true;
-            continue;
-        }
-
-        let Some((key, value)) = segment.split_once('=') else {
-            filtered.push(segment.to_string());
-            continue;
-        };
-        if key.eq_ignore_ascii_case("catalog") {
-            has_catalog = true;
-        }
-        if is_mysql_cleartext_password_param(key) {
-            changed = true;
-            enable_cleartext_plugin |= mysql_url_param_value_is_true(value);
-            continue;
-        }
-        if is_mysql_jdbc_tls_param(key) {
-            changed = true;
-            continue;
-        }
-        if is_dbx_handled_mysql_url_param(key) {
-            changed = true;
-            continue;
-        }
-        if key.eq_ignore_ascii_case("ssl-mode") || key.eq_ignore_ascii_case("sslmode") {
-            changed = true;
-            match value.to_ascii_lowercase().replace('-', "_").as_str() {
-                "disabled" | "disable" => filtered.push("require_ssl=false".to_string()),
-                "preferred" | "prefer" => {
-                    filtered.push("require_ssl=true".to_string());
-                    filtered.push("verify_ca=false".to_string());
-                    filtered.push("verify_identity=false".to_string());
-                }
-                "required" | "require" => {
-                    filtered.push("require_ssl=true".to_string());
-                    filtered.push("verify_ca=false".to_string());
-                    filtered.push("verify_identity=false".to_string());
-                }
-                "verify_ca" => {
-                    filtered.push("require_ssl=true".to_string());
-                    filtered.push("verify_identity=false".to_string());
-                }
-                "verify_identity" => filtered.push("require_ssl=true".to_string()),
-                _ => {}
-            }
-            continue;
-        }
-        if is_jdbc_param(key) {
-            changed = true;
-            continue;
-        }
-        filtered.push(segment.to_string());
-    }
-    if !has_native_tls_param {
-        match jdbc_tls_mode {
-            Some(MysqlJdbcTlsMode::Disabled) => filtered.push("require_ssl=false".to_string()),
-            Some(MysqlJdbcTlsMode::Preferred | MysqlJdbcTlsMode::Required) => {
-                filtered.push("require_ssl=true".to_string());
-                filtered.push("verify_ca=false".to_string());
-                filtered.push("verify_identity=false".to_string());
-            }
-            Some(MysqlJdbcTlsMode::VerifyCa) => {
-                filtered.push("require_ssl=true".to_string());
-                filtered.push("verify_ca=true".to_string());
-                filtered.push("verify_identity=false".to_string());
-            }
-            None => {}
-        }
-    }
-    if enable_cleartext_plugin {
-        filtered.push("enable_cleartext_plugin=true".to_string());
-    }
-
-    // When a catalog is configured, the database in the URL path must not be
-    // sent as the schema during the MySQL handshake. Strip the path so mysql_async
-    // connects without a default schema; the database is selected via setup queries.
-    let base = if has_catalog { strip_mysql_url_path(base) } else { base };
-
-    if !changed && filtered.len() == original_count && !has_catalog {
-        Cow::Borrowed(url)
-    } else if filtered.is_empty() {
-        Cow::Owned(base.to_string())
-    } else {
-        Cow::Owned(format!("{base}?{}", filtered.join("&")))
     }
 }
 
@@ -5384,47 +5110,6 @@ fn mysql_warnings_fallback_message(warnings: u16) -> QueryMessage {
     }
 }
 
-/// Builds the message list from an OK-packet info string plus the outcome of a
-/// `SHOW WARNINGS` query: `None` when the query failed (MySQL-compatible
-/// proxies such as Doris/StarRocks may not support it), `Some(rows)` with its
-/// rows otherwise. An empty successful result still falls back to the
-/// count-only message so a nonzero warning count is never silently dropped.
-fn mysql_server_messages_from_warnings(
-    info: &str,
-    warnings: u16,
-    warning_rows: Option<Vec<(String, u16, String)>>,
-) -> Vec<QueryMessage> {
-    let mut messages: Vec<QueryMessage> = mysql_info_message(info).into_iter().collect();
-    if warnings == 0 {
-        return messages;
-    }
-    match warning_rows {
-        Some(rows) if !rows.is_empty() => messages.extend(mysql_warning_rows_to_messages(rows)),
-        _ => messages.push(mysql_warnings_fallback_message(warnings)),
-    }
-    messages
-}
-
-/// Best-effort collection of server messages for a finished statement: the
-/// OK-packet info string plus `SHOW WARNINGS` output when the server reported
-/// warnings. `SHOW WARNINGS` runs on the same connection; all errors are
-/// swallowed (MySQL-compatible proxies such as Doris/StarRocks may not support
-/// it) and fall back to a count-only message.
-async fn collect_mysql_server_messages(conn: &mut mysql_async::Conn, warnings: u16, info: &str) -> Vec<QueryMessage> {
-    let warning_rows = if warnings == 0 {
-        None
-    } else {
-        match conn.query_iter("SHOW WARNINGS").await {
-            Ok(result) => match result.try_collect_and_drop::<(String, u16, String)>().await {
-                Ok(rows) => rows.into_iter().collect::<Result<Vec<_>, _>>().ok(),
-                Err(_) => None,
-            },
-            Err(_) => None,
-        }
-    };
-    mysql_server_messages_from_warnings(info, warnings, warning_rows)
-}
-
 async fn execute_result_set_with_text_protocol_on_conn(
     conn: &mut mysql_async::Conn,
     sql: &str,
@@ -5531,7 +5216,6 @@ async fn execute_result_set_with_text_protocol_on_conn(
         }
         let Some(row) = next_row else { break };
         let row = row.map_err(|e| e.to_string())?;
-        ensure_doris_opaque_cells_fit_budget(&row, &column_types, max_result_bytes)?;
         if let Some(progress_clock) = progress_clock {
             progress_clock.mark();
         }
@@ -5690,7 +5374,6 @@ async fn execute_result_sets_with_text_protocol_on_conn(
                 let Some(row) = next_row else { break };
                 let row = row.map_err(|e| e.to_string())?;
                 if rows.len() < row_limit {
-                    ensure_doris_opaque_cells_fit_budget(&row, &column_types, max_result_bytes)?;
                     let row_index = rows.len();
                     let convert_started_at = diagnostics_enabled.then(Instant::now);
                     let (values, srids, mut row_large_values) = mysql_row_to_json_with_srids_and_previews(
@@ -5880,7 +5563,6 @@ async fn execute_result_set_with_prepared_protocol_on_conn(
         }
         let Some(row) = next_row else { break };
         let row = row.map_err(|e| e.to_string())?;
-        ensure_doris_opaque_cells_fit_budget(&row, &column_types, max_result_bytes)?;
         if let Some(progress_clock) = progress_clock {
             progress_clock.mark();
         }
@@ -6076,7 +5758,7 @@ pub async fn stream_query_result_on_conn(
     mut on_item: impl FnMut(MySqlQueryStreamItem) -> Result<(), String>,
 ) -> Result<u64, String> {
     let row_limit = max_rows.unwrap_or(usize::MAX);
-    let opaque_types = resolve_doris_opaque_column_types(conn, sql, dialect).await;
+    let opaque_types = HashMap::new();
 
     if bare || prefers_text_protocol_query(sql, dialect) {
         stream_query_result_text(conn, sql, row_limit, cancelled, spatial_as_wkb, &opaque_types, &mut on_item).await
@@ -6379,7 +6061,7 @@ pub async fn execute_query_on_conn_with_limits_progress(
     diagnostic_trace_id: Option<&str>,
     progress_clock: Option<&crate::execution::StreamProgressClock>,
 ) -> Result<MySqlQueryResult, String> {
-    let opaque_types = resolve_doris_opaque_column_types(conn, sql, dialect).await;
+    let opaque_types = HashMap::new();
     execute_query_on_conn_with_limits_progress_resolved(
         conn,
         sql,
@@ -6550,7 +6232,7 @@ pub async fn execute_query_results_on_conn_with_limits(
     dialect: MySqlQueryDialect,
     diagnostic_trace_id: Option<&str>,
 ) -> Result<Vec<MySqlQueryResult>, String> {
-    let opaque_types = resolve_doris_opaque_column_types(conn, sql, dialect).await;
+    let opaque_types = HashMap::new();
     if is_result_set_query(sql, dialect) && (bare || prefers_text_protocol_query(sql, dialect)) {
         let start = Instant::now();
         execute_result_sets_with_text_protocol_on_conn(
@@ -7557,43 +7239,6 @@ mod tests {
     }
 
     #[test]
-    fn mysql_server_messages_from_warnings_maps_info_and_warning_rows() {
-        let rows = vec![("Warning".to_string(), 1265, "Data truncated for column 'a' at row 1".to_string())];
-        let messages = mysql_server_messages_from_warnings("Records: 1  Duplicates: 0  Warnings: 1", 1, Some(rows));
-
-        assert_eq!(messages.len(), 2);
-        assert_eq!(messages[0].severity, "INFO");
-        assert_eq!(messages[1].severity, "Warning");
-        assert_eq!(messages[1].code.as_deref(), Some("1265"));
-    }
-
-    #[test]
-    fn mysql_server_messages_from_warnings_falls_back_when_show_warnings_returns_no_rows() {
-        let messages = mysql_server_messages_from_warnings("", 2, Some(Vec::new()));
-
-        assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].severity, "Warning");
-        assert_eq!(messages[0].message, "2 warning(s)");
-    }
-
-    #[test]
-    fn mysql_server_messages_from_warnings_falls_back_when_show_warnings_fails() {
-        let messages = mysql_server_messages_from_warnings("", 2, None);
-
-        assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].message, "2 warning(s)");
-    }
-
-    #[test]
-    fn mysql_server_messages_from_warnings_skips_warnings_when_count_is_zero() {
-        let messages = mysql_server_messages_from_warnings("Query OK", 0, None);
-
-        assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].severity, "INFO");
-        assert_eq!(messages[0].message, "Query OK");
-    }
-
-    #[test]
     fn mysql_sql_statement_limit_reserves_packet_headroom() {
         let packet_bytes = 64 * 1024 * 1024;
         let hard_limit = mysql_sql_statement_hard_limit(packet_bytes).unwrap();
@@ -7621,15 +7266,6 @@ mod tests {
             Vec::<String>::new()
         );
         assert!(catalog_database_context_queries(None, Some("paimon_catalog"), "bi").is_err());
-    }
-
-    #[test]
-    fn catalog_dialect_supports_native_and_profile_connections() {
-        assert_eq!(mysql_catalog_dialect(DatabaseType::Doris, None), Some(MySqlCatalogDialect::Doris));
-        assert_eq!(mysql_catalog_dialect(DatabaseType::StarRocks, None), Some(MySqlCatalogDialect::StarRocks));
-        assert_eq!(mysql_catalog_dialect(DatabaseType::Mysql, Some("selectdb")), Some(MySqlCatalogDialect::Doris));
-        assert_eq!(mysql_catalog_dialect(DatabaseType::Mysql, Some("STARROCKS")), Some(MySqlCatalogDialect::StarRocks));
-        assert_eq!(mysql_catalog_dialect(DatabaseType::Mysql, None), None);
     }
 
     fn mysql_test_object(name: &str, object_type: &str) -> ObjectInfo {
@@ -7790,15 +7426,6 @@ mod tests {
     }
 
     #[test]
-    fn mariadb_returning_dml_is_treated_as_a_result_set() {
-        let dialect = MySqlQueryDialect::default();
-
-        assert!(is_result_set_query("INSERT INTO users (id) VALUES (1) RETURNING id", dialect));
-        assert!(is_result_set_query("DELETE FROM users WHERE id = 1 RETURNING id", dialect));
-        assert!(!is_result_set_query("UPDATE users SET name = 'Ada'", dialect));
-    }
-
-    #[test]
     fn mysql_multi_statement_pipeline_only_accepts_known_dml() {
         let dialect = MySqlQueryDialect::default();
 
@@ -7925,64 +7552,6 @@ mod tests {
     }
 
     #[test]
-    fn starrocks_admin_show_queries_are_treated_as_result_sets() {
-        let sql = "ADMIN SHOW FRONTEND CONFIG LIKE '%default_replication_num%'";
-        let dialect = MySqlQueryDialect::for_connection(DatabaseType::StarRocks, None);
-
-        assert!(is_result_set_query(sql, dialect));
-        assert!(requires_text_protocol_query(sql, dialect));
-    }
-
-    #[test]
-    fn doris_admin_show_queries_are_treated_as_result_sets() {
-        let sql = "ADMIN SHOW FRONTEND CONFIG LIKE '%default_replication_num%'";
-        let dialect = MySqlQueryDialect::for_connection(DatabaseType::Doris, None);
-
-        assert!(is_result_set_query(sql, dialect));
-        assert!(requires_text_protocol_query(sql, dialect));
-    }
-
-    #[test]
-    fn mysql_starrocks_profile_admin_show_queries_are_treated_as_result_sets() {
-        let sql = "ADMIN SHOW FRONTEND CONFIG LIKE '%default_replication_num%'";
-        let dialect = MySqlQueryDialect::for_connection(DatabaseType::Mysql, Some("starrocks"));
-
-        assert!(is_result_set_query(sql, dialect));
-        assert!(requires_text_protocol_query(sql, dialect));
-    }
-
-    #[test]
-    fn tidb_admin_show_queries_are_treated_as_result_sets() {
-        let dialect = MySqlQueryDialect::for_connection(DatabaseType::Mysql, Some("tidb"));
-
-        for sql in [
-            "ADMIN SHOW DDL",
-            "ADMIN SHOW DDL JOBS 20",
-            "-- inspect DDL\nadmin /* TiDB */ show ddl jobs 20",
-            "ADMIN SHOW DDL JOB QUERIES 1",
-        ] {
-            assert!(is_result_set_query(sql, dialect), "{sql}");
-            assert!(requires_text_protocol_query(sql, dialect), "{sql}");
-        }
-    }
-
-    #[test]
-    fn tidb_non_show_admin_statements_are_not_treated_as_result_sets() {
-        let dialect = MySqlQueryDialect::for_connection(DatabaseType::Mysql, Some("tidb"));
-
-        for sql in [
-            "ADMIN SET BDR ROLE PRIMARY",
-            "ADMIN CANCEL DDL JOBS 1",
-            "ADMIN PAUSE DDL JOBS 1",
-            "ADMIN RESUME DDL JOBS 1",
-            "ADMIN ALTER DDL JOBS 1 THREAD = 8",
-        ] {
-            assert!(!is_result_set_query(sql, dialect), "{sql}");
-            assert!(!requires_text_protocol_query(sql, dialect), "{sql}");
-        }
-    }
-
-    #[test]
     fn mysql_admin_show_queries_are_not_treated_as_result_sets() {
         let sql = "ADMIN SHOW FRONTEND CONFIG LIKE '%default_replication_num%'";
         let dialect = MySqlQueryDialect::for_connection(DatabaseType::Mysql, None);
@@ -8001,21 +7570,6 @@ mod tests {
             assert!(!is_result_set_query(sql, dialect), "{profile}");
             assert!(!requires_text_protocol_query(sql, dialect), "{profile}");
         }
-    }
-
-    #[test]
-    fn admin_show_detection_skips_leading_comments() {
-        let sql = "-- inspect FE config\nADMIN /* StarRocks */ SHOW FRONTEND CONFIG";
-        let dialect = MySqlQueryDialect::for_connection(DatabaseType::StarRocks, None);
-
-        assert!(is_result_set_query(sql, dialect));
-        assert!(requires_text_protocol_query(sql, dialect));
-    }
-
-    #[test]
-    fn admin_set_queries_are_not_treated_as_result_sets() {
-        let dialect = MySqlQueryDialect::for_connection(DatabaseType::StarRocks, None);
-        assert!(!is_result_set_query("ADMIN SET FRONTEND CONFIG ('default_replication_num' = '1')", dialect));
     }
 
     #[test]
@@ -8869,125 +8423,6 @@ mod tests {
     }
 
     #[test]
-    fn doris_preflight_collects_static_sources_and_filters_ctes() {
-        let dialect = MySqlQueryDialect { is_doris: true, ..Default::default() };
-        let mut sources = doris_preflight_sources(
-            "WITH recent AS (SELECT * FROM analytics.events) SELECT * FROM recent JOIN `raw`.`states` s ON 1=1",
-            dialect,
-        )
-        .unwrap();
-        sources.sort_by(|left, right| (&left.database, &left.table).cmp(&(&right.database, &right.table)));
-        assert_eq!(
-            sources,
-            vec![
-                DorisSourceTable { database: Some("analytics".to_string()), table: "events".to_string() },
-                DorisSourceTable { database: Some("raw".to_string()), table: "states".to_string() },
-            ]
-        );
-    }
-
-    #[test]
-    fn doris_preflight_rejects_unsafe_or_observer_queries() {
-        let dialect = MySqlQueryDialect { is_doris: true, ..Default::default() };
-        for sql in [
-            "SELECT * FROM catalog.db.states",
-            "SELECT * FROM TABLE(generate_series(1, 2))",
-            "SELECT LAST_QUERY_ID() FROM states",
-            "SELECT sys.LAST_QUERY_ID() FROM states",
-            "WITH nested AS (SELECT LAST_QUERY_ID() FROM states) SELECT * FROM nested",
-            "WITH same_name AS (SELECT * FROM states) SELECT * FROM (WITH same_name AS (SELECT * FROM other_states) SELECT * FROM same_name) nested",
-            "SELECT * FROM states; SELECT * FROM other_states",
-        ] {
-            assert_eq!(doris_preflight_sources(sql, dialect), None, "{sql}");
-        }
-        assert_eq!(doris_preflight_sources("SELECT * FROM states", MySqlQueryDialect::default()), None);
-    }
-
-    #[test]
-    fn doris_query_enrichment_profile_is_narrow() {
-        assert!(MySqlQueryDialect::for_connection(DatabaseType::Doris, None).is_doris);
-        assert!(MySqlQueryDialect::for_connection(DatabaseType::Mysql, Some("doris")).is_doris);
-        assert!(!MySqlQueryDialect::for_connection(DatabaseType::Mysql, Some("selectdb")).is_doris);
-        assert!(!MySqlQueryDialect::for_connection(DatabaseType::Mysql, Some("starrocks")).is_doris);
-        assert!(!MySqlQueryDialect::for_connection(DatabaseType::Mysql, None).is_doris);
-    }
-
-    #[test]
-    fn doris_effective_type_requires_complete_exact_origin() {
-        let direct = Column::new(ColumnType::MYSQL_TYPE_STRING)
-            .with_schema(b"analytics")
-            .with_org_table(b"states")
-            .with_name(b"renamed")
-            .with_org_name(b"v2")
-            .with_character_set(33);
-        let expression = Column::new(ColumnType::MYSQL_TYPE_STRING).with_name(b"v2").with_character_set(33);
-        let wrong_origin = Column::new(ColumnType::MYSQL_TYPE_STRING)
-            .with_schema(b"analytics")
-            .with_org_table(b"states")
-            .with_name(b"v2")
-            .with_org_name(b"ordinary_text")
-            .with_character_set(33);
-        let incompatible_wire = Column::new(ColumnType::MYSQL_TYPE_LONG)
-            .with_schema(b"analytics")
-            .with_org_table(b"states")
-            .with_name(b"v2")
-            .with_org_name(b"v2");
-        let opaque_types = HashMap::from([(
-            (b"analytics".to_vec(), b"states".to_vec(), b"v2".to_vec()),
-            "agg_state<group_concat(text)>".to_string(),
-        )]);
-
-        assert_eq!(
-            effective_mysql_column_types(&[direct, expression, wrong_origin, incompatible_wire], &opaque_types),
-            vec!["agg_state<group_concat(text)>", "char", "char", "int"]
-        );
-    }
-
-    #[test]
-    fn doris_duplicate_show_column_names_are_ambiguous() {
-        let key = (b"analytics".to_vec(), b"states".to_vec(), b"v2".to_vec());
-        let mut resolved = HashMap::new();
-        let mut ambiguous = HashSet::new();
-        insert_doris_opaque_column_type(&mut resolved, &mut ambiguous, key.clone(), "agg_state<sum(int)>".to_string());
-        insert_doris_opaque_column_type(&mut resolved, &mut ambiguous, key.clone(), "agg_state<max(int)>".to_string());
-        insert_doris_opaque_column_type(&mut resolved, &mut ambiguous, key.clone(), "agg_state<min(int)>".to_string());
-        assert!(!resolved.contains_key(&key));
-        assert!(ambiguous.contains(&key));
-    }
-
-    #[test]
-    fn doris_opaque_values_preserve_invalid_utf8_and_null() {
-        let column = Column::new(ColumnType::MYSQL_TYPE_STRING).with_name(b"v2").with_character_set(33);
-        let row = mysql_test_row_with_columns(vec![Value::Bytes(vec![0x00, 0xff, 0x01])], vec![column.clone()]);
-        assert_eq!(
-            mysql_value_to_json_with_effective_type(&row, 0, Some("agg_state<sum(int)>")),
-            serde_json::json!("0x00ff01")
-        );
-        assert!(ensure_doris_opaque_cells_fit_budget(&row, &["agg_state<sum(int)>".to_string()], Some(7))
-            .unwrap_err()
-            .contains("interactive byte budget"));
-
-        let modest = mysql_test_row_with_columns(vec![Value::Bytes(vec![0xff; 9 * 1024])], vec![column.clone()]);
-        assert!(ensure_doris_opaque_cells_fit_budget(&modest, &["agg_state<sum(int)>".to_string()], Some(20 * 1024),)
-            .is_ok());
-        assert!(ensure_doris_opaque_cells_fit_budget(&modest, &["agg_state<sum(int)>".to_string()], Some(18 * 1024),)
-            .is_err());
-
-        let null_row = mysql_test_row_with_columns(vec![Value::NULL], vec![column]);
-        assert_eq!(
-            mysql_value_to_json_with_effective_type(&null_row, 0, Some("agg_state<sum(int)>")),
-            serde_json::Value::Null
-        );
-
-        let unexpected =
-            mysql_test_row_with_columns(vec![Value::Int(42)], vec![Column::new(ColumnType::MYSQL_TYPE_LONG)]);
-        assert_eq!(
-            mysql_value_to_json_with_effective_type(&unexpected, 0, Some("agg_state<sum(int)>")),
-            serde_json::json!(42)
-        );
-    }
-
-    #[test]
     fn parse_mysql_enum_values_preserves_mysql_literal_edges() {
         assert_eq!(
             parse_mysql_enum_values("enum('pending','active','archived')"),
@@ -9024,32 +8459,6 @@ mod tests {
         let column = mysql_test_column(ColumnType::MYSQL_TYPE_VAR_STRING, 45, ColumnFlags::BINARY_FLAG, 64);
 
         assert_eq!(mysql_bytes_to_json(b"SN-A0001".to_vec(), &column), serde_json::json!("SN-A0001"));
-    }
-
-    #[test]
-    fn mysql_shardingsphere_binary_flags_restore_proxy_binary_types() {
-        let proxy_flags = ColumnFlags::BINARY_FLAG | ColumnFlags::UNSIGNED_FLAG;
-        let binary_column = mysql_test_column(ColumnType::MYSQL_TYPE_STRING, 45, proxy_flags, 8);
-        let varbinary_column = mysql_test_column(ColumnType::MYSQL_TYPE_VAR_STRING, 45, proxy_flags, 32);
-
-        assert_eq!(mysql_column_type_name(&binary_column), "binary");
-        assert_eq!(mysql_column_type_name(&varbinary_column), "varbinary");
-        assert_eq!(
-            mysql_bytes_to_json(b"150010\0\0".to_vec(), &binary_column),
-            serde_json::json!("0x3135303031300000")
-        );
-        assert_eq!(
-            mysql_bytes_to_json(vec![0xde, 0xad, 0xbe, 0xef], &varbinary_column),
-            serde_json::json!("0xdeadbeef")
-        );
-    }
-
-    #[test]
-    fn mysql_shardingsphere_unsigned_text_flags_remain_text() {
-        let text_column = mysql_test_column(ColumnType::MYSQL_TYPE_VAR_STRING, 45, ColumnFlags::UNSIGNED_FLAG, 32);
-
-        assert_eq!(mysql_column_type_name(&text_column), "varchar");
-        assert_eq!(mysql_bytes_to_json(b"TEXT-001".to_vec(), &text_column), serde_json::json!("TEXT-001"));
     }
 
     #[test]
@@ -9303,14 +8712,6 @@ mod tests {
     }
 
     #[test]
-    fn mysql_server_without_ssl_capability_retries_without_ssl() {
-        let error =
-            "MySQL connection failed: Driver error: `Client asked for SSL but server does not have this capability'";
-
-        assert!(mysql_error_should_retry_without_ssl(error));
-    }
-
-    #[test]
     fn mysql_packet_out_of_order_can_retry_without_ssl() {
         let error = "MySQL connection failed: Input/output error: Input/output error: packet out of order";
 
@@ -9484,16 +8885,6 @@ mod tests {
                 Some(MySqlSetupMode::Compatible)
             );
         }
-    }
-
-    #[test]
-    fn mysql_group_concat_doris_truncated_syntax_error_retries_without_session_variable() {
-        let error = "MySQL connection failed: Server error: `ERROR 1105 (HY000): errCode = 2, detailMessage = Syntax error in line 1:\n..._len,1048576) as unsigned)\n                       ^\nEncountered: )\nExpected: '";
-
-        assert_eq!(
-            mysql_group_concat_setup_fallback_mode(MySqlSetupMode::Standard, error),
-            Some(MySqlSetupMode::Compatible)
-        );
     }
 
     #[test]
@@ -9754,31 +9145,6 @@ mod tests {
     }
 
     #[test]
-    fn mysql_group_concat_starrocks_cast_error_retries_without_session_variable() {
-        let error = "MySQL connection failed: Server error: `ERROR 1064 (HY000): class com.starrocks.analysis.CastExpr cannot be cast to class com.starrocks.analysis.LiteralExpr (com.starrocks.analysis.CastExpr and com.starrocks.analysis.LiteralExpr are in unnamed module of loader 'app')'";
-
-        assert_eq!(
-            mysql_group_concat_setup_fallback_mode(MySqlSetupMode::Standard, error),
-            Some(MySqlSetupMode::Compatible)
-        );
-        assert_eq!(mysql_group_concat_setup_fallback_mode(MySqlSetupMode::Compatible, error), None);
-    }
-
-    #[test]
-    fn mysql_group_concat_starrocks_cast_retry_requires_exact_error() {
-        for error in [
-            "Server error: `ERROR 1105 (HY000): class com.starrocks.analysis.CastExpr cannot be cast to class com.starrocks.analysis.LiteralExpr'",
-            "Server error: `ERROR 1064 (42000): class com.starrocks.analysis.CastExpr cannot be cast to class com.starrocks.analysis.LiteralExpr'",
-            "Server error: `ERROR 1064 (HY000): class com.starrocks.analysis.SlotRef cannot be cast to class com.starrocks.analysis.LiteralExpr'",
-            "Server error: `ERROR 1064 (HY000): class com.starrocks.analysis.CastExpr cannot be cast to class com.starrocks.analysis.SlotRef'",
-            "Server error: `ERROR 1064 (HY000): class com.example.CastExpr cannot be cast to class com.example.LiteralExpr'",
-            "Server error: `ERROR 1064 (HY000): You have an error in your SQL syntax'",
-        ] {
-            assert_eq!(mysql_group_concat_setup_fallback_mode(MySqlSetupMode::Standard, error), None, "{error}");
-        }
-    }
-
-    #[test]
     fn mysql_group_concat_unrecognized_server_rejection_still_retries_without_session_variable() {
         // KunDB (#10003) answers `invalid syntax`, Apache Doris answers `must be
         // constant value`, and a bare `1064 (HY000)` carries no usable wording at all;
@@ -10003,28 +9369,6 @@ mod tests {
     }
 
     #[test]
-    fn mysql_tdsql_proxy_truncated_variable_name_retries_without_session_variable() {
-        // A TDSQL/TXSQL proxy in front of the real server truncates the echoed
-        // variable name to a fixed length, so the 1193 error never contains the
-        // full `group_concat_max_len` spelling (issue #10197).
-        let error =
-            "MySQL connection failed: Server error: `ERROR 1193 (HY000): Unknown system variable 'group_concat_'";
-
-        assert_eq!(
-            mysql_group_concat_setup_fallback_mode(MySqlSetupMode::Standard, error),
-            Some(MySqlSetupMode::Compatible)
-        );
-        assert_eq!(mysql_group_concat_setup_fallback_mode(MySqlSetupMode::Compatible, error), None);
-    }
-
-    #[test]
-    fn mysql_tdsql_proxy_truncated_variable_retry_requires_exact_prefix() {
-        let error = "Server error: `ERROR 1193 (HY000): Unknown system variable 'other_var_'";
-
-        assert_eq!(mysql_group_concat_setup_fallback_mode(MySqlSetupMode::Standard, error), None);
-    }
-
-    #[test]
     fn mysql_group_concat_setup_retry_is_narrow() {
         assert_eq!(
             mysql_group_concat_setup_fallback_mode(
@@ -10212,17 +9556,6 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    #[ignore = "requires remote MariaDB with ed25519 user"]
-    async fn test_ed25519_auth() {
-        let url = "mysql://edtest:test123@172.26.128.159:20026/testdb";
-        let pool = super::connect(url, std::time::Duration::from_secs(5)).await.expect("connect with ed25519");
-        let mut conn = pool.get_conn().await.expect("get connection");
-        conn.ping().await.expect("ping");
-        let _ = conn.disconnect().await;
-        let _ = pool.disconnect().await;
-    }
-
     #[test]
     fn parse_connect_timeout_extracts_underscore_form() {
         let url = "mysql://host:3306/db?connect_timeout=30";
@@ -10348,12 +9681,6 @@ mod tests {
     }
 
     #[test]
-    fn mysql_async_url_keeps_valid_params_while_stripping_jdbc() {
-        let url = "mysql://host:3306/db?useUnicode=true&characterEncoding=utf8&require_ssl=true&charset=utf8mb4&autoReconnect=true&allowMultiQueries=true";
-        assert_eq!(mysql_async_url(url).as_ref(), "mysql://host:3306/db?require_ssl=true");
-    }
-
-    #[test]
     fn connector_j_preferred_tls_falls_back_but_required_tls_does_not() {
         assert_eq!(
             ssl_fallback_url("mysql://host:3306/db?useSSL=true&characterEncoding=utf8"),
@@ -10364,13 +9691,6 @@ mod tests {
         let disabled = "mysql://host:3306/db?useSSL=false&requireSSL=true&verifyServerCertificate=true";
         assert!(!mysql_url_requires_ssl(disabled));
         assert!(!mysql_url_attempts_ssl(disabled));
-    }
-
-    #[test]
-    fn mysql_async_url_accepts_reported_doris_jdbc_params() {
-        let url = "mysql://host:9030/db?useLocalSessionState=true&rewriteBatchedStatements=true&prepStmtCacheSqlLimit=2048&prepStmtCacheSize=250&sessionVariables=query_timeout%3D60";
-
-        assert_eq!(mysql_async_url(url).as_ref(), "mysql://host:9030/db");
     }
 
     #[test]
@@ -10608,28 +9928,6 @@ mod tests {
     }
 
     #[test]
-    fn mysql_setup_queries_apply_jdbc_time_zone_aliases() {
-        assert_eq!(
-            mysql_setup_queries("mysql://host:3306/db?serverTimezone=GMT%2B8", &[]),
-            vec![
-                "USE `db`",
-                "SET time_zone = '+08:00'",
-                "SET NAMES utf8mb4",
-                "SET SESSION group_concat_max_len = cast(greatest(@@session.group_concat_max_len, 1048576) as unsigned)"
-            ]
-        );
-        assert_eq!(
-            mysql_setup_queries("mysql://host:3306/db?connectionTimeZone=UTC", &[]),
-            vec![
-                "USE `db`",
-                "SET time_zone = '+00:00'",
-                "SET NAMES utf8mb4",
-                "SET SESSION group_concat_max_len = cast(greatest(@@session.group_concat_max_len, 1048576) as unsigned)"
-            ]
-        );
-    }
-
-    #[test]
     fn mysql_setup_queries_apply_go_loc_when_no_explicit_time_zone_exists() {
         assert_eq!(
             mysql_setup_queries("mysql://host:3306/db?loc=Asia%2FShanghai", &[]),
@@ -10693,70 +9991,193 @@ mod tests {
             ]
         );
     }
+}
 
-    #[tokio::test]
-    #[ignore = "requires a live ShardingSphere Proxy 5.3.0 fixture"]
-    async fn live_shardingsphere_proxy_preserves_binary_columns() {
-        let url = std::env::var("DBX_MYSQL_SHARDING_PROXY_URL")
-            .expect("DBX_MYSQL_SHARDING_PROXY_URL must point to the live proxy fixture");
-        let opts = mysql_async::Opts::from_url(&url).expect("valid MySQL proxy URL");
-        let pool = mysql_async::Pool::new(opts);
+async fn collect_mysql_server_messages(conn: &mut mysql_async::Conn, warnings: u16, info: &str) -> Vec<QueryMessage> {
+    let warning_rows = if warnings == 0 {
+        None
+    } else {
+        match conn.query_iter("SHOW WARNINGS").await {
+            Ok(result) => match result.try_collect_and_drop::<(String, u16, String)>().await {
+                Ok(rows) => rows.into_iter().collect::<Result<Vec<_>, _>>().ok(),
+                Err(_) => None,
+            },
+            Err(_) => None,
+        }
+    };
+    mysql_server_messages_from_warnings(info, warnings, warning_rows)
+}
 
-        let columns =
-            get_columns(&pool, "dbx_sharding_proxy_test", "binary_samples").await.expect("load proxy column metadata");
-        let result = execute_query_with_max_rows(
-            &pool,
-            "SELECT id, fixed_value, variable_value, char_value, text_value, binary_collated \
-             FROM binary_samples ORDER BY id LIMIT 100",
-            false,
-            Some(100),
-            MySqlQueryDialect::default(),
-        )
-        .await
-        .expect("query proxy binary fixture");
-        pool.disconnect().await.expect("disconnect proxy pool");
+fn mysql_server_messages_from_warnings(
+    info: &str,
+    warnings: u16,
+    warning_rows: Option<Vec<(String, u16, String)>>,
+) -> Vec<QueryMessage> {
+    let mut messages: Vec<QueryMessage> = mysql_info_message(info).into_iter().collect();
+    if warnings == 0 {
+        return messages;
+    }
+    match warning_rows {
+        Some(rows) if !rows.is_empty() => messages.extend(mysql_warning_rows_to_messages(rows)),
+        _ => messages.push(mysql_warnings_fallback_message(warnings)),
+    }
+    messages
+}
 
-        assert_eq!(
-            columns.iter().map(|column| column.data_type.as_str()).collect::<Vec<_>>(),
-            vec!["int", "binary(8)", "varbinary(32)", "char(8)", "varchar(32)", "varchar(32)"]
-        );
-        assert_eq!(result.column_types, vec!["int", "binary", "varbinary", "char", "varchar", "varchar"]);
-        assert_eq!(
-            result.rows,
-            vec![
-                vec![
-                    serde_json::json!("1"),
-                    serde_json::json!("0x3135303031300000"),
-                    serde_json::json!("0x534e2d4130303031"),
-                    serde_json::json!("CHAR-001"),
-                    serde_json::json!("TEXT-001"),
-                    serde_json::json!("BIN-TEXT-001"),
-                ],
-                vec![
-                    serde_json::json!("2"),
-                    serde_json::json!("0xdeadbeef00000000"),
-                    serde_json::json!("0xdeadbeef"),
-                    serde_json::json!("CHAR-002"),
-                    serde_json::json!("TEXT-002"),
-                    serde_json::json!("BIN-TEXT-002"),
-                ],
-                vec![
-                    serde_json::json!("3"),
-                    serde_json::json!("0x0000000000000000"),
-                    serde_json::json!("0x"),
-                    serde_json::json!("CHAR-003"),
-                    serde_json::json!("TEXT-003"),
-                    serde_json::json!("BIN-TEXT-003"),
-                ],
-                vec![
-                    serde_json::json!("4"),
-                    serde_json::json!("0x7f80810000000000"),
-                    serde_json::json!("0x7f8081"),
-                    serde_json::json!("CHAR-004"),
-                    serde_json::json!("TEXT-004"),
-                    serde_json::json!("BIN-TEXT-004"),
-                ],
-            ]
-        );
+fn is_jdbc_param(key: &str) -> bool {
+    matches!(
+        key.to_ascii_lowercase().as_str(),
+        "useunicode"
+            | "characterencoding"
+            | "zerodatetimebehavior"
+            | "usessl"
+            | "servertimezone"
+            | "allowpublickeyretrieval"
+            | "autoreconnect"
+            | "maxreconnects"
+            | "uselegacydatetimecode"
+            | "usecompression"
+            | "cacheprepstmts"
+            | "useserverprepstmts"
+            | "useconfigs"
+            | "usecursorfetch"
+            | "defaultfetchsize"
+            | "usejdbccomplianttimezoneshift"
+            | "usesspscompatibletimezoneshift"
+            | "failoverreadonly"
+            | "maxallowedpacket"
+            | "tinyint1isbit"
+            | "transformedbitisboolean"
+            | "yearisdatetype"
+            | "createdatabaseifnotexist"
+            | "allowmultiqueries"
+            | "noaccesstoprocedurebodies"
+            | "nullcatalogmeanscurrent"
+            | "nullnamepatternmatchesall"
+            | "dumponqueriesexception"
+            | "enablequerytimeouts"
+            | "useinformationschema"
+            | "gatherperfmetrics"
+            | "reportmetricsintervalmillis"
+            | "maxquerysizetolog"
+            | "packetdebugbuffersize"
+            | "usenanosforelapsedtime"
+            | "slowquerythresholdmillis"
+            | "autoslowlog"
+            | "explainslowqueries"
+            | "resultsetsizethreshold"
+            | "nettimeoutforstreamingresults"
+            | "useusageadvisor"
+            | "uselocalsessionstate"
+            | "rewritebatchedstatements"
+            | "prepstmtcachesqllimit"
+            | "prepstmtcachesize"
+    )
+}
+
+fn mysql_async_url(url: &str) -> Cow<'_, str> {
+    let Some((base, query)) = url.split_once('?') else {
+        return Cow::Borrowed(url);
+    };
+
+    let original_count = query.split('&').filter(|segment| !segment.trim().is_empty()).count();
+    let mut filtered: Vec<String> = Vec::new();
+    let mut changed = false;
+    let mut has_catalog = false;
+    let mut enable_cleartext_plugin = false;
+    let has_native_tls_param = query.split('&').any(|segment| {
+        let key = segment.split_once('=').map(|(key, _)| key).unwrap_or(segment).trim();
+        key.eq_ignore_ascii_case("ssl-mode")
+            || key.eq_ignore_ascii_case("sslmode")
+            || key.eq_ignore_ascii_case("require_ssl")
+    });
+    let jdbc_tls_mode = mysql_jdbc_tls_mode(Some(query));
+    for segment in query.split('&') {
+        let segment = segment.trim();
+        if segment.is_empty() {
+            changed = true;
+            continue;
+        }
+
+        let Some((key, value)) = segment.split_once('=') else {
+            filtered.push(segment.to_string());
+            continue;
+        };
+        if key.eq_ignore_ascii_case("catalog") {
+            has_catalog = true;
+        }
+        if is_mysql_cleartext_password_param(key) {
+            changed = true;
+            enable_cleartext_plugin |= mysql_url_param_value_is_true(value);
+            continue;
+        }
+        if is_mysql_jdbc_tls_param(key) {
+            changed = true;
+            continue;
+        }
+        if is_dbx_handled_mysql_url_param(key) {
+            changed = true;
+            continue;
+        }
+        if key.eq_ignore_ascii_case("ssl-mode") || key.eq_ignore_ascii_case("sslmode") {
+            changed = true;
+            match value.to_ascii_lowercase().replace('-', "_").as_str() {
+                "disabled" | "disable" => filtered.push("require_ssl=false".to_string()),
+                "preferred" | "prefer" => {
+                    filtered.push("require_ssl=true".to_string());
+                    filtered.push("verify_ca=false".to_string());
+                    filtered.push("verify_identity=false".to_string());
+                }
+                "required" | "require" => {
+                    filtered.push("require_ssl=true".to_string());
+                    filtered.push("verify_ca=false".to_string());
+                    filtered.push("verify_identity=false".to_string());
+                }
+                "verify_ca" => {
+                    filtered.push("require_ssl=true".to_string());
+                    filtered.push("verify_identity=false".to_string());
+                }
+                "verify_identity" => filtered.push("require_ssl=true".to_string()),
+                _ => {}
+            }
+            continue;
+        }
+        if is_jdbc_param(key) {
+            changed = true;
+            continue;
+        }
+        filtered.push(segment.to_string());
+    }
+    if !has_native_tls_param {
+        match jdbc_tls_mode {
+            Some(MysqlJdbcTlsMode::Disabled) => filtered.push("require_ssl=false".to_string()),
+            Some(MysqlJdbcTlsMode::Preferred | MysqlJdbcTlsMode::Required) => {
+                filtered.push("require_ssl=true".to_string());
+                filtered.push("verify_ca=false".to_string());
+                filtered.push("verify_identity=false".to_string());
+            }
+            Some(MysqlJdbcTlsMode::VerifyCa) => {
+                filtered.push("require_ssl=true".to_string());
+                filtered.push("verify_ca=true".to_string());
+                filtered.push("verify_identity=false".to_string());
+            }
+            None => {}
+        }
+    }
+    if enable_cleartext_plugin {
+        filtered.push("enable_cleartext_plugin=true".to_string());
+    }
+
+    // When a catalog is configured, the database in the URL path must not be
+    // sent as the schema during the MySQL handshake. Strip the path so mysql_async
+    // connects without a default schema; the database is selected via setup queries.
+    let base = if has_catalog { strip_mysql_url_path(base) } else { base };
+
+    if !changed && filtered.len() == original_count && !has_catalog {
+        Cow::Borrowed(url)
+    } else if filtered.is_empty() {
+        Cow::Owned(base.to_string())
+    } else {
+        Cow::Owned(format!("{base}?{}", filtered.join("&")))
     }
 }

@@ -180,19 +180,6 @@ pub struct BuildCreateDatabaseSqlRequest {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg(feature = "duckdb-sidecar")]
-pub struct BuildDuckDbAttachDatabaseSqlRequest {
-    pub options: dbx_core::db_admin_sql::DuckDbAttachDatabaseSqlOptions,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BuildSqliteAttachDatabaseSqlRequest {
-    pub options: dbx_core::db_admin_sql::SqliteAttachDatabaseSqlOptions,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct BuildDropObjectSqlRequest {
     pub options: dbx_core::db_admin_sql::DropObjectSqlOptions,
 }
@@ -296,23 +283,6 @@ pub struct BuildCreatePartitionedTableSqlRequest {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PreviewSqliteTableStructureChangeRequest {
-    pub connection_id: String,
-    pub database: String,
-    pub options: dbx_core::table_structure_sql::TableStructureSqlOptions,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ApplySqliteTableStructureChangeRequest {
-    pub connection_id: String,
-    pub database: String,
-    pub options: dbx_core::table_structure_sql::TableStructureSqlOptions,
-    pub schema_revision: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct BuildSingleColumnAlterSqlRequest {
     pub options: dbx_core::table_structure_sql::SingleColumnAlterSqlOptions,
 }
@@ -383,12 +353,6 @@ pub struct BuildDataGridCountSqlRequest {
 #[serde(rename_all = "camelCase")]
 pub struct BuildDataGridConditionalUpdateSqlRequest {
     pub options: dbx_core::data_grid_sql::DataGridConditionalUpdateSqlOptions,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BuildHiveTablePropertiesSqlRequest {
-    pub options: dbx_core::data_grid_sql::HiveTablePropertiesSqlOptions,
 }
 
 #[derive(Deserialize)]
@@ -845,24 +809,6 @@ pub struct BuildCreateUserSqlRequest {
     pub tablespace: String,
 }
 
-pub async fn get_explain_info(
-    State(state): State<Arc<WebState>>,
-    Json(req): Json<GetExplainInfoRequest>,
-) -> Result<Json<String>, AppError> {
-    let plan = dbx_core::agent_explain::get_agent_explain_info_core(
-        &state.app,
-        &req.connection_id,
-        req.database.as_deref(),
-        req.schema.as_deref(),
-        &req.sql,
-        req.mode.as_deref(),
-        None,
-    )
-    .await
-    .map_err(AppError::from)?;
-    Ok(Json(plan))
-}
-
 /// Plugin Host API: what the current host and connection can plan, reported
 /// without connecting or running any SQL.
 pub async fn get_plugin_plan_capabilities(
@@ -939,10 +885,6 @@ pub async fn set_plugin_data_grant(
     Ok(Json(grants))
 }
 
-pub async fn build_create_user_sql(Json(req): Json<BuildCreateUserSqlRequest>) -> Result<Json<String>, AppError> {
-    Ok(Json(dbx_core::db_admin_sql::build_create_user_sql(&req.username, &req.password, &req.tablespace)))
-}
-
 pub async fn build_dropped_file_preview_sql(
     Json(req): Json<BuildDroppedFilePreviewSqlRequest>,
 ) -> Json<Option<String>> {
@@ -992,15 +934,6 @@ pub async fn build_create_database_sql(
     Json(req): Json<BuildCreateDatabaseSqlRequest>,
 ) -> Result<Json<String>, AppError> {
     dbx_core::db_admin_sql::build_create_database_sql(req.options).map(Json).map_err(AppError::from)
-}
-
-#[cfg(feature = "duckdb-sidecar")]
-pub async fn build_duckdb_attach_database_sql(Json(req): Json<BuildDuckDbAttachDatabaseSqlRequest>) -> Json<String> {
-    Json(dbx_core::db_admin_sql::build_duckdb_attach_database_sql(req.options))
-}
-
-pub async fn build_sqlite_attach_database_sql(Json(req): Json<BuildSqliteAttachDatabaseSqlRequest>) -> Json<String> {
-    Json(dbx_core::db_admin_sql::build_sqlite_attach_database_sql(req.options))
 }
 
 pub async fn build_drop_object_sql(Json(req): Json<BuildDropObjectSqlRequest>) -> Json<String> {
@@ -1113,37 +1046,6 @@ pub async fn build_create_partitioned_table_sql(
     Json(req): Json<BuildCreatePartitionedTableSqlRequest>,
 ) -> Json<dbx_core::table_structure_sql::TableStructureSqlResult> {
     Json(dbx_core::table_structure_sql::build_create_partitioned_table_sql(req.options, req.partitioning))
-}
-
-pub async fn preview_sqlite_table_structure_change(
-    State(state): State<Arc<WebState>>,
-    Json(req): Json<PreviewSqliteTableStructureChangeRequest>,
-) -> Result<Json<dbx_core::table_structure_sql::SqliteTableStructurePreview>, AppError> {
-    dbx_core::table_structure_sql::preview_sqlite_table_structure_change(
-        &state.app,
-        &req.connection_id,
-        &req.database,
-        req.options,
-    )
-    .await
-    .map(Json)
-    .map_err(AppError::from)
-}
-
-pub async fn apply_sqlite_table_structure_change(
-    State(state): State<Arc<WebState>>,
-    Json(req): Json<ApplySqliteTableStructureChangeRequest>,
-) -> Result<Json<dbx_core::db::QueryResult>, AppError> {
-    dbx_core::table_structure_sql::apply_sqlite_table_structure_change(
-        &state.app,
-        &req.connection_id,
-        &req.database,
-        req.options,
-        &req.schema_revision,
-    )
-    .await
-    .map(Json)
-    .map_err(AppError::from)
 }
 
 pub async fn build_create_table_sql(
@@ -1259,10 +1161,6 @@ pub async fn build_data_grid_conditional_update_sql(
     Json(req): Json<BuildDataGridConditionalUpdateSqlRequest>,
 ) -> Json<Option<String>> {
     Json(dbx_core::data_grid_sql::build_data_grid_conditional_update_sql(req.options))
-}
-
-pub async fn build_hive_table_properties_sql(Json(req): Json<BuildHiveTablePropertiesSqlRequest>) -> Json<String> {
-    Json(dbx_core::data_grid_sql::build_hive_table_properties_sql(req.options))
 }
 
 pub async fn build_export_insert_statements(

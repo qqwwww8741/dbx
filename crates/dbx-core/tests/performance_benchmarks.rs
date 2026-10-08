@@ -75,7 +75,7 @@ fn benchmark_small_schema_diff() {
         target_tables,
         source_details,
         target_details,
-        database_type: DatabaseType::Postgres,
+        database_type: DatabaseType::Mysql,
         ..Default::default()
     };
 
@@ -103,7 +103,7 @@ fn benchmark_medium_schema_diff() {
         target_tables,
         source_details,
         target_details,
-        database_type: DatabaseType::Postgres,
+        database_type: DatabaseType::Mysql,
         ..Default::default()
     };
 
@@ -131,7 +131,7 @@ fn benchmark_large_schema_diff() {
         target_tables,
         source_details,
         target_details,
-        database_type: DatabaseType::Postgres,
+        database_type: DatabaseType::Mysql,
         ..Default::default()
     };
 
@@ -159,7 +159,7 @@ fn benchmark_thousand_table_schema_diff() {
         target_tables,
         source_details,
         target_details,
-        database_type: DatabaseType::Postgres,
+        database_type: DatabaseType::Mysql,
         ..Default::default()
     };
 
@@ -191,7 +191,7 @@ fn benchmark_shard_parallel_speedup() {
         target_tables: target_tables.clone(),
         source_details: source_details.clone(),
         target_details: target_details.clone(),
-        database_type: DatabaseType::Postgres,
+        database_type: DatabaseType::Mysql,
         ..Default::default()
     };
 
@@ -205,7 +205,7 @@ fn benchmark_shard_parallel_speedup() {
         target_tables: target_tables.clone(),
         source_details: source_details.clone(),
         target_details: target_details.clone(),
-        database_type: DatabaseType::Postgres,
+        database_type: DatabaseType::Mysql,
         shard_strategy: Some(ShardStrategy { shard_count: 4, shard_by: ShardBy::RoundRobin }),
         ..Default::default()
     };

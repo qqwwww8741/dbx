@@ -25,53 +25,11 @@ export interface InfluxDbV1DeleteChanges {
   rows: readonly (readonly CellValue[])[];
 }
 
-function configuredInfluxDbVersion(connection: Pick<ConnectionConfig, "db_type" | "external_config">): string | undefined {
-  const external = connection.external_config;
-  if (external == null) return undefined;
-  if (typeof external !== "object" || Array.isArray(external)) return "unknown";
-  const version = (external as Record<string, unknown>).version;
-  if (version == null) return undefined;
-  if (typeof version === "number") return String(version);
-  return typeof version === "string" ? version.trim().toLowerCase() : "unknown";
-}
-
 /** Legacy InfluxDB connections without a version marker are v1, matching the Rust driver. */
-export function isInfluxDbV1Connection(connection: Pick<ConnectionConfig, "db_type" | "external_config"> | undefined): boolean {
-  if (connection?.db_type !== "influxdb") return false;
-  const version = configuredInfluxDbVersion(connection);
-  return version === undefined || version === "1" || version === "v1";
-}
-
-function influxColumnRole(column: Pick<ColumnInfo, "extra">): "time" | "tag" | "field" | "ambiguous" | undefined {
-  switch (column.extra?.trim().toLowerCase()) {
-    case INFLUXDB_V1_TIME_COLUMN_EXTRA:
-      return "time";
-    case INFLUXDB_V1_TAG_COLUMN_EXTRA:
-      return "tag";
-    case INFLUXDB_V1_FIELD_COLUMN_EXTRA:
-      return "field";
-    case INFLUXDB_V1_AMBIGUOUS_COLUMN_EXTRA:
-      return "ambiguous";
-    default:
-      return undefined;
+export function isInfluxDbV1Connection(_connection: Pick<ConnectionConfig, "db_type" | "external_config"> | undefined): boolean {
+  {
+    return false;
   }
-}
-
-function singleColumnIndex(columns: readonly string[], name: string): number | undefined {
-  let found: number | undefined;
-  for (let index = 0; index < columns.length; index++) {
-    if (columns[index] !== name) continue;
-    if (found !== undefined) return undefined;
-    found = index;
-  }
-  return found;
-}
-
-function integerTimeIsNanoseconds(urlParams: string | undefined): boolean {
-  if (!urlParams) return false;
-  const params = new URLSearchParams(urlParams.startsWith("?") ? urlParams.slice(1) : urlParams);
-  const epochs = params.getAll("epoch").map((value) => value.trim().toLowerCase());
-  return epochs.length === 1 && epochs[0] === "ns";
 }
 
 /**
@@ -81,53 +39,10 @@ function integerTimeIsNanoseconds(urlParams: string | undefined): boolean {
  * Requiring those roles, exact column names, and every tag prevents an aliased,
  * computed, stale, or otherwise ambiguous result from being treated as points.
  */
-export function resolveInfluxDbV1DeleteTarget(options: { connection: Pick<ConnectionConfig, "db_type" | "external_config" | "url_params"> | undefined; measurement: string | undefined; tableColumns: readonly ColumnInfo[]; resultColumns: readonly string[] }): InfluxDbV1DeleteTarget | undefined {
-  if (!options.connection || !isInfluxDbV1Connection(options.connection) || options.measurement === undefined || options.measurement.length === 0 || options.tableColumns.length === 0 || options.resultColumns.length === 0) {
+export function resolveInfluxDbV1DeleteTarget(_options: { connection: Pick<ConnectionConfig, "db_type" | "external_config" | "url_params"> | undefined; measurement: string | undefined; tableColumns: readonly ColumnInfo[]; resultColumns: readonly string[] }): InfluxDbV1DeleteTarget | undefined {
+  {
     return undefined;
   }
-
-  const metadataByName = new Map<string, ColumnInfo>();
-  let timeColumn: ColumnInfo | undefined;
-  const tagColumns: ColumnInfo[] = [];
-  for (const column of options.tableColumns) {
-    if (!column.name || metadataByName.has(column.name)) return undefined;
-    const role = influxColumnRole(column);
-    if (!role || role === "ambiguous") return undefined;
-    metadataByName.set(column.name, column);
-    if (role === "time") {
-      if (timeColumn || column.name !== "time" || !column.is_primary_key) return undefined;
-      timeColumn = column;
-    } else if (role === "tag") {
-      if (!column.is_primary_key) return undefined;
-      tagColumns.push(column);
-    } else if (column.is_primary_key) {
-      return undefined;
-    }
-  }
-  if (!timeColumn) return undefined;
-
-  const resultColumnNames = new Set<string>();
-  for (const column of options.resultColumns) {
-    if (resultColumnNames.has(column) || !metadataByName.has(column)) return undefined;
-    resultColumnNames.add(column);
-  }
-
-  const timeColumnIndex = singleColumnIndex(options.resultColumns, timeColumn.name);
-  if (timeColumnIndex === undefined) return undefined;
-  const resolvedTags: InfluxDbV1DeleteTarget["tagColumns"] = [];
-  for (const tag of tagColumns) {
-    const resultColumnIndex = singleColumnIndex(options.resultColumns, tag.name);
-    if (resultColumnIndex === undefined) return undefined;
-    resolvedTags.push({ name: tag.name, resultColumnIndex });
-  }
-
-  return {
-    measurement: options.measurement,
-    resultColumns: [...options.resultColumns],
-    timeColumnIndex,
-    tagColumns: resolvedTags,
-    integerTimeIsNanoseconds: integerTimeIsNanoseconds(options.connection.url_params),
-  };
 }
 
 function quoteInfluxIdentifier(value: string): string {

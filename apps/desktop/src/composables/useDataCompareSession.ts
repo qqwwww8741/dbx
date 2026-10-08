@@ -366,7 +366,9 @@ async function runDataCompareSession(session: DataCompareSession, tasks: DataCom
           for (const key of resolvedKeys) {
             const canonical = matchColumnNameIgnoreCase(key, columns);
             if (!canonical) missingKeys.push(key);
-            else if (!canonicalKeyColumns.includes(canonical)) canonicalKeyColumns.push(canonical);
+            else {
+              canonicalKeyColumns.push(canonical);
+            }
           }
           if (missingKeys.length > 0) throw new Error(compareErrorMessage(dependencies, "missingKeyColumns", missingKeys.join(", ")));
           if (columns.length === 0) throw new Error(compareErrorMessage(dependencies, "noCommonColumns"));

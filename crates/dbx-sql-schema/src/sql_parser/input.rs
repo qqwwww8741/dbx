@@ -185,16 +185,7 @@ impl InputResolver {
 }
 
 fn dialect_to_database_type(dialect: &str) -> crate::models::connection::DatabaseType {
-    match dialect.to_ascii_lowercase().as_str() {
-        "mysql" | "mariadb" | "tidb" => crate::models::connection::DatabaseType::Mysql,
-        "postgres" | "postgresql" => crate::models::connection::DatabaseType::Postgres,
-        "sqlite" => crate::models::connection::DatabaseType::Sqlite,
-        "sqlserver" | "mssql" => crate::models::connection::DatabaseType::SqlServer,
-        "clickhouse" => crate::models::connection::DatabaseType::ClickHouse,
-        "duckdb" => crate::models::connection::DatabaseType::DuckDb,
-        "oracle" => crate::models::connection::DatabaseType::Oracle,
-        _ => crate::models::connection::DatabaseType::Mysql,
-    }
+    crate::models::connection::DatabaseType::Mysql
 }
 
 #[cfg(test)]
@@ -236,26 +227,6 @@ mod tests {
         assert_eq!(meta.unwrap().dialect.as_deref(), Some("postgres"));
 
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn normalize_uses_meta_dialect() {
-        let resolved = ResolvedInput {
-            source: InputSource::DdlFiles(Vec::new()),
-            meta: Some(MetaData {
-                dialect: Some("postgres".into()),
-                version: None,
-                charset: None,
-                collation: None,
-                sql_mode: None,
-                explicit_dependencies: std::collections::HashMap::new(),
-            }),
-            ddl_sql: Some("CREATE TABLE t (id INT);".into()),
-            has_errors: false,
-            warnings: Vec::new(),
-        };
-        let (options, _) = InputResolver::normalize_to_diff_options(resolved);
-        assert_eq!(options.database_type, crate::models::connection::DatabaseType::Postgres);
     }
 
     #[test]

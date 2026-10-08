@@ -21,10 +21,10 @@ export function unassociatedExternalSqlFileTarget(): ExternalSqlFileTarget {
   return { connectionId: "", database: "", catalog: undefined, schema: undefined };
 }
 
-export function activeTabExternalSqlFileTarget(tabs: readonly ExternalSqlFileTargetTab[], activeTabId: string | null | undefined, getConnection: ExternalSqlFileConnectionLookup, options: ExternalSqlFileTargetOptions = {}): ExternalSqlFileTarget {
+export function activeTabExternalSqlFileTarget(tabs: readonly ExternalSqlFileTargetTab[], activeTabId: string | null | undefined, getConnection: ExternalSqlFileConnectionLookup, _options: ExternalSqlFileTargetOptions = {}): ExternalSqlFileTarget {
   const activeTab = activeTabId ? tabs.find((tab) => tab.id === activeTabId) : undefined;
   const connection = activeTab?.connectionId ? getConnection(activeTab.connectionId) : undefined;
-  if (!activeTab || activeTab.mode === "plugin-workbench" || activeTab.mode === "plugin-filesystem" || !connection || !(supportsSqlFileExecution(connection.db_type) || (options.allowMongoScripts === true && connection.db_type === "mongodb"))) return unassociatedExternalSqlFileTarget();
+  if (!activeTab || activeTab.mode === "plugin-filesystem" || !connection || !supportsSqlFileExecution(connection.db_type)) return unassociatedExternalSqlFileTarget();
   return {
     connectionId: activeTab.connectionId,
     database: activeTab.database,

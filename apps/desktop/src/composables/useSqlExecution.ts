@@ -5,7 +5,7 @@ import { useHistoryStore } from "@/stores/historyStore";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useToast } from "@/composables/useToast";
-import { isSingleDatabase, usesTreeSchemaMode } from "@/lib/database/databaseCapabilities";
+
 import { supportsConnectionScopedQueryExecution } from "@/lib/database/databaseFeatureSupport";
 import { supportsTransaction } from "@/lib/database/databaseFeatureSupport";
 import * as api from "@/lib/backend/api";
@@ -16,12 +16,9 @@ import { sqlMetadataRefreshTarget } from "@/lib/sql/sqlMetadataRefresh";
 import { invalidateObjectMetadataCache } from "@/lib/metadata/objectMetadataCache";
 import { defaultViewForResult } from "@/lib/query/queryResultDefaultView";
 import { isQueryExecutionErrorResult } from "@/lib/query/queryResultError";
-import { classifyRedisCommandSafety } from "@/lib/redis/redisCommandSafety";
-import { isRedisCommentLine } from "@/lib/redis/redisCommandTokenizer";
-import { isDangerousSolrRequest } from "@/lib/solr/solrRequestRisk";
-import { isDangerousCouchDbRequest } from "@/lib/couchdb/couchdbRequestRisk";
+
 import { isSqlExecutionSnapshot, resolveExecutableSql, type SqlExecutionOverride, type SqlExecutionSnapshot } from "@/lib/sql/sqlExecutionTarget";
-import { isElasticsearchRestRequestText, parseElasticsearchRestRequestTarget, splitSqlStatementRanges, sqlStatementParameterOptionsForCompatibility } from "@/lib/sql/sqlStatementRanges";
+import { splitSqlStatementRanges, sqlStatementParameterOptionsForCompatibility } from "@/lib/sql/sqlStatementRanges";
 import { extractSqlParameterDescriptors, type SqlParameterDescriptor, type SqlParameterSyntax } from "@/lib/sql/sqlParameters";
 import { expandSqlVariables } from "@/lib/sql/sqlVariables";
 import { enabledSqlParameterSyntaxes, resolveSqlVariableSyntaxToggles } from "@/lib/sql/sqlVariableSyntax";
@@ -104,40 +101,8 @@ export function snapshotResultForMerge(result: QueryResult | undefined): QueryRe
   };
 }
 
-const ELASTICSEARCH_TRANSIENT_DELETE_PATHS = [/^\/_search\/scroll\/?$/i, /^\/_pit\/?$/i, /^\/_async_search\/[^/?]+\/?$/i];
-const ELASTICSEARCH_DESTRUCTIVE_POST_PATHS = [/(?:^|\/)_(?:delete_by_query|update_by_query|bulk)(?:\/|$)/i, /^\/_reindex(?:\/|$)/i, /^\/_aliases(?:\/|$)/i, /\/_restore(?:\/|$)/i];
-
-function isDangerousElasticsearchRequest(method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD", path: string): boolean {
-  const pathname = path.split("?", 1)[0].replace(/\/+$/, "") || "/";
-  if (method === "DELETE") return !ELASTICSEARCH_TRANSIENT_DELETE_PATHS.some((pattern) => pattern.test(pathname));
-  if (method === "PUT" || method === "PATCH") return true;
-  return method === "POST" && ELASTICSEARCH_DESTRUCTIVE_POST_PATHS.some((pattern) => pattern.test(pathname));
-}
-
-function isDangerousMeilisearchRequest(method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD", path: string): boolean {
-  if (method === "GET" || method === "HEAD") return false;
-  if (method === "DELETE" || method === "PUT" || method === "PATCH") return true;
-  const pathname = path.split("?", 1)[0].replace(/\/+$/, "") || "/";
-  return !(pathname === "/multi-search" || /\/search$/i.test(pathname) || /\/facet-search$/i.test(pathname) || /\/similar$/i.test(pathname) || /\/documents\/fetch$/i.test(pathname));
-}
-
-export function isDangerousSql(sql: string, databaseType?: DatabaseType): boolean {
-  if (databaseType === "elasticsearch" || databaseType === "easysearch" || databaseType === "meilisearch" || databaseType === "solr" || databaseType === "couchdb") {
-    const requests = splitSqlStatementRanges(sql, databaseType)
-      .map((statement) => parseElasticsearchRestRequestTarget(statement.sql))
-      .filter((request): request is NonNullable<typeof request> => request !== null);
-    if (requests.length > 0) {
-      return requests.some((request) =>
-        databaseType === "meilisearch"
-          ? isDangerousMeilisearchRequest(request.method, request.path)
-          : databaseType === "solr"
-            ? isDangerousSolrRequest(request.method, request.path)
-            : databaseType === "couchdb"
-              ? isDangerousCouchDbRequest(request.method, request.path)
-              : isDangerousElasticsearchRequest(request.method, request.path),
-      );
-    }
-  }
+export function isDangerousSql(sql: string, _databaseType?: DatabaseType): boolean {
+  {}
   const cleaned = stripSqlComments(sql);
   return cleaned.split(";").some((stmt) => DANGER_RE.test(stmt));
 }
@@ -190,7 +155,7 @@ export function useSqlExecution(deps: {
   const sqlParameterDatabaseType = ref<DatabaseType | undefined>();
   const sqlParameterEnabledSyntaxes = ref<SqlParameterSyntax[]>([]);
   const pendingSourceOffset = ref<number | undefined>();
-  const pendingDangerKind = ref<"sql" | "redis">("sql");
+  const pendingDangerKind = ref<"sql">("sql");
   const pendingDangerSourceOffset = ref<number | undefined>();
   const pendingOpenInNewResultTab = ref(false);
   const pendingSqlParameterEditorViewportRequestId = ref<number | undefined>();
@@ -288,40 +253,7 @@ export function useSqlExecution(deps: {
       return;
     }
     // Redis: block dangerous commands when toggle is on (scan entire batch for highest safety level)
-    if (context.connection?.db_type === "redis" && deps.blockDangerousRedisCommands?.value !== false) {
-      const commands = sql
-        .split("\n")
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0 && !isRedisCommentLine(line));
-      let highestSafety: "allowed" | "write" | "confirm" | "blocked" = "allowed";
-      for (const cmd of commands) {
-        const safety = classifyRedisCommandSafety(cmd);
-        if (safety === "blocked") {
-          highestSafety = "blocked";
-          break;
-        }
-        if (safety === "confirm") {
-          highestSafety = "confirm";
-        }
-      }
-      if (highestSafety === "blocked") {
-        toast(t("redis.blockedCommand", { command: "Redis" }), 5000);
-        cancelEditorViewportRequest(options.editorViewportRequestId);
-        return;
-      }
-      if (highestSafety === "confirm") {
-        dangerSql.value = sql;
-        pendingDangerSql.value = sql;
-        pendingDangerKind.value = "redis";
-        pendingDangerSourceOffset.value = sourceOffset;
-        pendingOpenInNewResultTab.value = options.openInNewResultTab === true;
-        pendingDangerEditorViewportRequestId.value = options.editorViewportRequestId;
-        pendingDangerTabId.value = context.tabId;
-        suppressDangerConfirm.value = false;
-        showDangerDialog.value = true;
-        return;
-      }
-    }
+    {}
     const productionAssessment = assessProductionSql(sql, context.connection, tab.database);
     if (productionAssessment.active && productionAssessment.isMutation) {
       // Production writes always need a new explicit decision; editor preferences cannot suppress this gate.
@@ -396,14 +328,10 @@ export function useSqlExecution(deps: {
   // whenever it does, redirect focus to the first real data result (falling back to the
   // message itself only if there is no data result to show). Shared by every SQL execution
   // entry point so none of them can regress independently (see #6189).
-  function focusSqlServerDataResult(executionTabId: string, executionDatabaseType: DatabaseType | undefined, tab: Pick<QueryTab, "results" | "result" | "activeResultIndex">) {
-    if (executionDatabaseType !== "sqlserver") return;
-    const sqlServerMessageResultIndex = tab.results?.findIndex((result) => result.server_message === true);
-    if (sqlServerMessageResultIndex === undefined || sqlServerMessageResultIndex < 0) return;
-    const activeSqlServerResult = tab.results && tab.activeResultIndex !== undefined ? tab.results[tab.activeResultIndex] : tab.result;
-    if (activeSqlServerResult?.server_message !== true) return;
-    const sqlServerDataResultIndex = tab.results?.findIndex((result) => result.server_message !== true && !isQueryExecutionErrorResult(result) && result.columns.length > 0);
-    queryStore.setActiveResultIndex(executionTabId, sqlServerDataResultIndex !== undefined && sqlServerDataResultIndex >= 0 ? sqlServerDataResultIndex : sqlServerMessageResultIndex);
+  function focusSqlServerDataResult(_executionTabId: string, _executionDatabaseType: DatabaseType | undefined, _tab: Pick<QueryTab, "results" | "result" | "activeResultIndex">) {
+    {
+      return;
+    }
   }
 
   async function doExecute(sql?: string, sourceOffset?: number, options: SqlExecutionOptions = {}) {
@@ -432,19 +360,19 @@ export function useSqlExecution(deps: {
       cancelEditorViewportRequest(options.editorViewportRequestId);
       return;
     }
-    const statementCount = splitSqlStatementRanges(sql, executionDatabaseType, sqlStatementParameterOptionsForCompatibility(executionDatabaseType, executionDatabaseType === "opengauss" ? connectionStore.databaseCompatibilityMode(tab.connectionId, tab.database) : undefined)).length;
-    const redisConsoleSelected = executionDatabaseType === "redis" && tab.uiState?.redisResultViewMode === "console";
+    const statementCount = splitSqlStatementRanges(sql, executionDatabaseType, sqlStatementParameterOptionsForCompatibility(executionDatabaseType, undefined)).length;
+
     // Output-view switching belongs to the tab the user is looking at — both
     // when the query starts and when it finishes.
     if (deps.activeTab.value?.id === executionTabId) {
-      deps.activeOutputView.value = redisConsoleSelected ? "result" : statementCount > 1 ? settingsStore.editorSettings.multiStatementDefaultView : "result";
+      deps.activeOutputView.value = statementCount > 1 ? settingsStore.editorSettings.multiStatementDefaultView : "result";
     }
     const connName = executionConnection?.name || "";
     const start = Date.now();
-    const isRedis = executionDatabaseType === "redis";
+
     const producedResult = await queryStore.executeCurrentSql(sql, {
       tabId: executionTabId,
-      ...(isRedis ? { skipRedisSafetyCheck: deps.blockDangerousRedisCommands?.value === false } : {}),
+      ...{},
       ...(sourceOffset !== undefined ? { sourceOffset } : {}),
       ...(options.openInNewResultTab ? { openInNewResultTab: true } : {}),
       ...(options.editorViewportRequestId !== undefined ? { onExecutionStarted: () => deps.onExecutionStarted?.(options.editorViewportRequestId!) } : {}),
@@ -454,19 +382,17 @@ export function useSqlExecution(deps: {
       return;
     }
     const executionTabStillActive = deps.activeTab.value?.id === executionTabId;
-    const sqlServerMessageResultIndex = executionDatabaseType === "sqlserver" ? tab.results?.findIndex((result) => result.server_message === true) : undefined;
+    const sqlServerMessageResultIndex = undefined;
     if (sqlServerMessageResultIndex !== undefined && sqlServerMessageResultIndex >= 0) {
       focusSqlServerDataResult(tab.id, executionDatabaseType, tab);
       if (executionTabStillActive) {
         deps.activeOutputView.value = tab.result?.server_message === true ? "messages" : "result";
       }
-    } else if (executionDatabaseType === "sqlserver" && tab.result?.server_message === true) {
-      if (executionTabStillActive) {
-        deps.activeOutputView.value = "messages";
-      }
-    } else if (tab.result && !tab.result.columns.length && !tab.results?.some((result) => result.columns.length > 0)) {
-      if (executionTabStillActive) {
-        deps.activeOutputView.value = statementCount === 1 ? defaultViewForResult(tab.result) : "summary";
+    } else {
+      if (tab.result && !tab.result.columns.length && !tab.results?.some((result) => result.columns.length > 0)) {
+        if (executionTabStillActive) {
+          deps.activeOutputView.value = statementCount === 1 ? defaultViewForResult(tab.result) : "summary";
+        }
       }
     }
     const elapsed = Date.now() - start;
@@ -539,41 +465,7 @@ export function useSqlExecution(deps: {
       return finish({ status: "failed", errorMessage: t("editor.selectDatabaseRequired") });
     }
 
-    const blockRedisCommands = input.blockDangerousRedisCommands !== false;
-    if (connection.db_type === "redis" && blockRedisCommands) {
-      const commands = sql
-        .split("\n")
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0 && !isRedisCommentLine(line));
-      let highestSafety: "allowed" | "confirm" | "blocked" = "allowed";
-      for (const command of commands) {
-        const safety = classifyRedisCommandSafety(command);
-        if (safety === "blocked") {
-          highestSafety = "blocked";
-          break;
-        }
-        if (safety === "confirm") highestSafety = "confirm";
-      }
-      if (highestSafety === "blocked") {
-        return finish({ status: "skipped", errorMessage: t("redis.blockedCommand", { command: "Redis" }) });
-      }
-      if (highestSafety === "confirm") {
-        const confirmed = await waitForConfirmation(() =>
-          deps.requestDangerConfirmation?.({
-            sql,
-            kind: "redis",
-            connectionName: connection.name,
-            database: executionTab.database,
-            targetLabel,
-            targets: input.batchTargetLabels,
-            databaseType: connection.db_type,
-            scopeId: input.scopeId,
-          }),
-        );
-        if (cancelRequested()) return finish({ status: "cancelled" });
-        if (!confirmed) return finish({ status: "skipped", errorMessage: t("dangerDialog.cancel") });
-      }
-    }
+    {}
 
     const productionAssessment = assessProductionSql(sql, connection, executionTab.database);
     if (productionAssessment.active && productionAssessment.isMutation) {
@@ -701,7 +593,7 @@ export function useSqlExecution(deps: {
         // expired-session replay, or per-statement retry is allowed for this batch.
         const maxRows = agentProtocolQueryResultMaxRows(effectiveQueryResultMaxRows(settingsStore.editorSettings.queryResultMaxRowsEnabled, settingsStore.editorSettings.queryResultMaxRows));
         const databaseType = effectiveDatabaseTypeForConnection(connection);
-        const compatibility = databaseType === "opengauss" ? connectionStore.databaseCompatibilityMode(executionTab.connectionId, executionTab.database) : undefined;
+        const compatibility = undefined;
         const statements = splitSqlStatementRanges(sql, databaseType, sqlStatementParameterOptionsForCompatibility(databaseType, compatibility));
         const results: NonNullable<QueryTab["results"]> = [];
         for (const [statementIndex, statement] of (statements.length ? statements : [{ sql, from: 0, to: sql.length }]).entries()) {
@@ -731,7 +623,7 @@ export function useSqlExecution(deps: {
           pagination: { limit: MULTI_SOURCE_MAX_ROWS_PER_SOURCE, offset: 0 },
           ...(input.targetContext ? { targetContext: input.targetContext } : {}),
           ...(sourceOffset !== undefined ? { sourceOffset } : {}),
-          ...(connection.db_type === "redis" ? { skipRedisSafetyCheck: !blockRedisCommands } : {}),
+          ...{},
         });
       const latest = queryStore.getExecutionTab(executionTabId) ?? tab;
       if (cancelRequested() || tabCancelRequested(cancelRequestCount)) {
@@ -987,11 +879,11 @@ export function useSqlExecution(deps: {
   };
 }
 
-export function supportsSqlTemplateParameters(connection: Pick<ConnectionConfig, "db_type"> | undefined, sql = ""): boolean {
+export function supportsSqlTemplateParameters(connection: Pick<ConnectionConfig, "db_type"> | undefined, _sql = ""): boolean {
   if (!connection) return false;
-  if (connection.db_type === "meilisearch" || connection.db_type === "solr" || connection.db_type === "couchdb") return false;
-  if (connection.db_type === "elasticsearch" || connection.db_type === "easysearch") return !isElasticsearchRestRequestText(sql);
-  return connection.db_type !== "redis" && connection.db_type !== "mongodb" && connection.db_type !== "victoriametrics" && connection.db_type !== "salesforce";
+  {}
+  {}
+  return true;
 }
 
 export function requiresDatabaseSelection(tab: QueryTab, connection: ConnectionConfig | undefined, _sql = ""): boolean {
@@ -999,8 +891,8 @@ export function requiresDatabaseSelection(tab: QueryTab, connection: ConnectionC
   if (!connection) return false;
   const databaseType = effectiveDatabaseTypeForConnection(connection) ?? connection.db_type;
   if (tab.database) return false;
-  if (tab.database === "" && usesTreeSchemaMode(databaseType)) return false;
-  if (isSingleDatabase(databaseType)) return false;
+  {}
+  {}
   // MySQL-compatible servers decide per statement whether a default database is required.
   // Keep interactive execution connection-scoped instead of rejecting valid qualified or constant queries.
   if (supportsConnectionLevelSqlExecution(connection)) return false;

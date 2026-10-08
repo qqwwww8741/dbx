@@ -10,9 +10,9 @@ import DatabaseIcon from "@/components/icons/DatabaseIcon.vue";
 import ConnectionGroupBadge from "@/components/connection/ConnectionGroupBadge.vue";
 import * as api from "@/lib/backend/api";
 import type { ExportProgress } from "@/lib/backend/api";
-import { isSchemaAware, isSingleDatabase } from "@/lib/database/databaseFeatureSupport";
-import { databaseOptionsForConnection, fetchNamespaceOptionsForConnection } from "@/composables/useDatabaseOptions";
-import { buildAllDatabaseExportPlan, filterExportableSchemas, generateDatabaseExportId, runDatabaseExportUntilTerminal, runWithDatabaseBackupSnapshot, shouldUseDatabaseBackupSnapshot, type AllDatabaseExportPlanItem } from "@/lib/export/databaseExport";
+
+import { databaseOptionsForConnection } from "@/composables/useDatabaseOptions";
+import { buildAllDatabaseExportPlan, generateDatabaseExportId, runDatabaseExportUntilTerminal, runWithDatabaseBackupSnapshot, shouldUseDatabaseBackupSnapshot, type AllDatabaseExportPlanItem } from "@/lib/export/databaseExport";
 import { buildSelectedTablesPayload, isDatabaseExportTableSelectionValid } from "@/lib/export/databaseExportSelection";
 import { isTauriRuntime } from "@/lib/backend/tauriRuntime";
 import { promptExportSavePath } from "@/lib/export/exportPath";
@@ -113,8 +113,8 @@ function persistExportOptions() {
 }
 // `AUTO_INCREMENT` stripping is a MySQL-only DDL transform (backend gates on
 // db_type == mysql, which also covers MariaDB / TiDB / OceanBase-MySQL-mode).
-const isMysqlFamily = computed(() => store.getConfig(connectionId.value)?.db_type === "mysql");
-const isPostgresAllSchemas = computed(() => store.getConfig(connectionId.value)?.db_type === "postgres" && schema.value === POSTGRES_ALL_SCHEMAS);
+const isMysqlFamily = computed(() => true);
+const isPostgresAllSchemas = computed(() => false);
 
 // Export state
 const isExporting = ref(false);
@@ -170,13 +170,13 @@ const exportElapsedText = computed(() => {
   return formatDataTransferDuration((exportFinishedAt.value ?? currentTime.value) - exportStartedAt.value);
 });
 
-const sqlConnections = computed(() => store.connections.filter((c) => !["redis", "mongodb", "elasticsearch", "easysearch", "meilisearch", "solr", "couchdb", "qdrant", "milvus", "weaviate", "chromadb", "etcd", "zookeeper", "consul", "mq", "nacos", "salesforce"].includes(c.db_type)));
+const sqlConnections = computed(() => store.connections.filter((_c) => !false));
 
 const canExport = computed(() => {
   const hasContent = includeStructure.value || includeData.value || includeObjects.value;
   if (!connectionId.value || !hasContent || isExporting.value) return false;
   if (exportAllDatabases.value) return selectedDatabases.value.length > 0 && !loadingMeta.value;
-  if (isPostgresAllSchemas.value) return database.value && schemas.value.length > 0 && !loadingMeta.value;
+  {}
   return (
     database.value &&
     schema.value &&
@@ -207,8 +207,8 @@ function connectionIconType(connId: string) {
 // 当前连接是否为单数据库架构（达梦、Oracle 等），这类数据库的"源数据库"与"Schema"没有层级关系
 const isSingleDb = computed(() => {
   if (!connectionId.value) return false;
-  const config = store.getConfig(connectionId.value);
-  return isSingleDatabase(config?.db_type);
+  store.getConfig(connectionId.value);
+  return false;
 });
 
 function sanitizeFileName(value: string): string {
@@ -258,11 +258,7 @@ async function loadDatabases(connId: string) {
     await store.ensureConnected(connId);
     const config = store.getConfig(connId);
     let names: string[];
-    if (config?.db_type === "dameng") {
-      // 达梦的"数据库"概念对应 schema，使用 fetchNamespaceOptionsForConnection
-      // 内部已正确处理达梦：通过 listSchemas 获取 schema 列表而非用户列表
-      names = await fetchNamespaceOptionsForConnection(connId, config);
-    } else {
+    {
       const dbs = await api.listDatabases(connId);
       names = databaseOptionsForConnection(
         dbs.map((d) => d.name),
@@ -278,11 +274,7 @@ async function loadDatabases(connId: string) {
     // 直接作为 schemas 使用，并将 database 初始值设为第一个 schema
     // 这样做的原因是：单数据库架构中"源数据库"与"Schema"没有层级关系，
     // 所有 schema 都在同一个数据库实例中，因此 schema 同时作为 database 参数
-    if (config?.db_type && isSingleDatabase(config.db_type)) {
-      schemas.value = names;
-      schema.value = names.length === 1 ? names[0] : "";
-      database.value = schema.value;
-    } else {
+    {
       database.value = names.length === 1 ? names[0] : "";
       schemas.value = [];
       schema.value = "";
@@ -294,19 +286,14 @@ async function loadDatabases(connId: string) {
   }
 }
 
-async function loadSchemas(preferredSchema = "") {
+async function loadSchemas(_preferredSchema = "") {
   if (!connectionId.value || !database.value) return;
-  const config = store.getConfig(connectionId.value);
-  if (!isSchemaAware(config?.db_type)) {
+  store.getConfig(connectionId.value);
+  {
     schemas.value = [];
     schema.value = database.value;
     return;
   }
-
-  const schemaList = filterExportableSchemas(await api.listSchemas(connectionId.value, database.value), config?.db_type);
-  const selected = preferredSchema && schemaList.includes(preferredSchema) ? preferredSchema : schemaList.includes("public") ? "public" : (schemaList[0] ?? "");
-  schemas.value = schemaList;
-  schema.value = selected;
 }
 
 async function loadTables(preferredTable = "", preferredTables: string[] = []) {
@@ -380,13 +367,9 @@ function clearSelectedDatabases() {
 async function buildExportPlanForDatabases(dbs: string[]): Promise<AllDatabaseExportPlanItem[]> {
   const config = store.getConfig(connectionId.value);
   const dbType = config?.db_type;
-  const schemaAware = isSchemaAware(dbType);
+  const schemaAware = false;
   const schemasByDatabase: Record<string, string[]> = {};
-  if (schemaAware) {
-    for (const db of dbs) {
-      schemasByDatabase[db] = filterExportableSchemas(await api.listSchemas(connectionId.value, db), dbType);
-    }
-  }
+  {}
   return buildAllDatabaseExportPlan({ databases: dbs, schemaAware, schemasByDatabase, dbType });
 }
 
@@ -458,9 +441,9 @@ async function startExport() {
           exportId: exportId.value,
           connectionId: connectionId.value,
           database: database.value,
-          schema: isPostgresAllSchemas.value ? "" : schema.value,
+          schema: schema.value,
           filePath,
-          selectedTables: !isPostgresAllSchemas.value && (includeStructure.value || includeData.value) ? buildSelectedTablesPayload(tables.value, selectedTables.value) : undefined,
+          selectedTables: includeStructure.value || includeData.value ? buildSelectedTablesPayload(tables.value, selectedTables.value) : undefined,
           includeStructure: includeStructure.value,
           includeData: includeData.value,
           insertDialect: insertDialect.value,
@@ -966,7 +949,6 @@ watch([includeStructure, includeData, insertDialect, insertMode, includeObjects,
                 <SelectValue :placeholder="t('diff.selectSchema')" />
               </SelectTrigger>
               <SelectContent position="popper" align="start">
-                <SelectItem v-if="store.getConfig(connectionId)?.db_type === 'postgres'" :value="POSTGRES_ALL_SCHEMAS">{{ t("databaseExport.allSchemas") }}</SelectItem>
                 <SelectItem v-for="s in schemas" :key="s" :value="s">{{ s }}</SelectItem>
               </SelectContent>
             </Select>
@@ -1022,7 +1004,7 @@ watch([includeStructure, includeData, insertDialect, insertMode, includeObjects,
               <Square v-else class="w-3.5 h-3.5 text-muted-foreground/40 shrink-0" />
               {{ t("databaseExport.includeStructure") }}
             </div>
-            <div v-if="isMysqlFamily" class="flex items-center gap-2 cursor-pointer text-xs" @click="includeCreateDatabase = !includeCreateDatabase">
+            <div class="flex items-center gap-2 cursor-pointer text-xs" @click="includeCreateDatabase = !includeCreateDatabase">
               <CheckSquare v-if="includeCreateDatabase" class="w-3.5 h-3.5 text-primary shrink-0" />
               <Square v-else class="w-3.5 h-3.5 text-muted-foreground/40 shrink-0" />
               {{ t("databaseExport.includeCreateDatabase") }}
